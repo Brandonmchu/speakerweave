@@ -104,7 +104,10 @@ def test_speakers_requires_matching_org(client, auth_headers, admin_db):
 def test_portal_invite_mints_link_and_queues_email(client, auth_headers, admin_db):
     resp = client.post(f"/api/contacts/{BEN}/portal-invite", headers=auth_headers)
     assert resp.status_code == 200
-    assert resp.json()["ok"] is True
+    body = resp.json()
+    assert body["ok"] is True
+    # the minted portal URL comes back so the organizer can share it directly
+    assert "/portal/" in body["invite_url"]
 
     # a fresh portal token was minted for Ben
     tokens = [

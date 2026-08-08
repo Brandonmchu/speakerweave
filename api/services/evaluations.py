@@ -575,6 +575,45 @@ async def open_plan(org_id: str, plan_id: str) -> dict:
     return {"plan": updated_plan, "count": queued}
 
 
+async def reviewer_links(org_id: str, plan_id: str) -> list[dict]:
+    """Mint a fresh review magic link for every evaluator on the plan.
+
+    A read-style helper the admin can call on demand to grab shareable reviewer
+    links while email delivery is deferred. Minting fresh is intentional — any
+    previously issued link stays valid until it expires.
+    """
+    await fetch_plan(plan_id, org_id)
+    evaluators = rows(
+        await db(
+            lambda: supabase.table("evaluators")
+            .select("*")
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .order("name")
+            .execute(),
+            "evaluation_reviewer_links_evaluators",
+        )
+    )
+    frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
+    links: list[dict] = []
+    for evaluator in evaluators:
+        token = await magic_links.mint(
+            org_id,
+            "review",
+            evaluator_id=evaluator["id"],
+            ttl_hours=168,
+        )
+        links.append(
+            {
+                "evaluator_id": evaluator["id"],
+                "name": evaluator.get("name") or "",
+                "email": evaluator.get("email"),
+                "review_url": f"{frontend_url}/review/{token}",
+            }
+        )
+    return links
+
+
 async def get_summary(org_id: str, plan_id: str) -> dict:
     plan = await fetch_plan(plan_id, org_id)
     criteria = normalize_criteria(plan.get("criteria") or [])

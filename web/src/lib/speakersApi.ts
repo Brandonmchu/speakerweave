@@ -30,9 +30,17 @@ export function listEventSpeakers(eventId: string): Promise<EventSpeakers> {
   return apiGet<EventSpeakers>(`/api/events/${encodeURIComponent(eventId)}/speakers`)
 }
 
+export interface PortalInviteResult {
+  ok: boolean
+  invited?: boolean
+  /** The full portal magic-link URL just minted — shareable directly while
+   * email delivery is pending a mail provider. */
+  invite_url: string
+}
+
 /** POST /api/contacts/{id}/portal-invite — mint a link + queue the invite email. */
-export function sendPortalInvite(contactId: string): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/api/contacts/${encodeURIComponent(contactId)}/portal-invite`)
+export function sendPortalInvite(contactId: string): Promise<PortalInviteResult> {
+  return apiPost<PortalInviteResult>(`/api/contacts/${encodeURIComponent(contactId)}/portal-invite`)
 }
 
 export type TaskKind = 'todo' | 'file_request'

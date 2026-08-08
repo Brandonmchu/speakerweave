@@ -245,6 +245,62 @@ def test_open_plan_mints_links_and_queues_invites(evaluation_client, monkeypatch
     assert all(row.get("invited_at") for row in fake_db.rows("evaluators"))
 
 
+def test_reviewer_links_mints_a_fresh_link_per_evaluator(evaluation_client, monkeypatch):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    fake_db.seed(
+        "evaluators",
+        {
+            "id": OWNER_ID,
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "owner@test.dev",
+            "name": "Grace Hopper",
+        },
+        {
+            "id": OTHER_EVALUATOR_ID,
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "other@test.dev",
+            "name": "Margaret Hamilton",
+        },
+    )
+    monkeypatch.setenv("FRONTEND_URL", "https://dais.test")
+
+    response = client.get(f"/api/evaluation-plans/{PLAN_ID}/reviewer-links")
+
+    assert response.status_code == 200
+    links = response.json()
+    assert {row["evaluator_id"] for row in links} == {OWNER_ID, OTHER_EVALUATOR_ID}
+    by_id = {row["evaluator_id"]: row for row in links}
+    assert by_id[OWNER_ID]["name"] == "Grace Hopper"
+    assert by_id[OWNER_ID]["email"] == "owner@test.dev"
+    assert all(row["review_url"].startswith("https://dais.test/review/") for row in links)
+
+    # a fresh review token was persisted for each evaluator (nothing queued)
+    tokens = [t for t in fake_db.rows("magic_link_tokens") if t.get("purpose") == "review"]
+    assert {t.get("evaluator_id") for t in tokens} == {OWNER_ID, OTHER_EVALUATOR_ID}
+    assert fake_db.rows("email_outbox") == []
+
+
+def test_reviewer_links_scoped_to_org(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    # A plan belonging to another org must not be readable.
+    fake_db.seed(
+        "evaluation_plans",
+        {
+            "id": "foreign-plan",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Someone else's committee",
+            "criteria": [{"name": "Relevance", "weight": 100}],
+            "status": "open",
+            "session_filter": {},
+        },
+    )
+    assert client.get("/api/evaluation-plans/foreign-plan/reviewer-links").status_code == 404
+
+
 def test_reviewer_can_only_read_and_score_their_assignments(evaluation_client):
     client, fake_db, _reviewer = evaluation_client
     _seed_plan(fake_db, status="open")

@@ -5,6 +5,7 @@ import {
   ArrowDownWideNarrow,
   Check,
   ClipboardCheck,
+  Link2,
   ListChecks,
   Mail,
   Plus,
@@ -21,6 +22,7 @@ import {
   deleteEvaluator,
   getEvaluationPlan,
   getEvaluationSummary,
+  getReviewerLinks,
   listEvaluationPlans,
   openEvaluationPlan,
   updateEvaluationDecision,
@@ -31,6 +33,7 @@ import {
   type EvaluationScale,
   type EvaluationSessionSummary,
 } from '@/lib/evaluationApi'
+import { CopyButton } from '@/pages/Forms'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -537,6 +540,7 @@ function EvaluatorEditor({
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [linksOpen, setLinksOpen] = useState(false)
   const add = useMutation({
     mutationFn: () => addEvaluator(plan.id, { name: name.trim(), email: email.trim() }),
     onSuccess: async () => {
@@ -556,12 +560,24 @@ function EvaluatorEditor({
 
   return (
     <section className="border-t border-border px-5 py-6 sm:px-6">
-      <div>
-        <h3 className="text-base font-semibold text-foreground">Review committee</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Add reviewers, assign every eligible submission, then open the plan to queue private links.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">Review committee</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add reviewers, assign every eligible submission, then open the plan to queue private links.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={evaluators.length === 0}
+          onClick={() => setLinksOpen(true)}
+        >
+          <Link2 />
+          Reviewer links
+        </Button>
       </div>
+      <ReviewerLinksDialog planId={plan.id} open={linksOpen} onOpenChange={setLinksOpen} />
       <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_auto]">
         <Field label="Name" htmlFor="evaluator-name">
           <Input
@@ -644,6 +660,63 @@ function EvaluatorEditor({
         )}
       </div>
     </section>
+  )
+}
+
+function ReviewerLinksDialog({
+  planId,
+  open,
+  onOpenChange,
+}: {
+  planId: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  // Fresh links each time the dialog opens — old links stay valid, so no caching.
+  const linksQuery = useQuery({
+    queryKey: ['reviewer-links', planId],
+    queryFn: () => getReviewerLinks(planId),
+    enabled: open,
+    gcTime: 0,
+    staleTime: 0,
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Reviewer links</DialogTitle>
+          <DialogDescription>
+            Email delivery is pending your mail provider — copy a reviewer's private link and share it
+            directly so they can open their scorecard.
+          </DialogDescription>
+        </DialogHeader>
+        {linksQuery.isPending ? (
+          <div className="space-y-2 py-1">
+            {[0, 1].map((item) => (
+              <Skeleton key={item} className="h-12" />
+            ))}
+          </div>
+        ) : linksQuery.error ? (
+          <InlineError>{linksQuery.error.message}</InlineError>
+        ) : (
+          <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            {(linksQuery.data ?? []).map((link) => (
+              <li key={link.evaluator_id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{link.name || link.email}</p>
+                  <p className="truncate font-mono text-xs text-muted-foreground">{link.review_url}</p>
+                </div>
+                <CopyButton value={link.review_url} label={`Copy link for ${link.name || link.email}`} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

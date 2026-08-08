@@ -167,6 +167,19 @@ export function getEvaluationSummary(planId: string): Promise<EvaluationSummary>
   return apiGet<EvaluationSummary>(`/api/evaluation-plans/${planId}/summary`)
 }
 
+export interface ReviewerLink {
+  evaluator_id: string
+  name: string
+  email: string | null
+  review_url: string
+}
+
+/** GET /api/evaluation-plans/{id}/reviewer-links — a fresh review link per
+ * evaluator, so an organizer can open a reviewer scorecard without email. */
+export function getReviewerLinks(planId: string): Promise<ReviewerLink[]> {
+  return apiGet<ReviewerLink[]>(`/api/evaluation-plans/${planId}/reviewer-links`)
+}
+
 export function updateEvaluationDecision(
   sessionId: string,
   status: 'pending' | 'accept_queue' | 'accepted' | 'decline_queue' | 'declined'

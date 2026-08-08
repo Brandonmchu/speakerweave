@@ -18,6 +18,7 @@ import {
   type EventSpeaker,
   type TaskKind,
 } from '@/lib/speakersApi'
+import { CopyButton } from '@/pages/Forms'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
@@ -35,6 +36,7 @@ export function Speakers() {
   const queryClient = useQueryClient()
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [taskOpen, setTaskOpen] = useState(false)
+  const [inviteLink, setInviteLink] = useState<{ name: string; url: string } | null>(null)
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -53,9 +55,11 @@ export function Speakers() {
 
   const invite = useMutation({
     mutationFn: (contactId: string) => sendPortalInvite(contactId),
-    onSuccess: (_data, contactId) => {
+    onSuccess: (data, contactId) => {
       const speaker = speakers.find((s) => s.contact_id === contactId)
-      toast({ title: 'Invite queued', description: `Sent the portal link to ${speaker?.name ?? 'the speaker'}.` })
+      const name = speaker?.name ?? 'the speaker'
+      toast({ title: 'Invite queued', description: `Portal link ready for ${name}.` })
+      setInviteLink({ name, url: data.invite_url })
       queryClient.invalidateQueries({ queryKey: speakersKey })
     },
     onError: (error: Error) =>
@@ -211,7 +215,41 @@ export function Speakers() {
           }}
         />
       )}
+
+      <InviteLinkDialog invite={inviteLink} onOpenChange={(open) => !open && setInviteLink(null)} />
     </div>
+  )
+}
+
+// ── invite-link dialog ────────────────────────────────────────────────────────
+
+/** Shown after a portal invite is queued: surfaces the minted magic link so the
+ * organizer can share it directly while email delivery is pending. */
+function InviteLinkDialog({
+  invite,
+  onOpenChange,
+}: {
+  invite: { name: string; url: string } | null
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <Dialog open={Boolean(invite)} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Portal link ready</DialogTitle>
+          <DialogDescription>
+            Email delivery is pending your mail provider — share this link with {invite?.name ?? 'the speaker'} directly.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{invite?.url}</span>
+          {invite && <CopyButton value={invite.url} label="Copy portal link" />}
+        </div>
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

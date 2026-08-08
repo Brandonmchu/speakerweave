@@ -247,7 +247,9 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
 
 @router.post("/contacts/{contact_id}/portal-invite")
 async def send_portal_invite(contact_id: str, auth: tuple = Depends(get_current_user_and_org)):
-    """Mint a portal magic link for a speaker and queue the invite email."""
+    """Mint a portal magic link for a speaker, queue the invite email, and hand
+    the minted URL back so the organizer can share it directly while email
+    delivery is still pending a mail provider."""
     _user_id, org_id = auth
     contact = first(
         await db(
@@ -299,7 +301,7 @@ async def send_portal_invite(contact_id: str, auth: tuple = Depends(get_current_
         "</div>"
     )
     await _queue_email(org_id, contact["event_id"], contact_id, "portal_invite", subject, body)
-    return {"ok": True, "invited": True}
+    return {"ok": True, "invited": True, "invite_url": link}
 
 
 # ── task authoring ──────────────────────────────────────────────────────────

@@ -161,6 +161,17 @@ async def open_evaluation_plan(
     return await evaluations.open_plan(org_id, plan_id)
 
 
+@router.get("/evaluation-plans/{plan_id}/reviewer-links")
+async def evaluation_reviewer_links(
+    plan_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Fresh review magic links per evaluator, for the admin to copy and share
+    directly while reviewer-invite email delivery is still pending."""
+    _user_id, org_id = auth
+    return await evaluations.reviewer_links(org_id, plan_id)
+
+
 @router.get("/evaluation-plans/{plan_id}/summary")
 async def evaluation_summary(
     plan_id: str,
