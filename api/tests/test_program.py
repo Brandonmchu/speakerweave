@@ -1,0 +1,277 @@
+"""The public program surface: published schedule + speaker gallery + embed.js.
+
+Mounted on its own app (like test_demo.py) so the suite doesn't depend on
+main.py wiring the router in. The interesting behaviour is the *shape*: only
+accepted+scheduled sessions reach the schedule, speakers resolve by role with a
+submitter fallback, nothing PII-shaped leaks, and grouping/ordering follows the
+requested timezone.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from routes.program_routes import router as program_router
+from security.rate_limiting import limiter
+from tests.conftest import TEST_EVENT_ID, TEST_ORG_ID
+
+SLUG = "ai-builders-summit"
+
+ROOM_A = "aaaaaaaa-0000-0000-0000-0000000000a1"
+ROOM_B = "aaaaaaaa-0000-0000-0000-0000000000b2"
+TRACK_ENG = "cccccccc-0000-0000-0000-0000000000e1"
+TRACK_RES = "cccccccc-0000-0000-0000-0000000000r2"
+
+# contacts — last names chosen so the alphabetical gallery order is unambiguous.
+C_ALPHA = "dddddddd-0000-0000-0000-00000000a001"
+C_BETA = "dddddddd-0000-0000-0000-00000000b002"
+C_YOUNG = "dddddddd-0000-0000-0000-00000000y003"
+C_ZETA = "dddddddd-0000-0000-0000-00000000z004"
+C_NOPE = "dddddddd-0000-0000-0000-00000000n005"
+
+S1 = "eeeeeeee-0000-0000-0000-0000000000s1"
+S2 = "eeeeeeee-0000-0000-0000-0000000000s2"
+S3 = "eeeeeeee-0000-0000-0000-0000000000s3"
+S4 = "eeeeeeee-0000-0000-0000-0000000000s4"
+S5 = "eeeeeeee-0000-0000-0000-0000000000s5"
+S6 = "eeeeeeee-0000-0000-0000-0000000000s6"
+
+ZETA_EMAIL = "zeta@example.com"
+ZETA_PHONE = "+15551230000"
+
+
+@pytest.fixture(scope="module")
+def program_client() -> TestClient:
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(program_router)
+    return TestClient(app)
+
+
+def _contact(cid: str, first: str, last: str, **extra) -> dict:
+    return {
+        "id": cid,
+        "org_id": TEST_ORG_ID,
+        "event_id": TEST_EVENT_ID,
+        "email": f"{first.lower()}@example.com",
+        "phone": "+15550000000",
+        "first_name": first,
+        "last_name": last,
+        "title": f"{first} Title",
+        "company_name": f"{first} Corp",
+        "photo_url": f"https://cdn.test/{first.lower()}.png",
+        "about": f"{first} is a speaker.",
+        "linkedin_url": f"https://linkedin.com/in/{first.lower()}",
+        "twitter_url": f"https://twitter.com/{first.lower()}",
+        **extra,
+    }
+
+
+def _session(sid: str, *, status: str, starts_at, ends_at, room, track, title) -> dict:
+    return {
+        "id": sid,
+        "org_id": TEST_ORG_ID,
+        "event_id": TEST_EVENT_ID,
+        "friendly_id": f"SESS-{sid[-2:]}",
+        "title": title,
+        "description": f"<p>About {title}</p>",
+        "status": status,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "room_id": room,
+        "track_id": track,
+    }
+
+
+def _participant(sid: str, cid: str, role: str, is_primary: bool = False) -> dict:
+    return {
+        "org_id": TEST_ORG_ID,
+        "session_id": sid,
+        "contact_id": cid,
+        "role": role,
+        "is_primary": is_primary,
+    }
+
+
+@pytest.fixture
+def program_db(seeded_db):
+    """The seeded event (slug ai-builders-summit) plus a small programme."""
+    db = seeded_db
+    db.seed("rooms", {"id": ROOM_A, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Room A"})
+    db.seed("rooms", {"id": ROOM_B, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Room B"})
+    db.seed(
+        "tracks",
+        {"id": TRACK_ENG, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Engineering", "color": "#123456"},
+    )
+    db.seed(
+        "tracks",
+        {"id": TRACK_RES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Research", "color": "#654321"},
+    )
+
+    db.seed("contacts", _contact(C_ALPHA, "Alice", "Alpha"))
+    db.seed("contacts", _contact(C_BETA, "Bob", "Beta"))
+    db.seed("contacts", _contact(C_YOUNG, "Yolanda", "Young"))
+    db.seed("contacts", _contact(C_ZETA, "Zed", "Zeta", email=ZETA_EMAIL, phone=ZETA_PHONE))
+    db.seed("contacts", _contact(C_NOPE, "Nina", "Nope"))
+
+    # Day 1 (2026-10-12 UTC): S1 @16:00, then S3 & S2 both @17:00 (Room A before B).
+    db.seed("sessions", _session(S1, status="accepted", starts_at="2026-10-12T16:00:00+00:00",
+                                 ends_at="2026-10-12T16:45:00+00:00", room=ROOM_B, track=TRACK_ENG,
+                                 title="Opening Keynote"))
+    db.seed("sessions", _session(S2, status="accepted", starts_at="2026-10-12T17:00:00+00:00",
+                                 ends_at="2026-10-12T17:30:00+00:00", room=ROOM_B, track=TRACK_RES,
+                                 title="RAG in Production"))
+    db.seed("sessions", _session(S3, status="accepted", starts_at="2026-10-12T17:00:00+00:00",
+                                 ends_at="2026-10-12T17:30:00+00:00", room=ROOM_A, track=TRACK_ENG,
+                                 title="Vector Databases"))
+    # Day 2.
+    db.seed("sessions", _session(S6, status="accepted", starts_at="2026-10-13T16:00:00+00:00",
+                                 ends_at="2026-10-13T16:30:00+00:00", room=ROOM_A, track=TRACK_ENG,
+                                 title="Closing Notes"))
+    # Accepted but unscheduled — in the gallery, never on the schedule.
+    db.seed("sessions", _session(S4, status="accepted", starts_at=None, ends_at=None,
+                                 room=None, track=TRACK_ENG, title="Unplaced Talk"))
+    # Pending — excluded everywhere.
+    db.seed("sessions", _session(S5, status="pending", starts_at="2026-10-12T18:00:00+00:00",
+                                 ends_at="2026-10-12T18:30:00+00:00", room=ROOM_A, track=TRACK_ENG,
+                                 title="Not Yet Accepted"))
+
+    db.seed("session_participants", _participant(S1, C_ZETA, "speaker", True))
+    db.seed("session_participants", _participant(S2, C_ALPHA, "speaker", True))
+    # S3 has no speaker — only a submitter, who must be used as the fallback.
+    db.seed("session_participants", _participant(S3, C_BETA, "submitter", True))
+    db.seed("session_participants", _participant(S6, C_ALPHA, "speaker", True))
+    db.seed("session_participants", _participant(S4, C_YOUNG, "speaker", True))
+    db.seed("session_participants", _participant(S5, C_NOPE, "speaker", True))
+    return db
+
+
+# ── schedule ─────────────────────────────────────────────────────────────────
+
+
+def test_schedule_groups_by_day_and_orders_by_time_then_room(program_client, program_db):
+    res = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC")
+    assert res.status_code == 200
+    body = res.json()
+
+    assert body["event"]["name"] == "AI Builders Summit"
+    assert body["event"]["timezone"] == "UTC"
+
+    days = body["days"]
+    assert [d["date"] for d in days] == ["2026-10-12", "2026-10-13"]
+
+    day1 = days[0]["sessions"]
+    # 16:00 first, then the two 17:00 sessions ordered Room A before Room B.
+    assert [s["title"] for s in day1] == ["Opening Keynote", "Vector Databases", "RAG in Production"]
+    assert [s["room"] for s in day1] == ["Room B", "Room A", "Room B"]
+    assert days[1]["sessions"][0]["title"] == "Closing Notes"
+
+
+def test_schedule_excludes_pending_and_unscheduled(program_client, program_db):
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    titles = [s["title"] for day in body["days"] for s in day["sessions"]]
+    assert "Not Yet Accepted" not in titles  # pending
+    assert "Unplaced Talk" not in titles  # accepted but starts_at null
+
+
+def test_schedule_carries_track_and_resolved_speakers_with_submitter_fallback(program_client, program_db):
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    by_title = {s["title"]: s for day in body["days"] for s in day["sessions"]}
+
+    keynote = by_title["Opening Keynote"]
+    assert keynote["track"] == {"name": "Engineering", "color": "#123456"}
+    assert keynote["speakers"][0]["name"] == "Zed Zeta"
+    assert keynote["speakers"][0]["company"] == "Zed Corp"
+    assert keynote["speakers"][0]["photo_url"] == "https://cdn.test/zed.png"
+
+    # S3 has no speaker participant — the submitter stands in.
+    assert by_title["Vector Databases"]["speakers"][0]["name"] == "Bob Beta"
+
+
+def test_schedule_leaks_no_pii(program_client, program_db):
+    raw = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").text
+    assert ZETA_EMAIL not in raw
+    assert ZETA_PHONE not in raw
+
+
+def test_schedule_timezone_shifts_day_boundaries(program_client, program_db):
+    """A session at 16:00 UTC is the 12th in UTC but still the 12th in LA (08:00);
+    grouping in a far-eastern zone rolls it onto the 13th."""
+    utc = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    tokyo = program_client.get(f"/public/program/{SLUG}/schedule?tz=Asia/Tokyo").json()
+    # 2026-10-13T16:00Z is 2026-10-14 01:00 in Tokyo — a date UTC never produces.
+    assert "2026-10-14" in [d["date"] for d in tokyo["days"]]
+    assert "2026-10-14" not in [d["date"] for d in utc["days"]]
+
+
+def test_schedule_bad_timezone_falls_back_not_500(program_client, program_db):
+    res = program_client.get(f"/public/program/{SLUG}/schedule?tz=Not/AZone")
+    assert res.status_code == 200
+    # Falls through to the event's own timezone.
+    assert res.json()["event"]["timezone"] == "America/Los_Angeles"
+
+
+def test_unknown_slug_404s(program_client, program_db):
+    assert program_client.get("/public/program/nope/schedule").status_code == 404
+    assert program_client.get("/public/program/nope/speakers").status_code == 404
+
+
+# ── speakers ─────────────────────────────────────────────────────────────────
+
+
+def test_speakers_are_distinct_and_alphabetical_by_last_name(program_client, program_db):
+    body = program_client.get(f"/public/program/{SLUG}/speakers").json()
+    names = [s["name"] for s in body["speakers"]]
+    # Alpha, Beta, Young, Zeta — Nope (pending only) is absent.
+    assert names == ["Alice Alpha", "Bob Beta", "Yolanda Young", "Zed Zeta"]
+    assert "Nina Nope" not in names
+
+
+def test_speakers_include_bio_socials_and_their_sessions(program_client, program_db):
+    body = program_client.get(f"/public/program/{SLUG}/speakers").json()
+    by_name = {s["name"]: s for s in body["speakers"]}
+
+    alice = by_name["Alice Alpha"]
+    assert alice["bio"] == "Alice is a speaker."
+    assert alice["linkedin_url"] == "https://linkedin.com/in/alice"
+    assert alice["twitter_url"] == "https://twitter.com/alice"
+    # Speaks on two accepted sessions, earliest first.
+    assert [s["title"] for s in alice["sessions"]] == ["RAG in Production", "Closing Notes"]
+
+    # Yolanda speaks only on the accepted-but-unscheduled talk: present here,
+    # with a null start, even though she never appears on the schedule.
+    yolanda = by_name["Yolanda Young"]
+    assert [s["title"] for s in yolanda["sessions"]] == ["Unplaced Talk"]
+    assert yolanda["sessions"][0]["starts_at"] is None
+
+
+def test_speakers_leak_no_pii(program_client, program_db):
+    raw = program_client.get(f"/public/program/{SLUG}/speakers").text
+    payload = json.loads(raw)
+    assert ZETA_EMAIL not in raw
+    assert ZETA_PHONE not in raw
+    for speaker in payload["speakers"]:
+        assert "email" not in speaker
+        assert "phone" not in speaker
+
+
+# ── embed.js ─────────────────────────────────────────────────────────────────
+
+
+def test_embed_js_is_javascript_and_self_contained(program_client, program_db):
+    res = program_client.get(f"/public/program/{SLUG}/embed.js")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/javascript")
+
+    body = res.text
+    assert "data-dais-event" in body
+    assert "data-dais-widget" in body
+    assert "?embed=1" in body
+    assert "dais-embed-height" in body
+    assert "createElement('iframe')" in body
+    # No untrusted data injected server-side: the slug is read at runtime.
+    assert SLUG not in body

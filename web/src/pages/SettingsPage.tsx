@@ -1,21 +1,34 @@
 import { useEffect, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, Plus, Settings, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, KeyRound, Plus, Settings, Trash2, X } from 'lucide-react'
 
 import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import {
+  createApiToken,
   createTaxonomy,
+  deleteApiToken,
   deleteTaxonomy,
+  listApiTokens,
   listTaxonomy,
   updateEvent,
   updateTaxonomy,
+  type ApiTokenRow,
   type TaxonomyInput,
   type TaxonomyKind,
   type TaxonomyRow,
 } from '@/lib/adminApi'
 import { cn } from '@/lib/utils'
+import { CopyButton } from '@/pages/Forms'
 import { Button } from '@/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/dialog'
 import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
@@ -170,9 +183,176 @@ export function SettingsPage() {
             title="Tags"
             description="Free-form labels for filtering and reporting."
           />
+          <ApiTokensSection />
         </div>
       )}
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* API tokens                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function formatUsed(value?: string | null): string {
+  if (!value) return 'Never used'
+  const t = Date.parse(value)
+  if (!Number.isFinite(t)) return 'Never used'
+  return `Last used ${new Date(t).toLocaleDateString()}`
+}
+
+/** Keys for the read-only public /v1 API. The raw key is shown once, right
+ *  after creation; the list only ever holds metadata. */
+function ApiTokensSection() {
+  const queryClient = useQueryClient()
+  const queryKey = ['api-tokens']
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [freshKey, setFreshKey] = useState<string | null>(null)
+
+  const query = useQuery({ queryKey, queryFn: listApiTokens })
+
+  const create = useMutation({
+    mutationFn: (tokenName: string) => createApiToken(tokenName),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey })
+      setDialogOpen(false)
+      setName('')
+      setFreshKey(result.token)
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't create token", description: error.message }),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteApiToken(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey })
+      toast({ title: 'Token revoked' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't revoke token", description: error.message }),
+  })
+
+  const tokens = query.data ?? []
+
+  return (
+    <section className="rounded-lg border border-border bg-card shadow-soft">
+      <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+            <KeyRound className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-foreground">API tokens</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Keys for the read-only public API.{' '}
+              <Link to="/developers" className="text-primary hover:underline">
+                Read the API docs
+              </Link>
+              .
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="secondary" onClick={() => setDialogOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New token
+        </Button>
+      </div>
+
+      {freshKey && (
+        <div className="border-b border-border bg-primary-subtle/50 px-5 py-4">
+          <p className="text-sm font-medium text-foreground">
+            Copy your key now — it won&rsquo;t be shown again.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-card px-3 py-2 font-mono text-sm text-foreground">
+              {freshKey}
+            </code>
+            <CopyButton value={freshKey} label="Copy API key" />
+            <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => setFreshKey(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="divide-y divide-border">
+        {query.isPending ? (
+          <div className="space-y-2 px-5 py-4">
+            <Skeleton className="h-6 w-1/3" />
+          </div>
+        ) : query.error ? (
+          <p className="px-5 py-4 text-sm text-destructive">{query.error.message}</p>
+        ) : tokens.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-muted-foreground">
+            No tokens yet — create one to call the API.
+          </p>
+        ) : (
+          tokens.map((token: ApiTokenRow) => (
+            <div
+              key={token.id}
+              className="group flex items-center gap-3 px-5 py-3 transition-colors hover:bg-hover"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">{token.name}</p>
+                <p className="text-xs text-muted-foreground">{formatUsed(token.last_used_at)}</p>
+              </div>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Revoke ${token.name}`}
+                className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-within:opacity-100"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate(token.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New API token</DialogTitle>
+            <DialogDescription>
+              Name it so you remember what it&rsquo;s for. The key is shown once after you create it.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const trimmed = name.trim()
+              if (trimmed) create.mutate(trimmed)
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="token-name" required>
+                Token name
+              </Label>
+              <Input
+                id="token-name"
+                autoFocus
+                value={name}
+                placeholder="Zapier integration"
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!name.trim() || create.isPending}>
+                {create.isPending ? 'Creating…' : 'Create token'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </section>
   )
 }
 

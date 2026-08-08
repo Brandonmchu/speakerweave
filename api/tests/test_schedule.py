@@ -533,6 +533,70 @@ def test_conflicts_reports_a_speaker_in_two_rooms(agenda_client, auth_headers, a
     ]
 
 
+def test_conflicts_reports_three_room_pairs_and_one_speaker_pair(
+    agenda_client, auth_headers, agenda_db
+):
+    agenda_db.seed(
+        "rooms",
+        {
+            "id": "room-c",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Workshop B",
+            "capacity": 60,
+            "order": 2,
+        },
+    )
+    placements = [
+        ("main-early", "room-a", "09:00", "10:00", "accepted"),
+        ("main-late", "room-a", "09:30", "10:00", "accepted"),
+        ("workshop-a-early", "room-b", "10:00", "11:00", "pending"),
+        ("workshop-a-late", "room-b", "10:15", "10:45", "pending"),
+        ("workshop-b-early", "room-c", "11:00", "12:00", "accept_queue"),
+        ("workshop-b-late", "room-c", "11:15", "11:45", "accept_queue"),
+        ("speaker-a", "room-a", "12:00", "12:30", "accepted"),
+        ("speaker-b", "room-b", "12:00", "12:30", "pending"),
+    ]
+    for session_id, room_id, starts, ends, status in placements:
+        seed_session(
+            agenda_db,
+            session_id,
+            room_id=room_id,
+            starts_at=ts(starts),
+            ends_at=ts(ends),
+            status=status,
+        )
+    seed_speaker(agenda_db, "speaker-a", "c-ada", first_name="Ada", last_name="Lovelace")
+    seed_speaker(agenda_db, "speaker-b", "c-ada", first_name="Ada", last_name="Lovelace")
+
+    body = agenda_client.get(
+        f"/api/events/{TEST_EVENT_ID}/agenda/conflicts", headers=auth_headers
+    ).json()
+
+    assert body["conflicts"] == [
+        {
+            "type": "room_overlap",
+            "session_ids": ["main-early", "main-late"],
+            "detail": "Main Hall is double-booked at 09:30",
+        },
+        {
+            "type": "room_overlap",
+            "session_ids": ["workshop-a-early", "workshop-a-late"],
+            "detail": "Workshop Room is double-booked at 10:15",
+        },
+        {
+            "type": "room_overlap",
+            "session_ids": ["workshop-b-early", "workshop-b-late"],
+            "detail": "Workshop B is double-booked at 11:15",
+        },
+        {
+            "type": "speaker_overlap",
+            "session_ids": ["speaker-a", "speaker-b"],
+            "detail": "Ada Lovelace is in two rooms at 12:00",
+        },
+    ]
+
+
 def test_back_to_back_sessions_are_not_a_conflict(agenda_client, auth_headers, agenda_db):
     seed_session(agenda_db, "a", starts_at=ts("09:00"), ends_at=ts("09:30"), room_id="room-a")
     seed_session(agenda_db, "b", starts_at=ts("09:30"), ends_at=ts("10:00"), room_id="room-a")

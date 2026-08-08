@@ -8,6 +8,7 @@ from app.core.logging_config import get_logger, setup_logging
 from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
 from routes.admin_routes import router as admin_router
+from routes.api_key_admin_routes import router as api_key_admin_router
 from routes.comms_routes import router as comms_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.demo_routes import router as demo_router
@@ -19,10 +20,12 @@ from routes.ics_routes import router as ics_router
 from routes.portal_admin_routes import router as portal_admin_router
 from routes.portal_routes import router as portal_router
 from routes.portal_session_routes import router as portal_session_router
+from routes.program_routes import router as program_router
 from routes.public_routes import router as public_router
 from routes.review_routes import router as review_router
 from routes.schedule_routes import router as schedule_router
 from routes.taxonomy_routes import router as taxonomy_router
+from routes.v1_routes import router as v1_router
 from security.rate_limiting import limiter, rate_limit_exceeded_handler
 
 setup_logging(default_level=settings.log_level)
@@ -56,6 +59,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(public_router)
 app.include_router(demo_router)
+app.include_router(program_router)
 app.include_router(portal_session_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
@@ -69,6 +73,8 @@ app.include_router(review_router)
 app.include_router(portal_router)
 app.include_router(portal_admin_router)
 app.include_router(comms_router)
+app.include_router(v1_router)
+app.include_router(api_key_admin_router)
 
 
 if __name__ == "__main__":

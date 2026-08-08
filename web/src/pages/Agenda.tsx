@@ -36,6 +36,7 @@ import {
   gridGeometry,
   scheduleSession,
   timestampDay,
+  timestampEpochMinutes,
   timestampMinutes,
   type Agenda as AgendaPayload,
   type AgendaRoom,
@@ -214,6 +215,22 @@ function toCard(session: AgendaSession): SpikeSession {
     color: paletteFor(session.track_id),
     // A session with a room but no start is not placed — the grid has nowhere
     // to draw it, so it stays in the tray until it is given a time.
+    roomId: startMin === null ? null : (session.room_id ?? null),
+    startMin,
+  }
+}
+
+/**
+ * The same card in the conflict detector's time domain.
+ *
+ * Layout needs minutes past midnight; overlap arithmetic needs the whole
+ * instant so equal clock times on different conference days do not alias.
+ */
+function toConflictCard(session: AgendaSession): SpikeSession {
+  const card = toCard(session)
+  const startMin = timestampEpochMinutes(session.starts_at)
+  return {
+    ...card,
     roomId: startMin === null ? null : (session.room_id ?? null),
     startMin,
   }
@@ -907,6 +924,14 @@ export function Agenda() {
 
   const sessions = useMemo(() => (agenda?.sessions ?? []).map(toCard), [agenda?.sessions])
   const byId = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
+  const conflictSessions = useMemo(
+    () => (agenda?.sessions ?? []).map(toConflictCard),
+    [agenda?.sessions]
+  )
+  const conflictById = useMemo(
+    () => new Map(conflictSessions.map((session) => [session.id, session])),
+    [conflictSessions]
+  )
   const rooms = useMemo(() => agenda?.rooms ?? [], [agenda?.rooms])
   const speakers = useMemo(() => speakerRegistry(agenda?.sessions ?? []), [agenda?.sessions])
 
@@ -921,10 +946,13 @@ export function Agenda() {
 
   // Full recompute, but only when the schedule actually changes — never during
   // a pointer move.
-  const clientConflicts = useMemo(() => detectConflicts(sessions, labels), [sessions, labels])
+  const clientConflicts = useMemo(
+    () => detectConflicts(conflictSessions, labels),
+    [conflictSessions, labels]
+  )
   const conflicts = useMemo(
-    () => mergeConflicts(clientConflicts, conflictsQuery.data, byId),
-    [clientConflicts, conflictsQuery.data, byId]
+    () => mergeConflicts(clientConflicts, conflictsQuery.data, conflictById),
+    [clientConflicts, conflictsQuery.data, conflictById]
   )
   const conflictedIds = useMemo(() => conflictedSessionIds(conflicts), [conflicts])
   const titles = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions])
@@ -1068,16 +1096,21 @@ export function Agenda() {
     lastTargetKey.current = key
 
     // Delta only: the dragged session against everything else. Never a full sweep.
+    const wire = agenda?.sessions.find((row) => row.id === session.id)
+    const onDay = timestampDay(wire?.starts_at) ?? day
+    const startMin = timestampEpochMinutes(
+      buildTimestamp(onDay, slotToMin(grid, target.startSlot))
+    )
     const candidate: SpikeSession = {
       ...session,
       roomId: target.roomId,
-      startMin: slotToMin(grid, target.startSlot),
+      startMin,
     }
     setPreview({
       roomId: target.roomId,
       startSlot: target.startSlot,
       slots: slotsFor(grid, session.durationMin),
-      conflicts: conflictsForSession(candidate, sessions, labels),
+      conflicts: conflictsForSession(candidate, conflictSessions, labels),
     })
   }
 

@@ -80,6 +80,93 @@ const CONFLICTS = {
   ],
 }
 
+const SEEDED_MULTI_DAY_AGENDA = {
+  ...AGENDA,
+  rooms: [
+    { id: 'room-main', name: 'Main Stage', capacity: 400, order: 0 },
+    { id: 'room-a', name: 'Workshop A', capacity: 80, order: 1 },
+    { id: 'room-b', name: 'Workshop B', capacity: 80, order: 2 },
+  ],
+  sessions: [
+    {
+      id: 'main-day-1',
+      title: 'Day 1 keynote',
+      status: 'accepted',
+      starts_at: '2026-10-12T16:00:00+00:00',
+      ends_at: '2026-10-12T16:45:00+00:00',
+      room_id: 'room-main',
+      track_id: 'track-1',
+      duration_min: 45,
+      speakers: [],
+    },
+    {
+      id: 'main-day-2',
+      title: 'Day 2 keynote',
+      status: 'accepted',
+      starts_at: '2026-10-13T16:00:00+00:00',
+      ends_at: '2026-10-13T16:45:00+00:00',
+      room_id: 'room-main',
+      track_id: 'track-1',
+      duration_min: 45,
+      speakers: [],
+    },
+    {
+      id: 'workshop-a-day-1',
+      title: 'Day 1 Workshop A',
+      status: 'accepted',
+      starts_at: '2026-10-12T17:00:00+00:00',
+      ends_at: '2026-10-12T17:30:00+00:00',
+      room_id: 'room-a',
+      track_id: 'track-1',
+      duration_min: 30,
+      speakers: [{ contact_id: 'priya', first_name: 'Priya', last_name: 'Raman' }],
+    },
+    {
+      id: 'workshop-b-day-1',
+      title: 'Day 1 Workshop B',
+      status: 'accepted',
+      starts_at: '2026-10-12T17:00:00+00:00',
+      ends_at: '2026-10-12T17:30:00+00:00',
+      room_id: 'room-b',
+      track_id: 'track-1',
+      duration_min: 30,
+      speakers: [{ contact_id: 'priya', first_name: 'Priya', last_name: 'Raman' }],
+    },
+    {
+      id: 'workshop-a-day-2',
+      title: 'Day 2 Workshop A',
+      status: 'accepted',
+      starts_at: '2026-10-13T17:00:00+00:00',
+      ends_at: '2026-10-13T17:30:00+00:00',
+      room_id: 'room-a',
+      track_id: 'track-1',
+      duration_min: 30,
+      speakers: [],
+    },
+    {
+      id: 'workshop-b-day-2',
+      title: 'Day 2 Workshop B',
+      status: 'accepted',
+      starts_at: '2026-10-13T17:00:00+00:00',
+      ends_at: '2026-10-13T18:30:00+00:00',
+      room_id: 'room-b',
+      track_id: 'track-1',
+      duration_min: 90,
+      speakers: [],
+    },
+  ],
+}
+
+const SEEDED_MULTI_DAY_CONFLICTS = {
+  conflicts: [
+    {
+      type: 'speaker_overlap',
+      session_ids: ['workshop-a-day-1', 'workshop-b-day-1'],
+      detail: 'Priya Raman is in two rooms at 17:00',
+    },
+  ],
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -169,6 +256,17 @@ describe('Agenda on real event data', () => {
     const panel = await screen.findByTestId('conflicts-panel')
     expect(panel).toHaveAttribute('data-conflict-count', '1')
     expect(within(panel).getByText('Auditorium is double-booked at 09:30')).toBeInTheDocument()
+  })
+
+  it('does not alias equal room times from different conference days', async () => {
+    vi.unstubAllGlobals()
+    stubApi(SEEDED_MULTI_DAY_AGENDA, SEEDED_MULTI_DAY_CONFLICTS)
+    renderAgenda()
+
+    const panel = await screen.findByTestId('conflicts-panel')
+    expect(panel).toHaveAttribute('data-conflict-count', '1')
+    expect(within(panel).getByText('Priya Raman is in two rooms at 17:00')).toBeInTheDocument()
+    expect(within(panel).queryByText(/double-booked/)).not.toBeInTheDocument()
   })
 
   it('tells the organizer what to do when nothing is accepted yet', async () => {

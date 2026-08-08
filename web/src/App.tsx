@@ -5,6 +5,7 @@ import { peekToken, subscribeToken } from '@/lib/api'
 import { CLERK_ENABLED, ClerkRequireAuth, SignInPage, SignUpPage } from '@/auth/clerk'
 import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
+import { ApiDocs } from '@/pages/ApiDocs'
 import { Comms } from '@/pages/Comms'
 import { Dashboard } from '@/pages/Dashboard'
 import { DemoLanding } from '@/pages/DemoLanding'
@@ -16,6 +17,8 @@ import { Inbox } from '@/pages/Inbox'
 import { Onboarding } from '@/pages/Onboarding'
 import { Portal } from '@/pages/Portal'
 import { PublicForm } from '@/pages/PublicForm'
+import { PublicSchedule } from '@/pages/PublicSchedule'
+import { PublicSpeakers } from '@/pages/PublicSpeakers'
 import { Review } from '@/pages/Review'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { Speakers } from '@/pages/Speakers'
@@ -52,6 +55,9 @@ export default function App() {
         <Route path="/dev-login" element={<DevLogin />} />
         <Route path="/submit/:slug" element={<PublicForm />} />
         <Route path="/demo" element={<DemoLanding />} />
+        <Route path="/developers" element={<ApiDocs />} />
+        <Route path="/e/:slug/schedule" element={<PublicSchedule />} />
+        <Route path="/e/:slug/speakers" element={<PublicSpeakers />} />
         {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
         <Route path="/portal/:token" element={<Portal />} />
         <Route path="/portal" element={<Portal />} />

@@ -178,10 +178,22 @@ export function toUtcDate(value: string | null | undefined): Date | null {
   return new Date(ms)
 }
 
-/** Minutes past midnight (UTC) — the grid's own unit. */
+/** Minutes past midnight (UTC) — for positioning a card on the clock grid. */
 export function timestampMinutes(value: string | null | undefined): number | null {
   const at = toUtcDate(value)
   return at ? at.getUTCHours() * 60 + at.getUTCMinutes() : null
+}
+
+/**
+ * Epoch minutes (UTC) — for comparisons that must preserve the conference day.
+ *
+ * The room grid positions cards by clock time, but conflict detection cannot:
+ * 16:00 on Monday and 16:00 on Tuesday are different intervals. This is the
+ * browser equivalent of `services.scheduling.minutes_from_timestamp`.
+ */
+export function timestampEpochMinutes(value: string | null | undefined): number | null {
+  const at = toUtcDate(value)
+  return at ? Math.floor(at.getTime() / 60_000) : null
 }
 
 /** "YYYY-MM-DD" (UTC) — which day of the conference a placement belongs to. */

@@ -1,0 +1,403 @@
+"""Public, embeddable program surface: the published schedule + speaker gallery.
+
+No JWT here — the event *slug* is the only credential, and org/event context is
+derived from the ``events`` row it resolves to, never from the request. So a
+reader can only ever see the programme of the event whose slug they hold.
+
+Everything served here is deliberately public data:
+
+  * the *published* programme — sessions that are ``accepted`` AND scheduled
+    (``starts_at`` is set). There is no ``is_public`` column on ``sessions``
+    (see migration 001); a session becomes public by being accepted and placed
+    on the grid, so accepted+scheduled *is* the public criterion.
+  * public-facing speaker fields only — name, title, company, headshot, bio and
+    social links. Email and phone are never selected, let alone returned.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import OrderedDict
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, HTTPException, Request, Response
+
+from security.rate_limiting import RATE_PUBLIC_DEFAULT, limiter
+from services.supabase_helpers import db, first, rows
+from supabase_client import supabase
+
+router = APIRouter(prefix="/public/program", tags=["public-program"])
+logger = logging.getLogger(__name__)
+
+SPEAKER_ROLE = "speaker"
+SUBMITTER_ROLE = "submitter"
+
+# The tiny, dependency-free embed loader. Generic across events: it reads the
+# slug and widget from its own <script> tag's data-* attributes rather than
+# having them injected server-side, so this response carries no untrusted data.
+# The <iframe> is the isolation boundary; the parent only ever learns a height.
+EMBED_JS = """\
+(function () {
+  var script = document.currentScript;
+  if (!script) return;
+  var slug = script.getAttribute('data-dais-event');
+  var widget = script.getAttribute('data-dais-widget') || 'schedule';
+  if (!slug) return;
+  if (widget !== 'schedule' && widget !== 'speakers') widget = 'schedule';
+  var origin = '';
+  try { origin = new URL(script.src).origin; } catch (e) { origin = ''; }
+  var iframe = document.createElement('iframe');
+  iframe.src = origin + '/e/' + encodeURIComponent(slug) + '/' + widget + '?embed=1';
+  iframe.title = 'dais ' + widget;
+  iframe.loading = 'lazy';
+  iframe.scrolling = 'no';
+  iframe.style.width = '100%';
+  iframe.style.border = '0';
+  iframe.style.display = 'block';
+  iframe.style.overflow = 'hidden';
+  iframe.style.height = '600px';
+  script.parentNode.insertBefore(iframe, script);
+  window.addEventListener('message', function (event) {
+    if (event.source !== iframe.contentWindow) return;
+    var data = event.data;
+    if (!data || data.type !== 'dais-embed-height') return;
+    var h = parseInt(data.height, 10);
+    if (h > 0) iframe.style.height = h + 'px';
+  });
+})();
+"""
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _parse_dt(value: object) -> datetime | None:
+    """An aware datetime from the ISO text PostgREST returns. Naive is read UTC."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _resolve_timezone(tz: str | None, fallback: str | None) -> tuple[ZoneInfo, str]:
+    """The IANA zone to group/label by: caller's ?tz, else the event's, else UTC.
+
+    A bad or unknown name never 500s the page — it just falls through to the
+    next candidate.
+    """
+    for candidate in (tz, fallback, "UTC"):
+        if not candidate:
+            continue
+        try:
+            return ZoneInfo(candidate), candidate
+        except Exception:  # noqa: BLE001, S112 — a bad ?tz is user input, not an error
+            continue
+    return ZoneInfo("UTC"), "UTC"
+
+
+def _speaker_name(contact: dict) -> str:
+    return f"{contact.get('first_name') or ''} {contact.get('last_name') or ''}".strip()
+
+
+async def _load_event(slug: str) -> dict:
+    """The public event row for ``slug``, or 404. Org context comes from here."""
+    event = first(
+        await db(
+            lambda: supabase.table("events")
+            .select("id, org_id, name, slug, starts_at, ends_at, timezone, location")
+            .eq("slug", slug)
+            .limit(1)
+            .execute(),
+            "program_event_by_slug",
+        )
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+
+async def _accepted_sessions(org_id: str, event_id: str) -> list[dict]:
+    """Every accepted session for the event. `starts_at` may be null — the
+    schedule endpoint drops the unscheduled ones; the gallery keeps them."""
+    return rows(
+        await db(
+            lambda: supabase.table("sessions")
+            .select(
+                "id, friendly_id, title, description, starts_at, ends_at, "
+                "room_id, track_id"
+            )
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("status", "accepted")
+            .execute(),
+            "program_accepted_sessions",
+        )
+    )
+
+
+async def _name_maps(org_id: str, event_id: str) -> tuple[dict[str, str], dict[str, dict]]:
+    """({room_id: name}, {track_id: {name, color}}) for the event."""
+    rooms = rows(
+        await db(
+            lambda: supabase.table("rooms")
+            .select("id, name")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .execute(),
+            "program_rooms",
+        )
+    )
+    tracks = rows(
+        await db(
+            lambda: supabase.table("tracks")
+            .select("id, name, color")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .execute(),
+            "program_tracks",
+        )
+    )
+    room_names = {str(r["id"]): r.get("name") or "" for r in rooms if r.get("id")}
+    track_meta = {
+        str(t["id"]): {"name": t.get("name") or "", "color": t.get("color") or None}
+        for t in tracks
+        if t.get("id")
+    }
+    return room_names, track_meta
+
+
+async def _speakers_by_session(
+    session_ids: list[str], org_id: str
+) -> tuple[dict[str, list[dict]], dict[str, dict]]:
+    """Resolve the on-stage humans for each session.
+
+    Returns ({session_id: [contact, ...ordered]}, {contact_id: contact}). The
+    chosen role is ``speaker``, falling back to ``submitter`` when no speaker has
+    been assigned — an accepted talk has one known human on it either way. Two
+    queries rather than a PostgREST embed, so the org predicate rides every hop.
+    Only public contact fields are selected: never email or phone.
+    """
+    if not session_ids:
+        return {}, {}
+
+    participants = rows(
+        await db(
+            lambda: supabase.table("session_participants")
+            .select("session_id, contact_id, role, is_primary")
+            .in_("session_id", session_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "program_participants",
+        )
+    )
+
+    by_session: dict[str, list[dict]] = {}
+    for participant in participants:
+        if not participant.get("contact_id"):
+            continue
+        by_session.setdefault(str(participant["session_id"]), []).append(participant)
+
+    chosen: dict[str, list[dict]] = {}
+    for session_id, group in by_session.items():
+        speakers = [p for p in group if p.get("role") == SPEAKER_ROLE]
+        if not speakers:
+            speakers = [p for p in group if p.get("role") == SUBMITTER_ROLE]
+        if speakers:
+            chosen[session_id] = speakers
+
+    contact_ids = sorted({str(p["contact_id"]) for group in chosen.values() for p in group})
+    if not contact_ids:
+        return {}, {}
+
+    contacts = rows(
+        await db(
+            lambda: supabase.table("contacts")
+            .select(
+                "id, first_name, last_name, title, company_name, "
+                "photo_url, about, linkedin_url, twitter_url"
+            )
+            .in_("id", contact_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "program_speaker_contacts",
+        )
+    )
+    contacts_by_id = {str(c["id"]): c for c in contacts}
+
+    resolved: dict[str, list[dict]] = {}
+    for session_id, group in chosen.items():
+        people = [
+            (bool(p.get("is_primary")), contacts_by_id[str(p["contact_id"])])
+            for p in group
+            if str(p.get("contact_id")) in contacts_by_id
+        ]
+        # Primary first, then alphabetical by last then first name.
+        people.sort(
+            key=lambda t: (
+                not t[0],
+                str(t[1].get("last_name") or "").casefold(),
+                str(t[1].get("first_name") or "").casefold(),
+                str(t[1].get("id")),
+            )
+        )
+        if people:
+            resolved[session_id] = [contact for _primary, contact in people]
+    return resolved, contacts_by_id
+
+
+# ── endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.get("/{event_slug}/schedule")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def get_schedule(request: Request, event_slug: str, tz: str | None = None):
+    """The published programme, grouped by day and ordered by time then room.
+
+    Only ``accepted`` sessions that are scheduled (``starts_at`` set) appear.
+    Days and times are grouped in ``tz`` (an IANA name) when given, else the
+    event's own timezone.
+    """
+    event = await _load_event(event_slug)
+    org_id, event_id = event["org_id"], event["id"]
+
+    zone, zone_key = _resolve_timezone(tz, event.get("timezone"))
+    sessions = await _accepted_sessions(org_id, event_id)
+    room_names, track_meta = await _name_maps(org_id, event_id)
+
+    scheduled = [s for s in sessions if s.get("starts_at")]
+    speakers_by_session, _contacts = await _speakers_by_session(
+        [str(s["id"]) for s in scheduled], org_id
+    )
+
+    # Time first, then room name — the reading order of a printed programme.
+    scheduled.sort(
+        key=lambda s: (
+            _parse_dt(s.get("starts_at")) or datetime.max.replace(tzinfo=timezone.utc),
+            room_names.get(str(s.get("room_id")), "").casefold(),
+        )
+    )
+
+    days: OrderedDict[str, list[dict]] = OrderedDict()
+    for session in scheduled:
+        local = _parse_dt(session["starts_at"]).astimezone(zone)
+        day_key = local.date().isoformat()
+        track = track_meta.get(str(session.get("track_id")))
+        days.setdefault(day_key, []).append(
+            {
+                "friendly_id": session.get("friendly_id"),
+                "title": session.get("title") or "",
+                "description": session.get("description") or "",
+                "starts_at": session.get("starts_at"),
+                "ends_at": session.get("ends_at"),
+                "room": room_names.get(str(session.get("room_id"))) or None,
+                "track": track,
+                "speakers": [
+                    {
+                        "name": _speaker_name(contact),
+                        "title": contact.get("title") or None,
+                        "company": contact.get("company_name") or None,
+                        "photo_url": contact.get("photo_url") or None,
+                    }
+                    for contact in speakers_by_session.get(str(session["id"]), [])
+                ],
+            }
+        )
+
+    return {
+        "event": {
+            "name": event.get("name"),
+            "starts_at": event.get("starts_at"),
+            "ends_at": event.get("ends_at"),
+            "timezone": zone_key,
+            "location": event.get("location"),
+        },
+        "days": [{"date": date, "sessions": items} for date, items in days.items()],
+    }
+
+
+@router.get("/{event_slug}/speakers")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def get_speakers(request: Request, event_slug: str):
+    """The speaker gallery: every distinct speaker on an accepted session,
+    alphabetical by last name, each with their sessions and public bio."""
+    event = await _load_event(event_slug)
+    org_id, event_id = event["org_id"], event["id"]
+
+    sessions = await _accepted_sessions(org_id, event_id)
+    room_names, _track_meta = await _name_maps(org_id, event_id)
+    sessions_by_id = {str(s["id"]): s for s in sessions}
+    speakers_by_session, contacts_by_id = await _speakers_by_session(
+        [str(s["id"]) for s in sessions], org_id
+    )
+
+    # contact_id -> the accepted sessions they speak on.
+    sessions_for_contact: dict[str, list[dict]] = {}
+    for session_id, contacts in speakers_by_session.items():
+        session = sessions_by_id.get(session_id)
+        if not session:
+            continue
+        for contact in contacts:
+            sessions_for_contact.setdefault(str(contact["id"]), []).append(session)
+
+    # Alphabetical by last name (then first), read off the contact row rather
+    # than a split of the display name.
+    ordered_ids = sorted(
+        sessions_for_contact,
+        key=lambda cid: (
+            str(contacts_by_id[cid].get("last_name") or "").casefold(),
+            str(contacts_by_id[cid].get("first_name") or "").casefold(),
+            cid,
+        ),
+    )
+
+    speakers = []
+    for contact_id in ordered_ids:
+        contact = contacts_by_id[contact_id]
+        sess_list = sessions_for_contact[contact_id]
+        sess_list.sort(
+            key=lambda s: (
+                s.get("starts_at") is None,
+                str(s.get("starts_at") or ""),
+                str(s.get("title") or "").casefold(),
+            )
+        )
+        speakers.append(
+            {
+                "name": _speaker_name(contact),
+                "title": contact.get("title") or None,
+                "company": contact.get("company_name") or None,
+                "photo_url": contact.get("photo_url") or None,
+                "bio": contact.get("about") or None,
+                "linkedin_url": contact.get("linkedin_url") or None,
+                "twitter_url": contact.get("twitter_url") or None,
+                "sessions": [
+                    {
+                        "title": s.get("title") or "",
+                        "starts_at": s.get("starts_at"),
+                        "room": room_names.get(str(s.get("room_id"))) or None,
+                    }
+                    for s in sess_list
+                ],
+            }
+        )
+
+    return {"event": {"name": event.get("name")}, "speakers": speakers}
+
+
+@router.get("/{event_slug}/embed.js")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def get_embed_js(request: Request, event_slug: str):
+    """The embed loader script. Generic across events and widgets; it reads the
+    slug/widget from its own <script data-dais-event=… data-dais-widget=…> tag
+    and injects a sized <iframe> pointing at /e/{slug}/{widget}?embed=1."""
+    return Response(
+        content=EMBED_JS,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )

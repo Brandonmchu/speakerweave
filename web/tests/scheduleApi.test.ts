@@ -20,6 +20,7 @@ import {
   parseClockMinutes,
   scheduleSession,
   timestampDay,
+  timestampEpochMinutes,
   timestampMinutes,
   type Agenda,
 } from '@/lib/scheduleApi'
@@ -176,10 +177,19 @@ describe('timestamps', () => {
     expect(timestampMinutes('2026-10-12T09:30:00.000Z')).toBe(570)
   })
 
+  it('preserves the day when converting timestamps for conflict detection', () => {
+    const dayOne = timestampEpochMinutes('2026-10-12T09:30:00+00:00')
+    const dayTwo = timestampEpochMinutes('2026-10-13T09:30:00+00:00')
+
+    expect(dayOne).not.toBeNull()
+    expect(dayTwo).toBe((dayOne ?? 0) + 1440)
+  })
+
   it('is null, never NaN, for anything unparseable', () => {
     expect(timestampMinutes(null)).toBeNull()
     expect(timestampMinutes('')).toBeNull()
     expect(timestampMinutes('tomorrow')).toBeNull()
+    expect(timestampEpochMinutes('tomorrow')).toBeNull()
     expect(timestampDay(undefined)).toBeNull()
   })
 

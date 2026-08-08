@@ -20,13 +20,17 @@ from typing import Any
 # missing here would silently talk to the real client.
 PATCH_TARGET_MODULES = (
     "routes.admin_routes",
+    "routes.api_key_admin_routes",
     "routes.dashboard_routes",
     "routes.field_routes",
     "routes.form_admin_routes",
     "routes.portal_admin_routes",
+    "routes.program_routes",
     "routes.public_routes",
     "routes.schedule_routes",
     "routes.taxonomy_routes",
+    "routes.v1_routes",
+    "services.api_keys",
     "services.forms",
     "services.magic_links",
     "services.org_scope",

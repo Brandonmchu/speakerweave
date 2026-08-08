@@ -313,3 +313,27 @@ export interface EventRow {
 export function listEvents(): Promise<EventRow[]> {
   return apiGet<unknown>('/api/events').then((p) => unwrapList<EventRow>(p as never))
 }
+
+// --- API tokens (keys for the public /v1 API) ------------------------------
+// The organizer-side management surface for public API keys. The raw key is
+// returned exactly once by createApiToken; every other call is metadata only.
+
+export interface ApiTokenRow {
+  id: string
+  name: string
+  scopes?: string[]
+  created_at?: string | null
+  last_used_at?: string | null
+}
+
+export function listApiTokens(): Promise<ApiTokenRow[]> {
+  return apiGet<unknown>('/api/api-tokens').then((p) => unwrapList<ApiTokenRow>(p as never))
+}
+
+export function createApiToken(name: string): Promise<{ token: string; name: string }> {
+  return apiPost<{ token: string; name: string }>('/api/api-tokens', { name })
+}
+
+export function deleteApiToken(id: string): Promise<void> {
+  return apiDelete<void>(`/api/api-tokens/${id}`)
+}
