@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>dais</title>
+    <meta
+      name="description"
+      content="dais — open-source speaker and session management for conferences."
+    />
+    <style>
+      /* Pre-paint background + font stack so the first frame isn't a white
+         flash in the wrong typeface. Kept in sync with tailwind.config.js. */
+      html {
+        background: #f8fafc;
+        font-family: Inter, Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          'Helvetica Neue', Arial, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- id="root" is load-bearing: tailwind.config.js sets important:'#root'. -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

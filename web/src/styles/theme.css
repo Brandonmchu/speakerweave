@@ -1,0 +1,67 @@
+/* dais design tokens.
+ *
+ * Adapted from every-react/packages/ui/styles/theme.css (same HSL-token
+ * approach, same token names so the shadcn-style components port unchanged),
+ * retinted for the Sessionboard-like target: indigo primary, white surfaces,
+ * slate text, light-slate canvas.
+ *
+ * Light only for now — a `.dark` block can be added later without touching
+ * any component.
+ */
+@layer base {
+  :root {
+    /* --- canvas & ink ------------------------------------------------- */
+    --background: 210 40% 98%; /* slate-50 — the page canvas */
+    --foreground: 222 47% 11%; /* slate-900 — primary text */
+    --card: 0 0% 100%; /* white — every elevated surface */
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* --- brand -------------------------------------------------------- */
+    --primary: 243 75% 59%; /* indigo-600 #4F46E5 */
+    --primary-strong: 245 58% 51%; /* indigo-700 #4338CA — hover/border */
+    --primary-subtle: 226 100% 97%; /* indigo-50  #EEF2FF — tinted fills */
+    --primary-foreground: 0 0% 100%;
+
+    /* --- neutrals ----------------------------------------------------- */
+    --secondary: 210 40% 96%; /* slate-100 */
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%; /* slate-100 — recessed wells, active fills */
+    --muted-foreground: 215 16% 47%; /* slate-500 — secondary text */
+    --placeholder-foreground: 215 20% 65%; /* slate-400 */
+    --accent: 210 40% 96%; /* slate-100 — hover fill */
+    --accent-foreground: 222 47% 11%;
+    --hover: 226 100% 97%; /* indigo-50 — row/card highlight */
+    --border: 214 32% 91%; /* slate-200 */
+    --input: 213 27% 84%; /* slate-300 — one step darker on inputs */
+    --ring: var(--primary);
+
+    /* --- status ------------------------------------------------------- */
+    --success: 142 71% 45%; /* green-500 */
+    --success-strong: 142 72% 29%; /* green-700 — text on tinted fills */
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%; /* amber-500 */
+    --warning-strong: 26 90% 37%; /* amber-700 */
+    --warning-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%; /* red-600 */
+    --destructive-strong: 0 70% 42%; /* red-700 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* --- sidebar / top chrome ----------------------------------------- */
+    /* The admin sidebar is white (like Sessionboard) and separated from the
+       canvas by a border, not by a fill. */
+    --navigation-background: 0 0% 100%;
+    --navigation-foreground: 215 25% 27%; /* slate-700 */
+    --navigation-accent: 210 40% 96%; /* slate-100 — item hover */
+    --navigation-accent-foreground: 222 47% 11%;
+    --navigation-border: 214 32% 91%;
+
+    /* --- shape & depth ------------------------------------------------ */
+    --radius: 0.5rem;
+    --line-height-base: 1.5;
+    --shadow-soft: 0 1px 2px hsl(222 47% 11% / 0.04), 0 2px 6px -2px hsl(222 47% 11% / 0.05);
+    --shadow-raised: 0 1px 2px hsl(222 47% 11% / 0.05), 0 8px 24px -6px hsl(222 47% 11% / 0.1);
+    --shadow-lifted: 0 2px 6px hsl(222 47% 11% / 0.08), 0 16px 32px -8px hsl(222 47% 11% / 0.18);
+  }
+}

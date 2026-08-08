@@ -1,0 +1,88 @@
+"""Organizer auth: HS256 Supabase-shaped JWTs.
+
+Tokens are signed with SUPABASE_JWT_SECRET, aud="authenticated", and carry
+`sub` (user id) + `org_id`. Today they come from scripts/mint_dev_token.py;
+later Clerk's `supabase` JWT template mints the exact same shape, so nothing
+here changes when Clerk lands.
+
+The backend uses the Supabase service-role key and therefore BYPASSES RLS.
+org isolation is this file's contract plus an org predicate on every query:
+fetch -> verify_org_access -> 404.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+import jwt
+from dotenv import load_dotenv
+from fastapi import HTTPException, Request
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def verify_token(token: str) -> dict | None:
+    """Verify a JWT. Returns claims, or None when the token is unusable."""
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
+    if not secret:
+        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET is not configured")
+    try:
+        return jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            # 30s leeway: client clocks drift, and a freshly minted token whose
+            # iat is a hair in the future must not 401.
+            options={"verify_exp": True, "verify_iat": True},
+            leeway=30,
+        )
+    except jwt.ExpiredSignatureError:
+        logger.info("auth: token expired")
+    except jwt.InvalidTokenError as exc:
+        logger.info("auth: invalid token: %s", exc)
+    return None
+
+
+async def get_current_user_and_org(request: Request) -> tuple[str, str]:
+    """FastAPI dependency -> (user_id, org_id). Raises 401 otherwise.
+
+    Usage:
+        @router.get("/events")
+        async def list_events(auth: tuple = Depends(get_current_user_and_org)):
+            user_id, org_id = auth
+
+    HS256 verification is pure CPU (microseconds) and touches no I/O, so it
+    runs inline — no threadpool hop needed.
+    """
+    header = request.headers.get("Authorization") or ""
+    token = header[7:].strip() if header.startswith("Bearer ") else header.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+
+    claims = verify_token(token)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user_id = claims.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found in token")
+
+    org_id = claims.get("org_id")
+    if not org_id:
+        # Expected briefly right after signup, before the org claim propagates.
+        logger.info("auth: authed user has no org_id claim user_id=%s", user_id)
+        raise HTTPException(status_code=401, detail="Organization ID not found in token")
+
+    return user_id, org_id
+
+
+def verify_org_access(row: dict | None, org_id: str, resource: str = "Resource") -> dict:
+    """Fetch -> verify -> 404. A row from another org is indistinguishable from
+    a row that does not exist; never 403 (that leaks existence)."""
+    if not row or row.get("org_id") != org_id:
+        raise HTTPException(status_code=404, detail=f"{resource} not found")
+    return row

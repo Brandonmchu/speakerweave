@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+venv/
+node_modules/
+dist/
+.DS_Store
+*.local
+# dev mailer output (.eml files written when RESEND_API_KEY is unset)
+outbox_dev/

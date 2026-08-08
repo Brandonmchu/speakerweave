@@ -1,0 +1,129 @@
+/* Base layer — trimmed adaptation of every-react/packages/ui/styles/base.css.
+ * Only the rules that the ported components actually depend on. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    @apply bg-background text-foreground text-base antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    line-height: var(--line-height-base);
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+
+  /* Radix portals get our own border from the component classes — reset the
+     primitives' defaults so we don't double up. With important:'#root' our
+     classes win, but only inside #root, which is why every portal in ui/
+     resolves its container to #root. */
+  [data-radix-select-content],
+  [data-radix-dropdown-menu-content] {
+    border: none;
+  }
+
+  /* Display sizes run loose in the Inter/Geist stack — tighten systematically. */
+  #root .text-xl,
+  #root .text-2xl,
+  #root .text-3xl,
+  #root .text-4xl {
+    letter-spacing: -0.02em;
+  }
+
+  /* The admin shell owns the viewport; public pages keep natural document flow. */
+  html.app-shell-active,
+  body.app-shell-active {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Keyboard-only focus ring. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  input,
+  select,
+  textarea {
+    @apply text-base md:text-sm;
+  }
+}
+
+@layer components {
+  /* Consumed by <Label required>. */
+  .form-required-asterisk {
+    @apply text-destructive font-normal leading-none;
+  }
+
+  /* Slim scrollbars on in-app scroll surfaces (tables, menus, sidebars). */
+  .scrollbar-app {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--foreground) / 0.18) transparent;
+  }
+  .scrollbar-app::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-app::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--foreground) / 0.18);
+    border-radius: 9999px;
+  }
+  .scrollbar-app::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Operator-authored HTML (form welcome copy, confirmation copy). Tailwind
+     preflight strips element styling, so the public form re-establishes just
+     enough typography for a pasted paragraph/list/link to look intentional. */
+  .rich-text > * + * {
+    @apply mt-3;
+  }
+  .rich-text p {
+    @apply text-[15px] leading-relaxed text-muted-foreground;
+  }
+  .rich-text h1 {
+    @apply text-2xl font-semibold text-foreground;
+  }
+  .rich-text h2 {
+    @apply text-xl font-semibold text-foreground;
+  }
+  .rich-text h3 {
+    @apply text-base font-semibold text-foreground;
+  }
+  .rich-text ul {
+    @apply list-disc pl-5 text-[15px] leading-relaxed text-muted-foreground;
+  }
+  .rich-text ol {
+    @apply list-decimal pl-5 text-[15px] leading-relaxed text-muted-foreground;
+  }
+  .rich-text li + li {
+    @apply mt-1;
+  }
+  .rich-text a {
+    @apply text-primary underline underline-offset-2;
+  }
+  .rich-text strong {
+    @apply font-semibold text-foreground;
+  }
+}

@@ -1,0 +1,19 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic[email]
+supabase==2.27.1
+PyJWT
+httpx
+python-multipart
+slowapi
+anyio
+# zoneinfo needs a tz database; slim container images often ship without one,
+# and invite emails render local times (services/ics.py falls back to UTC).
+tzdata
+
+# Testing / lint
+pytest
+pytest-asyncio
+pytest-timeout
+ruff
