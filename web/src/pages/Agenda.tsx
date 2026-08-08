@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   DndContext,
   DragOverlay,
@@ -14,6 +15,7 @@ import {
 } from '@dnd-kit/core'
 import { restrictToWindowEdges } from '@dnd-kit/modifiers'
 import {
+  AlertCircle,
   AlertTriangle,
   CalendarDays,
   CalendarRange,
@@ -25,118 +27,74 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
+import {
+  agendaDay,
+  buildTimestamp,
+  getAgenda,
+  getAgendaConflicts,
+  gridGeometry,
+  scheduleSession,
+  timestampDay,
+  timestampMinutes,
+  type Agenda as AgendaPayload,
+  type AgendaRoom,
+  type AgendaSession,
+  type GridGeometry,
+  type SchedulePatch,
+  type ServerConflict,
+} from '@/lib/scheduleApi'
 import { cn } from '@/lib/utils'
 import {
   assignLanes,
-  clampStartSlot,
   conflictedSessionIds,
   conflictsForSession,
   detectConflicts,
-  durationSlots,
   formatDuration,
   formatMinutes,
   formatRange,
   isScheduled,
-  minutesToSlot,
-  slotToMinutes,
-  DAY_START_MIN,
-  SLOT_COUNT,
-  SLOT_MINUTES,
+  overlapStart,
   type Conflict,
   type ScheduleLabels,
   type SpikeSession,
 } from '@/lib/schedule'
 import { Button } from '@/ui/button'
+import { EmptyState } from '@/ui/empty-state'
+import { Skeleton } from '@/ui/skeleton'
+import { toast } from '@/ui/use-toast'
 
 /* -------------------------------------------------------------------------- */
-/* SPIKE — client-side only, hardcoded data, zero backend calls.              */
+/* The agenda builder: a room x time grid over the event's real sessions.      */
 /*                                                                            */
-/* This is the PLAN.md §6 Day-0 go/no-go for the agenda builder: a fixed-slot  */
-/* room x time grid with constrained drag and live conflict highlighting. The  */
-/* geometry and the drag mechanics here are meant to survive into the real     */
-/* builder; only the data source is throwaway.                                */
+/* The geometry and drag mechanics came out of the PLAN.md §6 spike; the data  */
+/* is now the API's. Three rules the wiring is built around:                   */
+/*                                                                            */
+/*   1. Conflicts are detected TWICE. lib/schedule.ts runs in the browser so   */
+/*      the ghost turns red before the drop; the server sweeps the same rules  */
+/*      (api/services/scheduling.py) and is the authority we reconcile with.   */
+/*   2. A drop is optimistic. The card lands, then PATCHes; a 409 (Postgres    */
+/*      refusing a room double-book) puts it back where it was.                */
+/*   3. A drag never refetches the board. The agenda query is written to       */
+/*      locally; only the cheap conflicts query is invalidated afterwards.     */
 /* -------------------------------------------------------------------------- */
 
-/** Pixel height of one 15-minute slot. 32 slots => a 768px day. */
+/** Pixel height of one slot. */
 const SLOT_PX = 24
-const GRID_HEIGHT = SLOT_COUNT * SLOT_PX
 
-interface Room {
-  id: string
+interface Speaker {
   name: string
-  capacity: number
+  initials: string
 }
 
-const ROOMS: Room[] = [
-  { id: 'room-a', name: 'Main Hall', capacity: 400 },
-  { id: 'room-b', name: 'Workshop Room', capacity: 60 },
-]
-
-const SPEAKERS: Record<string, { name: string; initials: string }> = {
-  ada: { name: 'Ada Lovelace', initials: 'AL' },
-  grace: { name: 'Grace Hopper', initials: 'GH' },
-  alan: { name: 'Alan Turing', initials: 'AT' },
-}
-
-const LABELS: ScheduleLabels = {
-  speakers: Object.fromEntries(Object.entries(SPEAKERS).map(([id, s]) => [id, s.name])),
-  rooms: Object.fromEntries(ROOMS.map((r) => [r.id, r.name])),
-}
+type SpeakerRegistry = Record<string, Speaker>
 
 /**
- * Five sessions across three speakers. Two are pre-scheduled and deliberately
- * collide (Ada is in both rooms at 09:30) so the conflict panel has something to
- * say on first paint — mirrors the seeded demo requirement in PLAN.md §5.
+ * Speaker names for the initial chips. In a context rather than threaded
+ * through six components: every card in the tree wants it, none of them wants
+ * to know where it came from.
  */
-function seedSessions(): SpikeSession[] {
-  return [
-    {
-      id: 'sess-keynote',
-      title: 'Opening Keynote: The Analytical Engine at 200',
-      speakerIds: ['ada'],
-      durationMin: 45,
-      color: 'indigo',
-      roomId: 'room-a',
-      startMin: 9 * 60 + 30,
-    },
-    {
-      id: 'sess-compilers',
-      title: 'Hands-on: Compilers from Scratch',
-      speakerIds: ['ada', 'grace'],
-      durationMin: 60,
-      color: 'violet',
-      roomId: 'room-b',
-      startMin: 9 * 60 + 30,
-    },
-    {
-      id: 'sess-debugging',
-      title: 'Debugging the Undebuggable',
-      speakerIds: ['alan'],
-      durationMin: 30,
-      color: 'sky',
-      roomId: null,
-      startMin: null,
-    },
-    {
-      id: 'sess-types',
-      title: 'Type Systems for Conference Ops',
-      speakerIds: ['grace', 'alan'],
-      durationMin: 45,
-      color: 'emerald',
-      roomId: null,
-      startMin: null,
-    },
-    {
-      id: 'sess-committee',
-      title: 'Scaling the Program Committee',
-      speakerIds: ['ada'],
-      durationMin: 60,
-      color: 'amber',
-      roomId: null,
-      startMin: null,
-    },
-  ]
-}
+const SpeakersContext = createContext<SpeakerRegistry>({})
 
 /**
  * Full class strings so Tailwind's scanner can see them — never build these by
@@ -180,8 +138,85 @@ const PALETTE: Record<string, { surface: string; bar: string; title: string; met
   },
 }
 
+const PALETTE_KEYS = Object.keys(PALETTE)
+
 function palette(color: string) {
   return PALETTE[color] ?? PALETTE.indigo
+}
+
+/**
+ * Track -> palette slot. Tracks carry a hex colour, but the card styling is a
+ * matched set of five Tailwind ramps (surface/bar/title/meta/chip) that a raw
+ * hex can't fill in. Hashing the track id keeps every session in a track the
+ * same colour and keeps that colour stable across reloads.
+ */
+function paletteFor(trackId: string | null | undefined): string {
+  if (!trackId) return 'indigo'
+  let hash = 0
+  for (let i = 0; i < trackId.length; i += 1) {
+    hash = (hash * 31 + trackId.charCodeAt(i)) >>> 0
+  }
+  return PALETTE_KEYS[hash % PALETTE_KEYS.length]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Geometry                                                                    */
+/*                                                                            */
+/* The event owns its own day window and slot width, so the slot<->minute maths */
+/* is parameterised here rather than taken from lib/schedule.ts's spike        */
+/* constants. Everything else in that module (conflict detection, lanes,       */
+/* formatting) is geometry-free and used as-is.                               */
+/* -------------------------------------------------------------------------- */
+
+const slotToMin = (grid: GridGeometry, slot: number) => grid.dayStartMin + slot * grid.slotMinutes
+
+const minToSlot = (grid: GridGeometry, minutes: number) =>
+  Math.round((minutes - grid.dayStartMin) / grid.slotMinutes)
+
+const slotsFor = (grid: GridGeometry, durationMin: number) =>
+  Math.max(1, Math.ceil(durationMin / grid.slotMinutes))
+
+/** Keep a placement inside the day: a session may not spill past day_end. */
+function clampSlot(grid: GridGeometry, slot: number, durationMin: number): number {
+  const max = Math.max(0, grid.slotCount - slotsFor(grid, durationMin))
+  return Math.min(Math.max(slot, 0), max)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Wire -> card model                                                          */
+/* -------------------------------------------------------------------------- */
+
+function speakerRegistry(sessions: AgendaSession[]): SpeakerRegistry {
+  const registry: SpeakerRegistry = {}
+  for (const session of sessions) {
+    for (const speaker of session.speakers ?? []) {
+      if (registry[speaker.contact_id]) continue
+      const first = (speaker.first_name ?? '').trim()
+      const last = (speaker.last_name ?? '').trim()
+      const name = [first, last].filter(Boolean).join(' ') || speaker.contact_id
+      const initials =
+        `${first.slice(0, 1)}${last.slice(0, 1)}`.toUpperCase() ||
+        speaker.contact_id.slice(0, 2).toUpperCase()
+      registry[speaker.contact_id] = { name, initials }
+    }
+  }
+  return registry
+}
+
+/** One API session -> the card the grid drags. Minutes, not timestamps. */
+function toCard(session: AgendaSession): SpikeSession {
+  const startMin = timestampMinutes(session.starts_at)
+  return {
+    id: session.id,
+    title: session.title || 'Untitled session',
+    speakerIds: (session.speakers ?? []).map((speaker) => speaker.contact_id),
+    durationMin: session.duration_min > 0 ? session.duration_min : 30,
+    color: paletteFor(session.track_id),
+    // A session with a room but no start is not placed — the grid has nowhere
+    // to draw it, so it stays in the tray until it is given a time.
+    roomId: startMin === null ? null : (session.room_id ?? null),
+    startMin,
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -206,11 +241,12 @@ interface Preview {
 /* -------------------------------------------------------------------------- */
 
 function SpeakerChips({ session, className }: { session: SpikeSession; className?: string }) {
+  const speakers = useContext(SpeakersContext)
   const colors = palette(session.color)
   return (
     <div className={cn('flex items-center gap-1', className)}>
       {session.speakerIds.map((id) => {
-        const speaker = SPEAKERS[id]
+        const speaker = speakers[id]
         return (
           <span
             key={id}
@@ -341,10 +377,18 @@ function DraggableCard({
 /**
  * One (room, slot) droppable. Kept deliberately dumb: every droppable
  * re-renders when the DndContext's `over` changes, so the cheapest possible
- * render here is what keeps a 64-cell grid at 60fps. All hover feedback is
- * drawn once, by the ghost layer above.
+ * render here is what keeps the grid at 60fps. All hover feedback is drawn
+ * once, by the ghost layer above.
  */
-function SlotCell({ roomId, slot }: { roomId: string; slot: number }) {
+function SlotCell({
+  roomId,
+  slot,
+  slotsPerHour,
+}: {
+  roomId: string
+  slot: number
+  slotsPerHour: number
+}) {
   const { setNodeRef } = useDroppable({
     id: cellId(roomId, slot),
     data: { type: 'cell', roomId, slot } satisfies DropData,
@@ -354,13 +398,13 @@ function SlotCell({ roomId, slot }: { roomId: string; slot: number }) {
     <div
       ref={setNodeRef}
       style={{ height: SLOT_PX }}
-      className={cn('border-t', slot % 4 === 0 ? 'border-border' : 'border-border/45')}
+      className={cn('border-t', slot % slotsPerHour === 0 ? 'border-border' : 'border-border/45')}
     />
   )
 }
 
 /** The translucent "it would land here" box, spanning the full duration. */
-function DropGhost({ preview }: { preview: Preview }) {
+function DropGhost({ preview, grid }: { preview: Preview; grid: GridGeometry }) {
   const conflicting = preview.conflicts.length > 0
   return (
     <div
@@ -380,7 +424,7 @@ function DropGhost({ preview }: { preview: Preview }) {
           conflicting ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground'
         )}
       >
-        {formatMinutes(slotToMinutes(preview.startSlot))}
+        {formatMinutes(slotToMin(grid, preview.startSlot))}
         {conflicting && ' · conflict'}
       </span>
     </div>
@@ -392,11 +436,13 @@ function RoomColumn({
   sessions,
   conflictedIds,
   preview,
+  grid,
 }: {
-  room: Room
+  room: AgendaRoom
   sessions: SpikeSession[]
   conflictedIds: Set<string>
   preview: Preview | null
+  grid: GridGeometry
 }) {
   // Overlapping sessions share the column width instead of hiding each other.
   const placed = useMemo(
@@ -404,6 +450,7 @@ function RoomColumn({
     [sessions, room.id]
   )
   const lanesById = useMemo(() => assignLanes(placed), [placed])
+  const slotsPerHour = Math.max(1, Math.round(60 / grid.slotMinutes))
 
   return (
     <div
@@ -411,10 +458,10 @@ function RoomColumn({
       data-room-id={room.id}
       className="relative min-w-0 flex-1 border-l border-border first:border-l-0"
     >
-      {/* Droppable lattice — 32 cells, one per 15-minute slot. */}
-      <div style={{ height: GRID_HEIGHT }}>
-        {Array.from({ length: SLOT_COUNT }, (_, slot) => (
-          <SlotCell key={slot} roomId={room.id} slot={slot} />
+      {/* Droppable lattice — one cell per slot. */}
+      <div style={{ height: grid.slotCount * SLOT_PX }}>
+        {Array.from({ length: grid.slotCount }, (_, slot) => (
+          <SlotCell key={slot} roomId={room.id} slot={slot} slotsPerHour={slotsPerHour} />
         ))}
       </div>
 
@@ -422,8 +469,8 @@ function RoomColumn({
           events or the cells underneath would never be hit-tested. */}
       <div className="pointer-events-none absolute inset-0">
         {placed.map((session) => {
-          const top = minutesToSlot(session.startMin) * SLOT_PX
-          const height = durationSlots(session) * SLOT_PX
+          const top = minToSlot(grid, session.startMin) * SLOT_PX
+          const height = slotsFor(grid, session.durationMin) * SLOT_PX
           const { lane, lanes } = lanesById.get(session.id) ?? { lane: 0, lanes: 1 }
           return (
             <DraggableCard
@@ -441,7 +488,7 @@ function RoomColumn({
             />
           )
         })}
-        {preview?.roomId === room.id && <DropGhost preview={preview} />}
+        {preview?.roomId === room.id && <DropGhost preview={preview} grid={grid} />}
       </div>
     </div>
   )
@@ -640,10 +687,13 @@ function ViewNote({ children }: { children: React.ReactNode }) {
 function ListView({
   sessions,
   conflictedIds,
+  rooms,
 }: {
   sessions: SpikeSession[]
   conflictedIds: Set<string>
+  rooms: Map<string, string>
 }) {
+  const speakerNames = useContext(SpeakersContext)
   const scheduled = useMemo(
     () => sessions.filter(isScheduled).sort((a, b) => a.startMin - b.startMin),
     [sessions]
@@ -661,7 +711,7 @@ function ListView({
             const colors = palette(session.color)
             const conflicted = conflictedIds.has(session.id)
             const speakers = session.speakerIds
-              .map((id) => SPEAKERS[id]?.name ?? id)
+              .map((id) => speakerNames[id]?.name ?? id)
               .join(', ')
             return (
               <li key={session.id} className="flex items-center gap-4 px-5 py-3">
@@ -679,7 +729,7 @@ function ListView({
                     )}
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
-                    {LABELS.rooms?.[session.roomId] ?? session.roomId} · {formatDuration(session.durationMin)}
+                    {rooms.get(session.roomId) ?? session.roomId} · {formatDuration(session.durationMin)}
                     {speakers && ` · ${speakers}`}
                   </p>
                 </div>
@@ -731,6 +781,58 @@ function ConflictsView({
 }
 
 /* -------------------------------------------------------------------------- */
+/* Conflict reconciliation                                                     */
+/* -------------------------------------------------------------------------- */
+
+const conflictKey = (conflict: Conflict) =>
+  `${conflict.type}|${conflict.sessionIds[0]}|${conflict.sessionIds[1]}`
+
+/**
+ * Client conflicts first, then anything the server saw that the browser did
+ * not.
+ *
+ * The client list is what the operator is looking at right now — it includes
+ * the card still under their finger. The server list can lag a drop by one
+ * request, so a server entry is only trusted while the two sessions still
+ * overlap in the current local model; otherwise a conflict the organizer just
+ * fixed would flicker back for a moment.
+ */
+function mergeConflicts(
+  client: Conflict[],
+  server: ServerConflict[] | undefined,
+  byId: Map<string, SpikeSession>
+): Conflict[] {
+  if (!server?.length) return client
+
+  const merged = [...client]
+  const seen = new Set(client.map(conflictKey))
+
+  for (const row of server) {
+    const [first, second] = row.session_ids ?? []
+    const a = byId.get(first)
+    const b = byId.get(second)
+    if (!a || !b || !isScheduled(a) || !isScheduled(b)) continue
+    if (
+      overlapStart(
+        a.startMin,
+        a.startMin + a.durationMin,
+        b.startMin,
+        b.startMin + b.durationMin
+      ) === null
+    ) {
+      continue
+    }
+
+    const entry: Conflict = { type: row.type, sessionIds: [first, second], detail: row.detail }
+    const key = conflictKey(entry)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(entry)
+  }
+  return merged
+}
+
+/* -------------------------------------------------------------------------- */
 /* Page                                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -757,7 +859,7 @@ function activatorCardNode(event: DragStartEvent): HTMLElement | null {
 }
 
 export function Agenda() {
-  const [sessions, setSessions] = useState<SpikeSession[]>(seedSessions)
+  const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   // Rooms (the drag grid) is the default read; the other tabs are lighter views
@@ -778,27 +880,154 @@ export function Agenda() {
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
   )
 
+  // The org's first event, exactly as the submissions inbox picks it.
+  const eventsQuery = useQuery({
+    queryKey: ['events'],
+    queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
+  })
+  const eventId = eventsQuery.data?.[0]?.id
+
+  const agendaKey = ['agenda', eventId]
+  const conflictsKey = ['agenda-conflicts', eventId]
+
+  const agendaQuery = useQuery({
+    queryKey: agendaKey,
+    queryFn: () => getAgenda(eventId!),
+    enabled: Boolean(eventId),
+  })
+  const conflictsQuery = useQuery({
+    queryKey: conflictsKey,
+    queryFn: () => getAgendaConflicts(eventId!),
+    enabled: Boolean(eventId),
+  })
+
+  const agenda = agendaQuery.data
+  const grid = useMemo(() => gridGeometry(agenda?.event), [agenda?.event])
+  const day = useMemo(() => agendaDay(agenda), [agenda])
+
+  const sessions = useMemo(() => (agenda?.sessions ?? []).map(toCard), [agenda?.sessions])
+  const byId = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
+  const rooms = useMemo(() => agenda?.rooms ?? [], [agenda?.rooms])
+  const speakers = useMemo(() => speakerRegistry(agenda?.sessions ?? []), [agenda?.sessions])
+
+  const roomNames = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms])
+  const labels: ScheduleLabels = useMemo(
+    () => ({
+      rooms: Object.fromEntries(rooms.map((room) => [room.id, room.name])),
+      speakers: Object.fromEntries(Object.entries(speakers).map(([id, s]) => [id, s.name])),
+    }),
+    [rooms, speakers]
+  )
+
   // Full recompute, but only when the schedule actually changes — never during
   // a pointer move.
-  const conflicts = useMemo(() => detectConflicts(sessions, LABELS), [sessions])
+  const clientConflicts = useMemo(() => detectConflicts(sessions, labels), [sessions, labels])
+  const conflicts = useMemo(
+    () => mergeConflicts(clientConflicts, conflictsQuery.data, byId),
+    [clientConflicts, conflictsQuery.data, byId]
+  )
   const conflictedIds = useMemo(() => conflictedSessionIds(conflicts), [conflicts])
   const titles = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions])
   const unscheduled = useMemo(() => sessions.filter((s) => !isScheduled(s)), [sessions])
   const scheduledCount = sessions.length - unscheduled.length
 
-  const activeSession = activeId ? (sessions.find((s) => s.id === activeId) ?? null) : null
+  const activeSession = activeId ? (byId.get(activeId) ?? null) : null
+
+  /**
+   * The drop, persisted.
+   *
+   * Optimistic: the card is already where it was dropped, so this only ever
+   * has to *undo*. The board is never refetched here — the response is written
+   * straight into the cache and only the conflicts sweep is invalidated, so
+   * dragging twenty sessions costs twenty small writes, not twenty boards.
+   */
+  const move = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: SchedulePatch }) => scheduleSession(id, patch),
+    onMutate: async ({ id, patch }) => {
+      await queryClient.cancelQueries({ queryKey: agendaKey })
+      const previous = queryClient.getQueryData<AgendaPayload>(agendaKey)
+      queryClient.setQueryData<AgendaPayload>(agendaKey, (current) =>
+        current
+          ? {
+              ...current,
+              sessions: current.sessions.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+            }
+          : current
+      )
+      return { previous }
+    },
+    onSuccess: (session, { id }) => {
+      // The row the server actually wrote wins over what we guessed. Duration
+      // stays local: it is derived, and an unscheduled session has no ends_at
+      // left to derive it from.
+      queryClient.setQueryData<AgendaPayload>(agendaKey, (current) =>
+        current
+          ? {
+              ...current,
+              sessions: current.sessions.map((s) =>
+                s.id === id
+                  ? {
+                      ...s,
+                      starts_at: session?.starts_at ?? null,
+                      ends_at: session?.ends_at ?? null,
+                      room_id: session?.room_id ?? null,
+                    }
+                  : s
+              ),
+            }
+          : current
+      )
+    },
+    onError: (error: Error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(agendaKey, context.previous)
+      const doubleBooked = error instanceof ApiError && error.status === 409
+      toast({
+        variant: 'destructive',
+        title: doubleBooked ? 'Room double-booked' : "Couldn't save that move",
+        description: doubleBooked
+          ? 'Another session already has that room at that time.'
+          : error.message,
+      })
+    },
+    onSettled: () => {
+      // Only the conflict sweep — the board itself is already correct.
+      queryClient.invalidateQueries({ queryKey: conflictsKey })
+    },
+  })
 
   function resolveTarget(
     session: SpikeSession,
     data: DropData | undefined
   ): { roomId: string; startSlot: number } | null {
     if (!data || data.type !== 'cell') return null
-    const startSlot = clampStartSlot(data.slot - grabSlotOffset.current, session)
+    const startSlot = clampSlot(grid, data.slot - grabSlotOffset.current, session.durationMin)
     return { roomId: data.roomId, startSlot }
   }
 
+  /** Persist a placement (or the lack of one), skipping no-op drops. */
+  function commit(session: SpikeSession, target: { roomId: string; startSlot: number } | null) {
+    const roomId = target?.roomId ?? null
+    const startMin = target ? slotToMin(grid, target.startSlot) : null
+    if ((session.roomId ?? null) === roomId && (session.startMin ?? null) === startMin) return
+
+    const wire = agenda?.sessions.find((s) => s.id === session.id)
+    // A session already placed on another day keeps that day when it moves.
+    const onDay = timestampDay(wire?.starts_at) ?? day
+
+    const patch: SchedulePatch =
+      target && startMin !== null
+        ? {
+            room_id: roomId,
+            starts_at: buildTimestamp(onDay, startMin),
+            ends_at: buildTimestamp(onDay, startMin + session.durationMin),
+          }
+        : { room_id: null, starts_at: null, ends_at: null }
+
+    move.mutate({ id: session.id, patch })
+  }
+
   function handleDragStart(event: DragStartEvent) {
-    const session = sessions.find((s) => s.id === event.active.id)
+    const session = byId.get(String(event.active.id))
     setActiveId(session?.id ?? null)
     setPreview(null)
     lastTargetKey.current = null
@@ -809,7 +1038,7 @@ export function Agenda() {
     const y = activatorClientY(event.activatorEvent)
     if (session && isScheduled(session) && node && y != null) {
       const offset = Math.floor((y - node.getBoundingClientRect().top) / SLOT_PX)
-      grabSlotOffset.current = Math.min(Math.max(offset, 0), durationSlots(session) - 1)
+      grabSlotOffset.current = Math.min(Math.max(offset, 0), slotsFor(grid, session.durationMin) - 1)
     } else {
       grabSlotOffset.current = 0
     }
@@ -817,12 +1046,12 @@ export function Agenda() {
 
   /**
    * dnd-kit fires this only when the hovered droppable changes, not on every
-   * pointer move — so the cost here is one O(n) delta per ~24px of travel, and
+   * pointer move — so the cost here is one O(n) delta per row of travel, and
    * the guard below collapses the cases where two different cells resolve to
    * the same placement.
    */
   function handleDragOver(event: DragOverEvent) {
-    const session = sessions.find((s) => s.id === event.active.id)
+    const session = byId.get(String(event.active.id))
     if (!session) return
 
     const target = resolveTarget(session, event.over?.data.current as DropData | undefined)
@@ -842,13 +1071,13 @@ export function Agenda() {
     const candidate: SpikeSession = {
       ...session,
       roomId: target.roomId,
-      startMin: slotToMinutes(target.startSlot),
+      startMin: slotToMin(grid, target.startSlot),
     }
     setPreview({
       roomId: target.roomId,
       startSlot: target.startSlot,
-      slots: durationSlots(session),
-      conflicts: conflictsForSession(candidate, sessions, LABELS),
+      slots: slotsFor(grid, session.durationMin),
+      conflicts: conflictsForSession(candidate, sessions, labels),
     })
   }
 
@@ -860,175 +1089,249 @@ export function Agenda() {
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    const session = sessions.find((s) => s.id === event.active.id)
+    const session = byId.get(String(event.active.id))
     const data = event.over?.data.current as DropData | undefined
 
     if (session && data?.type === 'unscheduled') {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === session.id ? { ...s, roomId: null, startMin: null } : s))
-      )
+      commit(session, null)
     } else if (session) {
       const target = resolveTarget(session, data)
-      if (target) {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === session.id
-              ? { ...s, roomId: target.roomId, startMin: slotToMinutes(target.startSlot) }
-              : s
-          )
-        )
-      }
+      if (target) commit(session, target)
     }
     endDrag()
   }
 
-  const hours = Array.from({ length: SLOT_COUNT / 4 + 1 }, (_, i) => DAY_START_MIN + i * 60)
+  const hours = useMemo(() => {
+    const count = Math.floor((grid.dayEndMin - grid.dayStartMin) / 60)
+    return Array.from({ length: count + 1 }, (_, i) => grid.dayStartMin + i * 60)
+  }, [grid])
 
-  return (
-    <DndContext
-      sensors={sensors}
-      // The grid is a non-overlapping lattice, so "which cell is the pointer
-      // in" is both the cheapest and the most predictable answer. Rect-based
-      // strategies fight the absolutely-positioned cards.
-      collisionDetection={pointerWithin}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-      onDragCancel={endDrag}
-    >
-      <div className="px-4 py-6 md:px-8">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-              <CalendarDays className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Agenda</h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Drag sessions onto the grid. Conflicts are flagged while you drag, before you drop.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-muted-foreground sm:inline tabular-nums">
-              {scheduledCount} scheduled · {unscheduled.length} unscheduled
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setSessions(seedSessions())
-                endDrag()
-              }}
-            >
-              <RotateCcw className="h-4 w-4" />
-              Reset
-            </Button>
-          </div>
-        </header>
+  const error = eventsQuery.error ?? agendaQuery.error
+  const isLoading = eventsQuery.isPending || (Boolean(eventId) && agendaQuery.isPending)
+  const eventName = agenda?.event?.name ?? eventsQuery.data?.[0]?.name
 
-        <ViewTabs value={view} onChange={setView} conflictCount={conflicts.length} />
+  /** One card frame for every state that isn't the grid. */
+  const panel = (children: React.ReactNode) => (
+    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      {children}
+    </div>
+  )
 
-        {view === 'list' && <ListView sessions={sessions} conflictedIds={conflictedIds} />}
-
-        {view === 'conflicts' && (
-          <ConflictsView
-            conflicts={conflicts}
-            sessions={sessions}
-            conflictedIds={conflictedIds}
-            titles={titles}
-          />
+  let body: React.ReactNode = null
+  if (error) {
+    body = panel(
+      <EmptyState
+        icon={<AlertCircle className="h-6 w-6 text-destructive" />}
+        title="Couldn't load the agenda"
+        description={error.message}
+        action={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              eventsQuery.refetch()
+              agendaQuery.refetch()
+            }}
+          >
+            Try again
+          </Button>
+        }
+      />
+    )
+  } else if (isLoading) {
+    body = panel(
+      <div className="space-y-3 p-4">
+        <Skeleton className="h-9 w-full" />
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-14 w-full" />
+        ))}
+      </div>
+    )
+  } else if (!eventId) {
+    body = panel(
+      <EmptyState
+        icon={<CalendarDays className="h-6 w-6 text-muted-foreground" />}
+        title="No events yet"
+        description="Create an event first, then its accepted sessions will show up here."
+      />
+    )
+  } else if (sessions.length === 0) {
+    body = panel(
+      <EmptyState
+        icon={<CalendarDays className="h-6 w-6 text-muted-foreground" />}
+        title="Nothing to schedule"
+        description="No accepted sessions yet — accept submissions to build the agenda"
+      />
+    )
+  } else if (view === 'list') {
+    body = <ListView sessions={sessions} conflictedIds={conflictedIds} rooms={roomNames} />
+  } else if (view === 'conflicts') {
+    body = (
+      <ConflictsView
+        conflicts={conflicts}
+        sessions={sessions}
+        conflictedIds={conflictedIds}
+        titles={titles}
+      />
+    )
+  } else {
+    body = (
+      <>
+        {view === 'day' && (
+          <ViewNote>
+            Day view spans every room for the event day — drag to reschedule, exactly like Rooms.
+          </ViewNote>
+        )}
+        {view === 'week' && (
+          <ViewNote>
+            Week view rolls up to the room grid for now — drag sessions the same way you do in Rooms.
+          </ViewNote>
         )}
 
-        {(view === 'rooms' || view === 'day' || view === 'week') && (
-          <>
-            {view === 'day' && (
-              <ViewNote>
-                Day view spans every room for the event day — drag to reschedule, exactly like Rooms.
-              </ViewNote>
-            )}
-            {view === 'week' && (
-              <ViewNote>
-                Week view rolls up to the room grid for now — drag sessions the same way you do in Rooms.
-              </ViewNote>
-            )}
+        <div className="mt-4">
+          <ConflictsPanel conflicts={conflicts} titles={titles} />
+        </div>
 
-            <div className="mt-4">
-              <ConflictsPanel conflicts={conflicts} titles={titles} />
-            </div>
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
+            <UnscheduledPanel
+              sessions={unscheduled}
+              conflictedIds={conflictedIds}
+              active={activeId !== null}
+            />
+            <p className="mt-2 px-1 text-xs text-muted-foreground">
+              {grid.slotMinutes}-minute slots, {formatMinutes(grid.dayStartMin)}–
+              {formatMinutes(grid.dayEndMin)}. Drop a scheduled card back here to unschedule it.
+            </p>
+          </div>
 
-            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
-                <UnscheduledPanel
-                  sessions={unscheduled}
-                  conflictedIds={conflictedIds}
-                  active={activeId !== null}
-                />
-                <p className="mt-2 px-1 text-xs text-muted-foreground">
-                  15-minute slots, 09:00–17:00. Drop a scheduled card back here to unschedule it.
-                </p>
-              </div>
-
-              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+            {rooms.length === 0 ? (
+              <EmptyState
+                icon={<Columns3 className="h-6 w-6 text-muted-foreground" />}
+                title="No rooms yet"
+                description="Add rooms in Settings and they become the columns of this grid."
+              />
+            ) : (
+              <>
                 {/* Room header. Sticks to the top of the app shell's scroll area so
                     the column you are dropping into stays labelled. */}
                 <div className="sticky top-0 z-30 flex border-b border-border bg-card">
                   <div className="w-14 shrink-0 border-r border-border" />
-                  {ROOMS.map((room) => (
+                  {rooms.map((room) => (
                     <div key={room.id} className="min-w-0 flex-1 border-l border-border px-3 py-2 first:border-l-0">
                       <div className="truncate text-sm font-semibold text-foreground">{room.name}</div>
                       <div className="text-xs text-muted-foreground tabular-nums">
-                        Capacity {room.capacity}
+                        {room.capacity == null ? 'Capacity —' : `Capacity ${room.capacity}`}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {/* py-3 gives the 09:00 and 17:00 gutter labels room to sit centred
+                {/* py-3 gives the first and last gutter labels room to sit centred
                     on the day's first and last line instead of being clipped. */}
                 <div className="flex py-3">
                   {/* Time gutter — a label on every hour boundary. */}
-                  <div className="relative w-14 shrink-0 border-r border-border" style={{ height: GRID_HEIGHT }}>
+                  <div
+                    className="relative w-14 shrink-0 border-r border-border"
+                    style={{ height: grid.slotCount * SLOT_PX }}
+                  >
                     {hours.map((minutes) => (
                       <div
                         key={minutes}
                         className="absolute right-2 -translate-y-1/2 text-2xs font-medium tabular-nums text-muted-foreground"
-                        style={{ top: ((minutes - DAY_START_MIN) / SLOT_MINUTES) * SLOT_PX }}
+                        style={{ top: ((minutes - grid.dayStartMin) / grid.slotMinutes) * SLOT_PX }}
                       >
                         {formatMinutes(minutes)}
                       </div>
                     ))}
                   </div>
 
-                  {ROOMS.map((room) => (
+                  {rooms.map((room) => (
                     <RoomColumn
                       key={room.id}
                       room={room}
                       sessions={sessions}
                       conflictedIds={conflictedIds}
                       preview={preview}
+                      grid={grid}
                     />
                   ))}
                 </div>
+              </>
+            )}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <SpeakersContext.Provider value={speakers}>
+      <DndContext
+        sensors={sensors}
+        // The grid is a non-overlapping lattice, so "which cell is the pointer
+        // in" is both the cheapest and the most predictable answer. Rect-based
+        // strategies fight the absolutely-positioned cards.
+        collisionDetection={pointerWithin}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={endDrag}
+      >
+        <div className="px-4 py-6 md:px-8">
+          <header className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                <CalendarDays className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">Agenda</h1>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Drag sessions onto the grid{eventName ? ` for ${eventName}` : ''}. Conflicts are
+                  flagged while you drag, before you drop.
+                </p>
               </div>
             </div>
-          </>
-        )}
-      </div>
+            <div className="flex items-center gap-3">
+              <span className="hidden text-sm text-muted-foreground sm:inline tabular-nums">
+                {scheduledCount} scheduled · {unscheduled.length} unscheduled
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!eventId || agendaQuery.isFetching}
+                onClick={() => {
+                  agendaQuery.refetch()
+                  conflictsQuery.refetch()
+                  endDrag()
+                }}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+          </header>
 
-      {/* Drag preview. dropAnimation is off: the card is already re-rendered at
-          its new slot, so animating the overlay back onto it only adds lag. */}
-      <DragOverlay modifiers={[restrictToWindowEdges]} dropAnimation={null} zIndex={100}>
-        {activeSession ? (
-          <SessionCard
-            session={activeSession}
-            dense={activeSession.durationMin <= 30}
-            dragging
-            conflicted={(preview?.conflicts.length ?? 0) > 0}
-            className="cursor-grabbing"
-          />
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+          <ViewTabs value={view} onChange={setView} conflictCount={conflicts.length} />
+
+          {body}
+        </div>
+
+        {/* Drag preview. dropAnimation is off: the card is already re-rendered at
+            its new slot, so animating the overlay back onto it only adds lag. */}
+        <DragOverlay modifiers={[restrictToWindowEdges]} dropAnimation={null} zIndex={100}>
+          {activeSession ? (
+            <SessionCard
+              session={activeSession}
+              dense={activeSession.durationMin <= 30}
+              dragging
+              conflicted={(preview?.conflicts.length ?? 0) > 0}
+              className="cursor-grabbing"
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </SpeakersContext.Provider>
   )
 }

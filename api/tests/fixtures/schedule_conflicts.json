@@ -1,0 +1,235 @@
+{
+  "_comment": [
+    "One canonical conflict suite, consumed by BOTH implementations:",
+    "  api/tests/test_scheduling.py      -> services/scheduling.detect_conflicts",
+    "  web/tests/scheduleParity.test.ts  -> src/lib/schedule.ts detectConflicts",
+    "The browser detects conflicts live during a drag and the server is the",
+    "authority on load; the two only stay interchangeable while both pass this.",
+    "Times are integer minutes, so a case can cross a day boundary (1980 = the",
+    "next day at 09:00) without any timezone maths."
+  ],
+  "labels": {
+    "speakers": {
+      "ada": "Ada Lovelace",
+      "grace": "Grace Hopper",
+      "alan": "Alan Turing"
+    },
+    "rooms": {
+      "room-a": "Main Hall",
+      "room-b": "Workshop Room"
+    }
+  },
+  "cases": [
+    {
+      "name": "two sessions overlapping in one room",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": [] },
+        { "id": "b", "room_id": "room-a", "start_min": 570, "duration_min": 30, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Main Hall is double-booked at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "a session fully contained inside another",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 120, "speaker_ids": [] },
+        { "id": "b", "room_id": "room-a", "start_min": 585, "duration_min": 30, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Main Hall is double-booked at 09:45"
+        }
+      ]
+    },
+    {
+      "name": "the same time in different rooms is fine",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": [] },
+        { "id": "b", "room_id": "room-b", "start_min": 540, "duration_min": 60, "speaker_ids": [] }
+      ],
+      "expected": []
+    },
+    {
+      "name": "back-to-back is clean — intervals are half-open",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 30, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-a", "start_min": 570, "duration_min": 45, "speaker_ids": ["ada"] }
+      ],
+      "expected": []
+    },
+    {
+      "name": "one speaker in two rooms at once",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-b", "start_min": 570, "duration_min": 30, "speaker_ids": ["ada"] }
+      ],
+      "expected": [
+        {
+          "type": "speaker_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Ada Lovelace is in two rooms at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "same room and a shared speaker are two separate problems",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-a", "start_min": 570, "duration_min": 30, "speaker_ids": ["ada"] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Main Hall is double-booked at 09:30"
+        },
+        {
+          "type": "speaker_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Ada Lovelace is booked twice at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "two shared speakers are two conflicts, in the first session's order",
+      "sessions": [
+        {
+          "id": "a",
+          "room_id": "room-a",
+          "start_min": 540,
+          "duration_min": 60,
+          "speaker_ids": ["ada", "grace"]
+        },
+        {
+          "id": "b",
+          "room_id": "room-b",
+          "start_min": 570,
+          "duration_min": 30,
+          "speaker_ids": ["grace", "ada"]
+        }
+      ],
+      "expected": [
+        {
+          "type": "speaker_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Ada Lovelace is in two rooms at 09:30"
+        },
+        {
+          "type": "speaker_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Grace Hopper is in two rooms at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "an unshared speaker is not a conflict",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-b", "start_min": 570, "duration_min": 30, "speaker_ids": ["alan"] }
+      ],
+      "expected": []
+    },
+    {
+      "name": "the pair is ordered by start, whatever the input order",
+      "sessions": [
+        { "id": "late", "room_id": "room-a", "start_min": 570, "duration_min": 30, "speaker_ids": [] },
+        { "id": "early", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["early", "late"],
+          "detail": "Main Hall is double-booked at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "identical starts fall back to the id for a stable pair",
+      "sessions": [
+        { "id": "zulu", "room_id": "room-a", "start_min": 540, "duration_min": 30, "speaker_ids": [] },
+        { "id": "alpha", "room_id": "room-a", "start_min": 540, "duration_min": 30, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["alpha", "zulu"],
+          "detail": "Main Hall is double-booked at 09:00"
+        }
+      ]
+    },
+    {
+      "name": "three overlapping sessions produce every pair",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": [] },
+        { "id": "b", "room_id": "room-a", "start_min": 555, "duration_min": 60, "speaker_ids": [] },
+        { "id": "c", "room_id": "room-a", "start_min": 570, "duration_min": 60, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Main Hall is double-booked at 09:15"
+        },
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "c"],
+          "detail": "Main Hall is double-booked at 09:30"
+        },
+        {
+          "type": "room_overlap",
+          "session_ids": ["b", "c"],
+          "detail": "Main Hall is double-booked at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "the same room on two different days never collides",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-a", "start_min": 1980, "duration_min": 60, "speaker_ids": ["ada"] }
+      ],
+      "expected": []
+    },
+    {
+      "name": "a conflict on the second day still reads as a wall clock",
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 1980, "duration_min": 60, "speaker_ids": [] },
+        { "id": "b", "room_id": "room-a", "start_min": 2010, "duration_min": 30, "speaker_ids": [] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "Main Hall is double-booked at 09:30"
+        }
+      ]
+    },
+    {
+      "name": "without labels the detail falls back to raw ids",
+      "labels": null,
+      "sessions": [
+        { "id": "a", "room_id": "room-a", "start_min": 540, "duration_min": 60, "speaker_ids": ["ada"] },
+        { "id": "b", "room_id": "room-a", "start_min": 570, "duration_min": 30, "speaker_ids": ["ada"] }
+      ],
+      "expected": [
+        {
+          "type": "room_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "room-a is double-booked at 09:30"
+        },
+        {
+          "type": "speaker_overlap",
+          "session_ids": ["a", "b"],
+          "detail": "ada is booked twice at 09:30"
+        }
+      ]
+    }
+  ]
+}

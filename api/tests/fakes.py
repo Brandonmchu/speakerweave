@@ -20,12 +20,17 @@ from typing import Any
 # missing here would silently talk to the real client.
 PATCH_TARGET_MODULES = (
     "routes.admin_routes",
+    "routes.dashboard_routes",
     "routes.field_routes",
     "routes.form_admin_routes",
+    "routes.portal_admin_routes",
     "routes.public_routes",
+    "routes.schedule_routes",
     "routes.taxonomy_routes",
     "services.forms",
+    "services.magic_links",
     "services.org_scope",
+    "services.portal",
     "services.slugs",
 )
 
@@ -67,6 +72,14 @@ class FakeQuery:
         self.filters.append(("eq", key, value))
         return self
 
+    def is_(self, key, value):
+        self.filters.append(("is", key, value))
+        return self
+
+    def gt(self, key, value):
+        self.filters.append(("gt", key, value))
+        return self
+
     def in_(self, key, values):
         self.filters.append(("in", key, list(values)))
         return self
@@ -103,6 +116,10 @@ class FakeQuery:
     def _matches(self, row: dict) -> bool:
         for kind, key, value in self.filters:
             if kind == "eq" and row.get(key) != value:
+                return False
+            if kind == "is" and value == "null" and row.get(key) is not None:
+                return False
+            if kind == "gt" and (row.get(key) is None or row.get(key) <= value):
                 return False
             if kind == "in" and row.get(key) not in value:
                 return False
@@ -173,11 +190,36 @@ class FakeRpc:
         return FakeResult(self.value)
 
 
+class FakeStorageBucket:
+    """`supabase.storage.from_(bucket)` — records uploads, hands back a URL."""
+
+    def __init__(self, bucket: str, uploads: dict[str, dict[str, bytes]]):
+        self.bucket = bucket
+        self.uploads = uploads
+
+    def upload(self, path: str, file: bytes, file_options: dict | None = None) -> dict:
+        self.uploads.setdefault(self.bucket, {})[path] = file
+        return {"path": path}
+
+    def get_public_url(self, path: str) -> str:
+        return f"https://storage.test/{self.bucket}/{path}"
+
+
+class FakeStorage:
+    def __init__(self) -> None:
+        # {bucket: {path: bytes}}
+        self.uploads: dict[str, dict[str, bytes]] = {}
+
+    def from_(self, bucket: str) -> FakeStorageBucket:
+        return FakeStorageBucket(bucket, self.uploads)
+
+
 class FakeSupabase:
     def __init__(self, store: dict[str, list[dict]] | None = None):
         self.store: dict[str, list[dict]] = store if store is not None else {}
         self.log: list[dict] = []
         self.rpc_calls: list[tuple[str, dict]] = []
+        self.storage = FakeStorage()
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self.store, name, self.log)

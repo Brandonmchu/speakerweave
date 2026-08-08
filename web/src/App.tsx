@@ -6,13 +6,18 @@ import { CLERK_ENABLED, ClerkRequireAuth, SignInPage, SignUpPage } from '@/auth/
 import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
 import { ComingSoon } from '@/pages/ComingSoon'
+import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
+import { Evaluation } from '@/pages/Evaluation'
 import { FormEditor } from '@/pages/FormEditor'
 import { Forms } from '@/pages/Forms'
 import { Inbox } from '@/pages/Inbox'
 import { Onboarding } from '@/pages/Onboarding'
+import { Portal } from '@/pages/Portal'
 import { PublicForm } from '@/pages/PublicForm'
+import { Review } from '@/pages/Review'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { Speakers } from '@/pages/Speakers'
 import { Toaster } from '@/ui/toaster'
 
 /**
@@ -44,6 +49,11 @@ export default function App() {
         {/* Public, unauthenticated surfaces. */}
         <Route path="/dev-login" element={<DevLogin />} />
         <Route path="/submit/:slug" element={<PublicForm />} />
+        {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
+        <Route path="/portal/:token" element={<Portal />} />
+        <Route path="/portal" element={<Portal />} />
+        <Route path="/review/:token" element={<Review />} />
+        <Route path="/review" element={<Review />} />
         {CLERK_ENABLED && (
           <>
             <Route path="/sign-in/*" element={<SignInPage />} />
@@ -61,12 +71,12 @@ export default function App() {
         >
           <Route index element={<Navigate to="/submissions" replace />} />
           <Route path="/submissions" element={<Inbox />} />
-          <Route path="/dashboard" element={<ComingSoon title="Dashboard" />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/forms" element={<Forms />} />
           <Route path="/forms/:formId" element={<FormEditor />} />
-          <Route path="/evaluation" element={<ComingSoon title="Evaluation" />} />
+          <Route path="/evaluation" element={<Evaluation />} />
           <Route path="/agenda" element={<Agenda />} />
-          <Route path="/speakers" element={<ComingSoon title="Speakers" />} />
+          <Route path="/speakers" element={<Speakers />} />
           <Route path="/comms" element={<ComingSoon title="Comms" />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* First run: no event yet. Forms/Settings redirect here. */}

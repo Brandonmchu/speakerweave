@@ -8,11 +8,18 @@ from app.core.logging_config import get_logger, setup_logging
 from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
 from routes.admin_routes import router as admin_router
+from routes.dashboard_routes import router as dashboard_router
+from routes.evaluation_routes import router as evaluation_router
 from routes.field_routes import router as field_router
 from routes.form_admin_routes import router as form_admin_router
 from routes.health_routes import router as health_router
 from routes.ics_routes import router as ics_router
+from routes.portal_admin_routes import router as portal_admin_router
+from routes.portal_routes import router as portal_router
+from routes.portal_session_routes import router as portal_session_router
 from routes.public_routes import router as public_router
+from routes.review_routes import router as review_router
+from routes.schedule_routes import router as schedule_router
 from routes.taxonomy_routes import router as taxonomy_router
 from security.rate_limiting import limiter, rate_limit_exceeded_handler
 
@@ -46,11 +53,18 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(public_router)
+app.include_router(portal_session_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
 app.include_router(taxonomy_router)
 app.include_router(form_admin_router)
 app.include_router(field_router)
+app.include_router(schedule_router)
+app.include_router(dashboard_router)
+app.include_router(evaluation_router)
+app.include_router(review_router)
+app.include_router(portal_router)
+app.include_router(portal_admin_router)
 
 
 if __name__ == "__main__":
