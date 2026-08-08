@@ -102,7 +102,7 @@ async def _ensure_org_exists(org_id: str) -> None:
             "ensure_org_exists",
         )
         _ORG_SEEN[org_id] = now
-    except Exception:  # noqa: BLE001 — an org-row race must never fail auth
+    except Exception:
         logger.warning("auth: org upsert failed org_id=%s", org_id, exc_info=True)
 
 
