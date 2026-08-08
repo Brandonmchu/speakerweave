@@ -562,10 +562,16 @@ def _summary(session_id: str, method: str, results: list[dict], *, dry_run: bool
 
 
 async def build_ics_for_uid(uid: str) -> str:
-    """Regenerate the current REQUEST invite for a ledger UID (public download).
+    """Regenerate the invite for a ledger UID (public download).
 
     Regenerated from live session data rather than stored bytes: whoever opens
     the link gets today's time and room, not whatever was mailed last week.
+
+    The ledger is authoritative on METHOD, though: once an invite has been
+    cancelled (last_method == 'CANCEL'), the download must stay a CANCEL —
+    re-deriving a REQUEST from live data would silently resurrect a dead hold on
+    the attendee's calendar. A cancellation is matched on UID + SEQUENCE, so a
+    session that has since been unscheduled can still hand back its CANCEL.
     """
     invite = first(
         await db(
@@ -583,7 +589,11 @@ async def build_ics_for_uid(uid: str) -> str:
     org_id = invite["org_id"]
     context = await _load_context(invite["session_id"], org_id)
     session, event, room = context["session"], context["event"], context["room"]
-    if not _parse_ts(session.get("starts_at")) or not _parse_ts(session.get("ends_at")):
+
+    is_cancel = invite.get("last_method") == METHOD_CANCEL
+    if not is_cancel and (
+        not _parse_ts(session.get("starts_at")) or not _parse_ts(session.get("ends_at"))
+    ):
         raise SessionNotScheduled("Session is not scheduled")
 
     contact = first(
@@ -601,7 +611,7 @@ async def build_ics_for_uid(uid: str) -> str:
         raise InviteTargetNotFound("Invite contact not found")
 
     return _render_ics(
-        method=METHOD_REQUEST,
+        method=METHOD_CANCEL if is_cancel else METHOD_REQUEST,
         uid=uid,
         sequence=int(invite.get("sequence") or 0),
         session=session,

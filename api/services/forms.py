@@ -12,10 +12,41 @@ from __future__ import annotations
 
 import logging
 
+import bleach
+
 from services.supabase_helpers import db, rows
 from supabase_client import supabase
 
 logger = logging.getLogger(__name__)
+
+# welcome_html / confirmation_html are organizer-authored rich text rendered on
+# the public form via dangerouslySetInnerHTML. A stored `<img onerror=…>` would
+# be a stored XSS against every speaker who opens the CFP, so the server is the
+# authoritative sanitizer (the client repeats a subset as defense in depth).
+_ALLOWED_TAGS = [
+    "p", "br", "strong", "em", "b", "i", "u",
+    "ul", "ol", "li", "a", "h2", "h3", "blockquote",
+]
+_ALLOWED_ATTRIBUTES = {"a": ["href", "title"]}
+_ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
+
+
+def sanitize_html(value: str | None) -> str:
+    """Strip stored rich text down to a tight formatting allowlist.
+
+    Everything outside the allowlist — scripts, event handlers, images, styles,
+    unknown protocols — is removed rather than escaped, so the output is safe to
+    inject into the DOM. Empty/None collapses to "".
+    """
+    if not value:
+        return ""
+    return bleach.clean(
+        value,
+        tags=_ALLOWED_TAGS,
+        attributes=_ALLOWED_ATTRIBUTES,
+        protocols=_ALLOWED_PROTOCOLS,
+        strip=True,
+    )
 
 
 async def load_form_layout(form_id: str, org_id: str) -> list[dict]:

@@ -18,6 +18,7 @@ import {
   visibleAnswers,
   type RuleStates,
 } from '@/lib/rules'
+import { stripUnsafeHtml } from '@/lib/sanitize'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
 import { Input } from '@/ui/input'
@@ -190,7 +191,7 @@ export function PublicForm() {
           {form.confirmation_html && (
             <div
               className="rich-text mt-6 max-w-lg text-left"
-              dangerouslySetInnerHTML={{ __html: form.confirmation_html }}
+              dangerouslySetInnerHTML={{ __html: stripUnsafeHtml(form.confirmation_html) }}
             />
           )}
         </div>
@@ -216,7 +217,10 @@ export function PublicForm() {
     <PublicShell eyebrow={form.event_name ?? undefined}>
       <h1 className="text-3xl font-semibold tracking-tight text-foreground">{form.name}</h1>
       {form.welcome_html && (
-        <div className="rich-text mt-4" dangerouslySetInnerHTML={{ __html: form.welcome_html }} />
+        <div
+          className="rich-text mt-4"
+          dangerouslySetInnerHTML={{ __html: stripUnsafeHtml(form.welcome_html) }}
+        />
       )}
 
       <form onSubmit={handleSubmit} noValidate className="mt-8 space-y-8">

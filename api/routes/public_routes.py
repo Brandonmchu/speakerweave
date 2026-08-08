@@ -16,13 +16,24 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, EmailStr, Field
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
-from services.forms import load_form_layout, load_question_rules, to_public_field
+from services.forms import (
+    load_form_layout,
+    load_question_rules,
+    sanitize_html,
+    to_public_field,
+)
 from services.question_rules import validate_submission
-from services.supabase_helpers import db, first
+from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
 
 router = APIRouter(prefix="/public", tags=["public"])
 logger = logging.getLogger(__name__)
+
+# Guardrails on a public, unauthenticated write. Answers are keyed by field id
+# and must be scalar: a nested object/array is not a form answer, and an
+# unbounded string is a cheap way to fill the sessions table.
+MAX_ANSWER_KEYS = 100
+MAX_ANSWER_STR_LEN = 10000
 
 
 class SubmissionRequest(BaseModel):
@@ -32,6 +43,41 @@ class SubmissionRequest(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)
     title: str = Field(..., min_length=1, max_length=300)
     description: str = Field(default="", max_length=10000)
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    """An aware datetime from an ISO string, or None. Naive input is read UTC."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _clean_answers(raw: dict[str, Any], field_ids: set[str]) -> dict[str, Any]:
+    """Validate a raw answer map, then drop everything not a current field id.
+
+    The renderer only ever posts answers to fields it showed, but this endpoint
+    is public and cannot trust that. We reject an answer set that is oversized,
+    holds a non-scalar value, or carries an over-long string; then we whitelist
+    to the form's own field ids so a hand-rolled POST can't stuff arbitrary keys
+    into form_answers. (Hidden-field answers are dropped later, after rules.)
+    """
+    if len(raw) > MAX_ANSWER_KEYS:
+        raise HTTPException(status_code=400, detail="Too many answers submitted.")
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if value is not None and not isinstance(value, (str, bool, int, float)):
+            raise HTTPException(
+                status_code=400, detail="Answers must be text, numbers, or true/false."
+            )
+        if isinstance(value, str) and len(value) > MAX_ANSWER_STR_LEN:
+            raise HTTPException(status_code=400, detail="An answer is too long.")
+        if key in field_ids:
+            cleaned[key] = value
+    return cleaned
 
 
 async def _get_form_by_slug(slug: str) -> dict:
@@ -68,14 +114,21 @@ async def get_public_form(request: Request, slug: str):
     )
     event = first(event_res)
 
+    # Defense in depth: sanitize on the way out too, so a row written before the
+    # server-side sanitizer existed (or by some other path) can't fire in a
+    # speaker's browser via dangerouslySetInnerHTML.
+    settings = dict(form.get("settings") or {})
+    if settings.get("confirmation_html"):
+        settings["confirmation_html"] = sanitize_html(settings["confirmation_html"])
+
     return {
         "form": {
             "id": form["id"],
             "slug": form["slug"],
             "name": form["name"],
             "kind": form.get("kind"),
-            "welcome_html": form.get("welcome_html") or "",
-            "settings": form.get("settings") or {},
+            "welcome_html": sanitize_html(form.get("welcome_html")),
+            "settings": settings,
         },
         "event": event,
         "fields": await _public_fields(form),
@@ -95,6 +148,7 @@ async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest
         return (
             supabase.table("contacts")
             .select("*")
+            .eq("org_id", org_id)
             .eq("event_id", event_id)
             .eq("email", email)
             .limit(1)
@@ -102,7 +156,7 @@ async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest
         )
 
     existing = first(await db(_select, "public_contact_lookup"))
-    if existing:
+    if existing and existing.get("org_id") == org_id:
         # Fill blanks only — never clobber an organizer-curated name.
         patch = {}
         if payload.first_name and not existing.get("first_name"):
@@ -145,7 +199,7 @@ async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest
         logger.info("public: lost contact insert race event_id=%s", event_id)
 
     raced = first(await db(_select, "public_contact_relookup"))
-    if not raced:
+    if not raced or raced.get("org_id") != org_id:
         raise HTTPException(status_code=500, detail="Could not create contact")
     return raced
 
@@ -156,17 +210,50 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     """Public CFP submission -> contact + pending session + submitter participant."""
     form = await _get_form_by_slug(slug)
     org_id, event_id = form["org_id"], form["event_id"]
+    settings = form.get("settings") or {}
+
+    # A closed CFP stops accepting server-side, not just in the browser: the
+    # public GET may be cached, and a hand-rolled POST ignores the UI entirely.
+    close_at = _parse_iso(settings.get("close_at"))
+    if close_at is not None and close_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=403, detail="This call for papers is closed.")
+
+    # Whitelist the answer set to the form's own fields before it touches rule
+    # evaluation, and reject an oversized/non-scalar payload outright.
+    fields = await _public_fields(form)
+    field_ids = {field["id"] for field in fields}
+    answers_in = _clean_answers(payload.answers, field_ids)
 
     # Re-run the renderer's own validation server-side, rules included: the
     # browser is not a trusted validator, and a hidden branch's leftover answers
     # must not be stored as if the speaker had given them.
-    fields = await _public_fields(form)
     rules = await load_question_rules(form["id"], org_id)
-    answers, problem = validate_submission(fields, rules, payload.answers)
+    answers, problem = validate_submission(fields, rules, answers_in)
     if problem:
         raise HTTPException(status_code=400, detail=problem)
 
     contact = await _upsert_contact(org_id, event_id, payload)
+
+    # Per-submitter cap on this form. Best-effort by design: the count-then-check
+    # is not transactional, so two concurrent submissions can both pass and land
+    # one over the limit. That is an acceptable slack for a CFP guardrail; a hard
+    # cap would need a DB constraint or a serializable transaction.
+    limit = settings.get("submission_limit")
+    if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
+        prior = rows(
+            await db(
+                lambda: supabase.table("sessions")
+                .select("id, status")
+                .eq("org_id", org_id)
+                .eq("source_form_id", form["id"])
+                .eq("submitter_contact_id", contact["id"])
+                .execute(),
+                "public_submission_limit_count",
+            )
+        )
+        live = [row for row in prior if row.get("status") != "withdrawn"]
+        if len(live) >= limit:
+            raise HTTPException(status_code=403, detail="Submission limit reached.")
 
     # friendly_id_raw comes from a DB counter (migration 001): atomic upsert,
     # no read-modify-write race. sessions.friendly_id is GENERATED from it.

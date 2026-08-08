@@ -49,6 +49,21 @@ export const RULE_OPS: readonly RuleOp[] = [
 ]
 export const RULE_ACTIONS: readonly RuleAction[] = ['show', 'hide', 'require']
 
+/**
+ * Operators that compare against an operand. `empty`/`not_empty` are unary — a
+ * valued op with a missing operand is a half-built rule and must never match
+ * (the Python evaluator gates the same set).
+ */
+const VALUED_OPS: ReadonlySet<string> = new Set([
+  'eq',
+  'neq',
+  'contains',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+])
+
 /** Anything a form field can hold, on the wire or in renderer state. */
 export type AnswerValue = string | number | boolean | string[] | null | undefined
 
@@ -204,6 +219,9 @@ function numericCompare(
 export function evaluateCondition(condition: RuleCondition, answers: AnswerMap): boolean {
   if (!condition || typeof condition !== 'object') return false
   const answer = answers[condition.field]
+  // A valued operator with no operand can't be a real comparison — fail closed,
+  // in lockstep with the Python evaluator.
+  if (VALUED_OPS.has(condition.op) && isNullish(condition.value)) return false
   switch (condition.op) {
     case 'eq':
       return looseEquals(answer, condition.value)

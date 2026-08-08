@@ -336,6 +336,20 @@ def test_put_fields_rejects_an_out_of_range_page(client, auth_headers, form_db):
 
 
 def test_put_rules_replaces_and_normalizes(client, auth_headers, form_db):
+    # A rule may only target/reference fields placed on the form, so put F_PRIOR
+    # on it before writing a rule against it.
+    form_db.seed(
+        "form_fields",
+        {
+            "id": "ff3",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_PRIOR,
+            "page": 1,
+            "order": 2,
+            "required": False,
+        },
+    )
     form_db.seed(
         "question_rules",
         {
@@ -441,6 +455,139 @@ def test_put_rules_on_a_foreign_form_404s(client, auth_headers, form_db):
         json={"rules": [{"target_field_id": F_PRIOR, "logic": SHOW_PRIOR}]},
     )
     assert response.status_code == 404
+
+
+# ── HTML sanitization (stored XSS) ─────────────────────────────────────────
+
+XSS_HTML = '<p>Hello</p><img src=x onerror=alert(1)><script>alert(2)</script>'
+
+
+def test_create_form_sanitizes_welcome_and_confirmation_html(client, auth_headers, seeded_db):
+    response = client.post(
+        f"/api/events/{TEST_EVENT_ID}/forms",
+        headers=auth_headers,
+        json={
+            "name": "CFP",
+            "welcome_html": XSS_HTML,
+            "settings": {"confirmation_html": XSS_HTML, "submission_limit": 2},
+        },
+    )
+
+    assert response.status_code == 201
+    form = response.json()["form"]
+    assert "onerror" not in form["welcome_html"]
+    assert "<script" not in form["welcome_html"]
+    assert "<p>Hello</p>" in form["welcome_html"]
+    assert "onerror" not in form["settings"]["confirmation_html"]
+    assert "<script" not in form["settings"]["confirmation_html"]
+    # non-html settings survive untouched
+    assert form["settings"]["submission_limit"] == 2
+
+
+def test_patch_form_sanitizes_welcome_and_confirmation_html(client, auth_headers, form_db):
+    response = client.patch(
+        f"/api/forms/{FORM_ID}",
+        headers=auth_headers,
+        json={"welcome_html": XSS_HTML, "settings": {"confirmation_html": XSS_HTML}},
+    )
+
+    assert response.status_code == 200
+    form = response.json()["form"]
+    assert "onerror" not in form["welcome_html"] and "<script" not in form["welcome_html"]
+    assert "onerror" not in form["settings"]["confirmation_html"]
+    assert form_db.rows("forms")[0]["welcome_html"] == form["welcome_html"]
+
+
+# ── field/rule cross-event integrity + orphan cleanup ──────────────────────
+
+
+def test_put_fields_accepts_an_org_global_field(client, auth_headers, form_db):
+    """event_id is null => the field belongs to every event, this form included."""
+    form_db.seed(
+        "fields",
+        {
+            "id": "global-field",
+            "org_id": TEST_ORG_ID,
+            "event_id": None,
+            "scope": "session",
+            "public_name": "Anything",
+            "field_type": "text",
+        },
+    )
+    response = client.put(
+        f"/api/forms/{FORM_ID}/fields",
+        headers=auth_headers,
+        json={"fields": [{"field_id": "global-field", "page": 1, "order": 0}]},
+    )
+    assert response.status_code == 200
+    assert [f["field_id"] for f in response.json()["fields"]] == ["global-field"]
+
+
+def test_put_fields_rejects_a_field_from_another_event(client, auth_headers, form_db):
+    """Same org, different event, not org-global — must not cross events."""
+    form_db.seed(
+        "fields",
+        {
+            "id": "other-event-field",
+            "org_id": TEST_ORG_ID,
+            "event_id": OTHER_EVENT_ID,
+            "scope": "session",
+            "public_name": "Theirs",
+            "field_type": "text",
+        },
+    )
+    response = client.put(
+        f"/api/forms/{FORM_ID}/fields",
+        headers=auth_headers,
+        json={"fields": [{"field_id": "other-event-field", "page": 1, "order": 0}]},
+    )
+    assert response.status_code == 400
+    assert "another event" in response.json()["detail"]
+    assert len(form_db.rows("form_fields")) == 2  # nothing destroyed on the way to 400
+
+
+def test_put_rules_rejects_a_field_not_on_the_form(client, auth_headers, form_db):
+    """F_PRIOR exists in the library on this event but is not placed on the form."""
+    response = client.put(
+        f"/api/forms/{FORM_ID}/rules",
+        headers=auth_headers,
+        json={"rules": [{"target_field_id": F_PRIOR, "logic": SHOW_PRIOR}]},
+    )
+    assert response.status_code == 400
+    assert "not on this form" in response.json()["detail"]
+    assert form_db.rows("question_rules") == []
+
+
+def test_put_fields_cleans_up_rules_that_reference_a_removed_field(client, auth_headers, form_db):
+    form_db.seed(
+        "question_rules",
+        # orphaned: targets F_ABSTRACT, which the replace below removes
+        {
+            "id": "r-orphan",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "target_field_id": F_ABSTRACT,
+            "logic": {"when": [{"field": F_SPOKEN, "op": "eq", "value": True}], "action": "hide"},
+        },
+        # survives: only references F_SPOKEN, which stays on the form
+        {
+            "id": "r-keep",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "target_field_id": F_SPOKEN,
+            "logic": {"when": [], "action": "require"},
+        },
+    )
+
+    response = client.put(
+        f"/api/forms/{FORM_ID}/fields",
+        headers=auth_headers,
+        json={"fields": [{"field_id": F_SPOKEN, "page": 1, "order": 0}]},
+    )
+
+    assert response.status_code == 200
+    remaining = [r["id"] for r in form_db.rows("question_rules")]
+    assert remaining == ["r-keep"]
 
 
 # ── slug helpers ───────────────────────────────────────────────────────────

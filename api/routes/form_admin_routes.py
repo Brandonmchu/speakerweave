@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import get_current_user_and_org
-from services.forms import load_form_layout, load_question_rules
+from services.forms import load_form_layout, load_question_rules, sanitize_html
 from services.org_scope import fetch_event, fetch_scoped
 from services.question_rules import RuleValidationError, validate_logic
 from services.slugs import slugify, unique_slug
@@ -64,11 +64,22 @@ class QuestionRulesReplaceRequest(BaseModel):
     rules: list[QuestionRuleInput] = Field(default_factory=list)
 
 
-async def _verify_fields_exist(field_ids: list[str], org_id: str) -> None:
-    """Every referenced field must belong to this org.
+def _sanitize_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
+    """A copy of a form's settings with confirmation_html sanitized in place."""
+    cleaned = dict(settings or {})
+    if "confirmation_html" in cleaned:
+        cleaned["confirmation_html"] = sanitize_html(cleaned.get("confirmation_html"))
+    return cleaned
+
+
+async def _verify_fields_exist(field_ids: list[str], org_id: str, event_id: str) -> None:
+    """Every referenced field must belong to this org AND this form's event.
 
     Without this the FK raises a 500 on a legitimate mistake — and a field id
-    from another org would otherwise be a way to probe for its existence.
+    from another org would otherwise be a way to probe for its existence. A
+    field scoped to a different event (event_id neither null nor this form's)
+    is rejected too: answers key off field ids, and a cross-event field would
+    let one event's questions leak onto another's form.
     """
     unique_ids = list(dict.fromkeys(field_ids))
     if not unique_ids:
@@ -76,19 +87,54 @@ async def _verify_fields_exist(field_ids: list[str], org_id: str) -> None:
     known = rows(
         await db(
             lambda: supabase.table("fields")
-            .select("id")
+            .select("id, event_id")
             .in_("id", unique_ids)
             .eq("org_id", org_id)
             .execute(),
             "form_field_ids_check",
         )
     )
-    missing = set(unique_ids) - {row["id"] for row in known}
+    by_id = {row["id"]: row for row in known}
+    missing = set(unique_ids) - set(by_id)
     if missing:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown field id(s): {', '.join(sorted(missing))}",
         )
+    # org-global fields (event_id is null) belong to every event; anything else
+    # must match this form's event.
+    wrong_event = sorted(
+        fid for fid in unique_ids if by_id[fid].get("event_id") not in (None, event_id)
+    )
+    if wrong_event:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Field(s) belong to another event: {', '.join(wrong_event)}",
+        )
+
+
+async def _form_field_ids(form_id: str, org_id: str) -> set[str]:
+    """The set of field ids currently placed on a form (its form_fields rows)."""
+    placed = rows(
+        await db(
+            lambda: supabase.table("form_fields")
+            .select("field_id")
+            .eq("form_id", form_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "form_field_set",
+        )
+    )
+    return {row["field_id"] for row in placed}
+
+
+def _rule_field_ids(target_field_id: str, logic: dict) -> set[str]:
+    """Every field a rule touches: its target plus each condition's field."""
+    referenced = {target_field_id}
+    for condition in logic.get("when") or []:
+        if isinstance(condition, dict) and condition.get("field"):
+            referenced.add(str(condition["field"]))
+    return referenced
 
 
 # ── forms ──────────────────────────────────────────────────────────────────
@@ -148,8 +194,8 @@ async def create_form(
         "event_id": event_id,
         "name": payload.name.strip(),
         "slug": slug,
-        "welcome_html": payload.welcome_html or "",
-        "settings": payload.settings or {},
+        "welcome_html": sanitize_html(payload.welcome_html or ""),
+        "settings": _sanitize_settings(payload.settings),
     }
     created = first(
         await db(lambda: supabase.table("forms").insert(record).execute(), "create_form")
@@ -181,7 +227,11 @@ async def update_form(
     await fetch_scoped("forms", form_id, org_id, "Form", columns="id, org_id")
 
     provided = payload.model_dump(exclude_unset=True)
-    patch = {key: provided[key] for key in ("welcome_html", "settings") if key in provided}
+    patch: dict[str, Any] = {}
+    if "welcome_html" in provided:
+        patch["welcome_html"] = sanitize_html(provided["welcome_html"])
+    if "settings" in provided:
+        patch["settings"] = _sanitize_settings(provided["settings"])
     if payload.name is not None:
         patch["name"] = payload.name.strip()
     if not patch:
@@ -215,7 +265,7 @@ async def replace_form_fields(
 ):
     """Full replace of a form's field layout: rows absent from the body go."""
     _user_id, org_id = auth
-    await fetch_scoped("forms", form_id, org_id, "Form", columns="id, org_id")
+    form = await fetch_scoped("forms", form_id, org_id, "Form", columns="id, org_id, event_id")
 
     incoming = payload.fields
     field_ids = [entry.field_id for entry in incoming]
@@ -227,7 +277,7 @@ async def replace_form_fields(
             status_code=400,
             detail=f"A field can only appear once on a form: {', '.join(sorted(duplicates))}",
         )
-    await _verify_fields_exist(field_ids, org_id)
+    await _verify_fields_exist(field_ids, org_id, form["event_id"])
 
     existing = rows(
         await db(
@@ -273,6 +323,35 @@ async def replace_form_fields(
             "replace_form_fields_upsert",
         )
 
+    # A rule that pointed at a field just removed from the form is now dead
+    # logic: it can never fire and would confuse the builder. Drop any rule
+    # whose target or condition fields are no longer on the form.
+    keep = set(field_ids)
+    orphan_ids = [
+        rule["id"]
+        for rule in rows(
+            await db(
+                lambda: supabase.table("question_rules")
+                .select("id, target_field_id, logic")
+                .eq("form_id", form_id)
+                .eq("org_id", org_id)
+                .execute(),
+                "replace_form_fields_rules_lookup",
+            )
+        )
+        if _rule_field_ids(rule.get("target_field_id"), rule.get("logic") or {}) - keep
+    ]
+    if orphan_ids:
+        await db(
+            lambda: supabase.table("question_rules")
+            .delete()
+            .eq("form_id", form_id)
+            .eq("org_id", org_id)
+            .in_("id", orphan_ids)
+            .execute(),
+            "replace_form_fields_rules_cleanup",
+        )
+
     return {"fields": await load_form_layout(form_id, org_id)}
 
 
@@ -287,13 +366,28 @@ async def replace_question_rules(
 ):
     """Full replace of a form's conditional logic."""
     _user_id, org_id = auth
-    await fetch_scoped("forms", form_id, org_id, "Form", columns="id, org_id")
+    form = await fetch_scoped("forms", form_id, org_id, "Form", columns="id, org_id, event_id")
 
     try:
         normalized = [validate_logic(rule.logic) for rule in payload.rules]
     except RuleValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    await _verify_fields_exist([rule.target_field_id for rule in payload.rules], org_id)
+
+    # Every field a rule names — its target and each condition — must exist in
+    # this org/event (existence + scope) AND actually be placed on this form: a
+    # rule keyed off a field the speaker never sees is logic that can't fire.
+    referenced: set[str] = set()
+    for rule, logic in zip(payload.rules, normalized, strict=True):
+        referenced |= _rule_field_ids(rule.target_field_id, logic)
+    await _verify_fields_exist(sorted(referenced), org_id, form["event_id"])
+
+    on_form = await _form_field_ids(form_id, org_id)
+    not_on_form = sorted(referenced - on_form)
+    if not_on_form:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Rule references field(s) not on this form: {', '.join(not_on_form)}",
+        )
 
     await db(
         lambda: supabase.table("question_rules")

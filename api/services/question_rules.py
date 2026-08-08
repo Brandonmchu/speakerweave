@@ -29,6 +29,7 @@ Everything here is pure: no I/O, no DB, no request context.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 OPS: tuple[str, ...] = (
@@ -41,6 +42,12 @@ OPS: tuple[str, ...] = (
     "lte",
     "empty",
     "not_empty",
+)
+# Operators that compare against an operand. `empty`/`not_empty` are unary — a
+# valued op with no operand is a half-built rule and must never match (the TS
+# mirror gates the same set).
+VALUED_OPS: frozenset[str] = frozenset(
+    ("eq", "neq", "contains", "gt", "gte", "lt", "lte")
 )
 ACTIONS: tuple[str, ...] = ("show", "hide", "require")
 MATCHES: tuple[str, ...] = ("all", "any")
@@ -102,17 +109,24 @@ def _to_bool(value: Any) -> bool | None:
 
 def _to_float(value: Any) -> float | None:
     """Numeric reading of a value, or None. Booleans are deliberately excluded:
-    `gt` against a checkbox is a builder mistake, not a comparison."""
+    `gt` against a checkbox is a builder mistake, not a comparison.
+
+    Non-finite results (inf/-inf/nan, e.g. the string "Infinity") are rejected:
+    a comparison against infinity is never a real form answer, and the TS mirror
+    already drops them via Number.isFinite — so both must agree they don't match.
+    """
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
+        num = float(value)
+    elif isinstance(value, str):
         try:
-            return float(value.strip())
+            num = float(value.strip())
         except ValueError:
             return None
-    return None
+    else:
+        return None
+    return num if math.isfinite(num) else None
 
 
 def loose_eq(left: Any, right: Any) -> bool:
@@ -162,6 +176,12 @@ def evaluate_condition(condition: dict, answers: dict[str, Any]) -> bool:
     op = condition.get("op")
     answer = answers.get(condition.get("field"))
     expected = condition.get("value")
+
+    # A valued operator whose operand is missing (None) can't be a real
+    # comparison — Python once coerced None -> "none" and `contains` matched
+    # "None of the above". Fail closed, in lockstep with the TS mirror.
+    if op in VALUED_OPS and expected is None:
+        return False
 
     if op == "eq":
         return loose_eq(answer, expected)

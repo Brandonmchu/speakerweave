@@ -376,3 +376,27 @@ async def test_public_ics_is_regenerated_from_live_session_data(ledger):
 
     assert "SUMMARY:Renamed after the invite went out" in document
     assert "METHOD:REQUEST" in document
+
+
+async def test_public_ics_honours_a_cancelled_invite(ledger):
+    """Once cancelled, the download must stay a CANCEL — not resurrect a hold."""
+    await invites.send_session_invites(SESSION_ID, ORG_ID)
+    await invites.cancel_session_invites(SESSION_ID, ORG_ID)
+
+    document = await invites.build_ics_for_uid(invite_uid(SESSION_ID, SPEAKER_ID))
+
+    assert "METHOD:CANCEL" in document
+    assert "STATUS:CANCELLED" in document
+    assert "SEQUENCE:1" in document  # the stored sequence, honoured
+
+
+async def test_public_ics_cancel_survives_an_unscheduled_session(ledger):
+    """A CANCEL is matched on UID + SEQUENCE, so missing times are fine."""
+    await invites.send_session_invites(SESSION_ID, ORG_ID)
+    await invites.cancel_session_invites(SESSION_ID, ORG_ID)
+    ledger.rows("sessions")[0]["starts_at"] = None
+    ledger.rows("sessions")[0]["ends_at"] = None
+
+    document = await invites.build_ics_for_uid(invite_uid(SESSION_ID, SPEAKER_ID))
+    assert "METHOD:CANCEL" in document
+    assert "STATUS:CANCELLED" in document

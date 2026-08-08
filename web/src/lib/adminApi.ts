@@ -104,6 +104,9 @@ export interface FormSummary {
   id: string
   slug: string
   name: string
+  /** The event this form belongs to — sources the field library (one event's
+   * fields, plus org-global ones), never events[0]. */
+  event_id?: string | null
   kind?: string | null
   welcome_html?: string | null
   settings?: FormSettings | null

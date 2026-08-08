@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import TEST_EVENT_ID, TEST_ORG_ID
+from tests.conftest import OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
 
 FORM_ID = "66666666-6666-6666-6666-666666666601"
 SLUG = "call-for-speakers"
@@ -265,3 +265,139 @@ def test_field_library_required_flag_still_counts(client, public_db):
     response = client.post(f"/public/forms/{SLUG}/submissions", json=submission(answers={}))
     assert response.status_code == 400
     assert response.json()["detail"] == '"Abstract" is required'
+
+
+# ── GET response sanitization (defense in depth) ───────────────────────────
+
+
+def test_public_get_sanitizes_stored_html(client, public_db):
+    """A row written before the sanitizer existed must not fire in a browser."""
+    public_db.rows("forms")[0]["welcome_html"] = "<p>Hi</p><img src=x onerror=alert(1)>"
+    public_db.rows("forms")[0]["settings"] = {
+        "confirmation_html": "<script>steal()</script><p>Thanks</p>"
+    }
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert "onerror" not in body["form"]["welcome_html"]
+    assert "<p>Hi</p>" in body["form"]["welcome_html"]
+    assert "<script" not in body["form"]["settings"]["confirmation_html"]
+    assert "<p>Thanks</p>" in body["form"]["settings"]["confirmation_html"]
+
+
+# ── answer whitelisting + payload guards ───────────────────────────────────
+
+
+def test_unknown_answer_key_is_dropped(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", "not_a_field": "junk"}),
+    )
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0]["form_answers"] == {F_ABSTRACT: "A tour."}
+
+
+def test_oversized_answer_value_is_rejected(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "x" * 10001}),
+    )
+    assert response.status_code == 400
+    assert public_db.rows("sessions") == []
+
+
+def test_nested_answer_value_is_rejected(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_SPOKEN: {"nested": 1}}),
+    )
+    assert response.status_code == 400
+    assert public_db.rows("sessions") == []
+
+
+# ── contact lookup is org-scoped ───────────────────────────────────────────
+
+
+def test_contact_lookup_ignores_a_foreign_org_row(client, public_db):
+    """A contact with the same (event, email) but another org must not be reused."""
+    public_db.seed(
+        "contacts",
+        {
+            "id": "foreign-contact",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "email": "ada@example.com",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+        },
+    )
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+    used = next(c for c in public_db.rows("contacts") if c["id"] == session["submitter_contact_id"])
+    assert used["org_id"] == TEST_ORG_ID
+    assert used["id"] != "foreign-contact"
+
+
+# ── close_at + submission_limit enforced server-side ───────────────────────
+
+
+def test_submission_is_rejected_after_close_at(client, public_db):
+    public_db.rows("forms")[0]["settings"] = {"close_at": "2020-01-01T00:00:00+00:00"}
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "This call for papers is closed."
+    assert public_db.rows("sessions") == []
+
+
+def test_a_future_close_at_still_accepts(client, public_db):
+    public_db.rows("forms")[0]["settings"] = {"close_at": "2099-01-01T00:00:00+00:00"}
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+    assert response.status_code == 201
+
+
+def test_submission_limit_is_enforced(client, public_db):
+    public_db.rows("forms")[0]["settings"] = {"submission_limit": 1}
+
+    first_resp = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+    assert first_resp.status_code == 201
+
+    second = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "Another tour."}),
+    )
+    assert second.status_code == 403
+    assert second.json()["detail"] == "Submission limit reached."
+    assert len(public_db.rows("sessions")) == 1
+
+
+def test_a_withdrawn_submission_does_not_count_against_the_limit(client, public_db):
+    public_db.rows("forms")[0]["settings"] = {"submission_limit": 1}
+
+    client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+    public_db.rows("sessions")[0]["status"] = "withdrawn"
+
+    again = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A comeback."}),
+    )
+    assert again.status_code == 201
+    assert len(public_db.rows("sessions")) == 2

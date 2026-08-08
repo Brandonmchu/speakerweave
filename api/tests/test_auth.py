@@ -63,6 +63,19 @@ def test_token_without_org_rejected(auth_client):
     assert response.status_code == 401
 
 
+def test_token_without_exp_rejected(auth_client):
+    """A token that never expires is not a Supabase-shaped token — fail closed."""
+    import jwt
+
+    from tests.conftest import TEST_JWT_SECRET
+
+    # A well-formed token in every way except that it omits `exp`.
+    claims = {"sub": TEST_USER_ID, "aud": "authenticated", "org_id": TEST_ORG_ID}
+    token = jwt.encode(claims, TEST_JWT_SECRET, algorithm="HS256")
+    response = auth_client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+
+
 def test_verify_org_access_allows_matching_org():
     row = {"id": "abc", "org_id": TEST_ORG_ID}
     assert verify_org_access(row, TEST_ORG_ID) is row

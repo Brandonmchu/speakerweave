@@ -38,7 +38,13 @@ def verify_token(token: str) -> dict | None:
             audience="authenticated",
             # 30s leeway: client clocks drift, and a freshly minted token whose
             # iat is a hair in the future must not 401.
-            options={"verify_exp": True, "verify_iat": True},
+            # `require` fails closed on a token that omits exp (would never
+            # expire) or sub (no user to scope to) rather than trusting it.
+            options={
+                "verify_exp": True,
+                "verify_iat": True,
+                "require": ["exp", "sub"],
+            },
             leeway=30,
         )
     except jwt.ExpiredSignatureError:

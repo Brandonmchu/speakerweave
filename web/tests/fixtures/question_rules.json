@@ -534,6 +534,70 @@
     "expected": { "mystery": { "visible": false, "required_override": null } }
   },
   {
+    "name": "contains with a missing operand never matches",
+    "rules": [
+      {
+        "id": "r-contains-missing",
+        "target_field_id": "safety_note",
+        "logic": {
+          "when": [{ "field": "audience", "op": "contains" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "audience": "None of the above" },
+    "expected": { "safety_note": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "eq with a missing operand does not match an unanswered field",
+    "rules": [
+      {
+        "id": "r-eq-missing",
+        "target_field_id": "detail",
+        "logic": {
+          "when": [{ "field": "choice", "op": "eq" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": {},
+    "expected": { "detail": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "a non-finite numeric operand never matches",
+    "rules": [
+      {
+        "id": "r-gt-infinite-operand",
+        "target_field_id": "capacity_warning",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gt", "value": "Infinity" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "attendees": "500" },
+    "expected": { "capacity_warning": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "a non-finite numeric answer never matches",
+    "rules": [
+      {
+        "id": "r-gt-infinite-answer",
+        "target_field_id": "capacity_warning",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gt", "value": 100 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "attendees": "Infinity" },
+    "expected": { "capacity_warning": { "visible": false, "required_override": null } }
+  },
+  {
     "name": "no rules means no opinions",
     "rules": [],
     "answers": { "spoken_before": true },

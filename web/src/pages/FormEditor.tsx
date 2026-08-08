@@ -17,7 +17,6 @@ import {
   Trash2,
 } from 'lucide-react'
 
-import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import {
   FIELD_TYPES,
   createField,
@@ -77,15 +76,15 @@ import { CopyButton } from '@/pages/Forms'
 /* impossible: either the whole ordering lands or none of it does.            */
 /* -------------------------------------------------------------------------- */
 
-/** Pages 3 and 4 are the two the seeded CFP uses; the rest are free-form. */
+/** Pages 3 and 4 are the two the seeded CFP uses; the rest are free-form.
+ * Capped at 4 to match the DB (form_fields.page CHECK page between 1 and 4). */
 const PAGE_LABELS: Record<number, string> = {
   1: 'Welcome',
   2: 'About you',
   3: 'Your session',
   4: 'Speaker info',
-  5: 'Extras',
 }
-const PAGES = [1, 2, 3, 4, 5]
+const PAGES = [1, 2, 3, 4]
 const DEFAULT_PAGE = 3
 
 function pageLabel(page: number): string {
@@ -238,12 +237,6 @@ export function FormEditor() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabKey>('fields')
 
-  const eventsQuery = useQuery({
-    queryKey: ['events'],
-    queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
-  })
-  const eventId = eventsQuery.data?.[0]?.id
-
   const formQuery = useQuery({
     queryKey: ['form', formId],
     queryFn: () => getForm(formId),
@@ -253,6 +246,9 @@ export function FormEditor() {
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   })
+  // The field library is this FORM's event, not events[0]: a form built on one
+  // event must never offer (or accept) another event's fields.
+  const eventId = formQuery.data?.form.event_id ?? undefined
 
   const [fields, setFields] = useState<DraftField[]>([])
   const [rules, setRules] = useState<DraftRule[]>([])

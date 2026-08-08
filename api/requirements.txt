@@ -4,6 +4,9 @@ python-dotenv
 pydantic[email]
 supabase==2.27.1
 PyJWT
+# HTML sanitizer for organizer-authored rich text (welcome_html /
+# confirmation_html) rendered on the public form via dangerouslySetInnerHTML.
+bleach
 httpx
 python-multipart
 slowapi
