@@ -25,13 +25,24 @@ function notifyTokenChange() {
 }
 
 /**
- * SWAP POINT FOR CLERK.
- *
- * Today: reads the dev token out of localStorage.
- * Later: `const { getToken } = useAuth()` → keep the resolved function in a
- * module-level ref and return `getToken({ template: 'supabase' })` here.
+ * Auth token source. When Clerk is active (VITE_CLERK_PUBLISHABLE_KEY set),
+ * ClerkTokenBridge registers a getter that mints a `supabase`-template JWT;
+ * otherwise we fall back to the dev token in localStorage.
  */
+let clerkTokenGetter: (() => Promise<string | null>) | null = null
+
+export function registerClerkTokenGetter(getter: (() => Promise<string | null>) | null): void {
+  clerkTokenGetter = getter
+}
+
 export async function getToken(): Promise<string | null> {
+  if (clerkTokenGetter) {
+    try {
+      return await clerkTokenGetter()
+    } catch {
+      return null
+    }
+  }
   try {
     return window.localStorage.getItem(TOKEN_STORAGE_KEY)
   } catch {

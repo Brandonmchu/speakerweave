@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { peekToken, subscribeToken } from '@/lib/api'
+import { CLERK_ENABLED, ClerkRequireAuth, SignInPage, SignUpPage } from '@/auth/clerk'
 import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
 import { ComingSoon } from '@/pages/ComingSoon'
@@ -26,6 +27,12 @@ function RequireToken({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** Clerk when configured, dev-token flow otherwise. */
+function RequireAuth({ children }: { children: ReactNode }) {
+  if (CLERK_ENABLED) return <ClerkRequireAuth>{children}</ClerkRequireAuth>
+  return <RequireToken>{children}</RequireToken>
+}
+
 export default function App() {
   return (
     <>
@@ -33,13 +40,19 @@ export default function App() {
         {/* Public, unauthenticated surfaces. */}
         <Route path="/dev-login" element={<DevLogin />} />
         <Route path="/submit/:slug" element={<PublicForm />} />
+        {CLERK_ENABLED && (
+          <>
+            <Route path="/sign-in/*" element={<SignInPage />} />
+            <Route path="/sign-up/*" element={<SignUpPage />} />
+          </>
+        )}
 
         {/* Organizer app. */}
         <Route
           element={
-            <RequireToken>
+            <RequireAuth>
               <AppShell />
-            </RequireToken>
+            </RequireAuth>
           }
         >
           <Route index element={<Navigate to="/submissions" replace />} />

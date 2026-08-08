@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import App from '@/App'
+import { MaybeClerkProvider } from '@/auth/clerk'
 import '@/index.css'
 
 const queryClient = new QueryClient({
@@ -24,9 +25,11 @@ if (!container) throw new Error('#root not found — index.html is out of sync w
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
-      <QueryClientProvider client={queryClient}>
-        <App />
-      </QueryClientProvider>
+      <MaybeClerkProvider>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </MaybeClerkProvider>
     </BrowserRouter>
   </StrictMode>
 )

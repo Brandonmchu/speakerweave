@@ -28,3 +28,8 @@ if (!window.matchMedia) {
 afterEach(() => {
   cleanup()
 })
+
+// Tests exercise the dev-token auth path deterministically — Clerk mode is
+// env-driven and would otherwise flip on whenever a local .env holds a key.
+import { vi } from 'vitest'
+vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', '')
