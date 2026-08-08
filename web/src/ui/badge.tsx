@@ -15,6 +15,8 @@ const badgeVariants = cva(
         destructive: 'border border-transparent bg-destructive/10 text-destructive-strong',
         muted: 'border border-transparent bg-foreground/5 text-muted-foreground',
         outline: 'bg-card border border-border text-foreground',
+        /* Sessionboard's solid dark-slate lifecycle pill ("Open", etc.) */
+        solid: 'border border-transparent bg-status-solid text-status-solid-foreground',
       },
     },
     defaultVariants: {

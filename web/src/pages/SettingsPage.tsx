@@ -217,7 +217,13 @@ function EventCard({ event }: { event: EventSummary }) {
             Used on public pages, calendar invites and every email you send.
           </p>
         </div>
-        <Button size="sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+        {/* Default variant = solid Sessionboard blue. Prominent while there are
+            unsaved changes; the disabled state (clean form) reads as muted. */}
+        <Button
+          className="min-w-[104px]"
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate()}
+        >
           {save.isPending ? 'Saving…' : 'Save'}
         </Button>
       </div>

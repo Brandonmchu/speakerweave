@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, parseISO } from 'date-fns'
-import { AlertCircle, Check, Copy, ExternalLink, FileText, Plus } from 'lucide-react'
+import { AlertCircle, ArrowUpDown, Check, ChevronDown, Copy, ExternalLink, FileText, Plus } from 'lucide-react'
 
 import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import { createForm, listForms, publicFormPath, publicFormUrl, type FormSummary } from '@/lib/adminApi'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import {
@@ -16,26 +17,52 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/ui/dropdown-menu'
 import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { Skeleton } from '@/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
 import { toast } from '@/ui/use-toast'
 
-function formatCloseDate(value?: string | null): string {
-  if (!value) return 'No close date'
-  try {
-    return format(parseISO(value), 'MMM d, yyyy')
-  } catch {
-    return 'No close date'
-  }
-}
+type TabKey = 'all' | 'open' | 'closed'
+type SortKey = 'newest' | 'submissions'
+
+/** The forms-list wire row carries a created_at the typed summary omits — read
+ * it here (never editing adminApi) so the card can show a created date and the
+ * "Newest" sort has something to order by. Optional: absent → gracefully hidden. */
+type FormWithMeta = FormSummary & { created_at?: string | null }
 
 function isClosed(value?: string | null): boolean {
   if (!value) return false
   const t = Date.parse(value)
   return Number.isFinite(t) && t < Date.now()
+}
+
+function formatCreated(value?: string | null): string | null {
+  if (!value) return null
+  try {
+    return `Created ${format(parseISO(value), 'MMM d, yyyy')}`
+  } catch {
+    return null
+  }
+}
+
+/** Trailing segment for the card meta line: "· Closes …" / "· Closed …". */
+function closeMeta(closeAt: string | null, closed: boolean): string {
+  if (!closeAt) return ''
+  try {
+    const d = format(parseISO(closeAt), 'MMM d, yyyy')
+    return closed ? ` · Closed ${d}` : ` · Closes ${d}`
+  } catch {
+    return ''
+  }
 }
 
 /** Copy-to-clipboard that degrades quietly where the API is missing (http, jsdom). */
@@ -101,9 +128,11 @@ export function Forms() {
     return <Navigate to="/onboarding" replace />
   }
 
-  const forms = formsQuery.data ?? []
+  const forms: FormWithMeta[] = formsQuery.data ?? []
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && formsQuery.isPending)
   const error = eventsQuery.error ?? formsQuery.error
+
+  const panelClass = 'mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft'
 
   return (
     <div className="px-4 py-6 md:px-8">
@@ -126,8 +155,8 @@ export function Forms() {
         </Button>
       </header>
 
-      <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
-        {error ? (
+      {error ? (
+        <div className={panelClass}>
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
             title="Couldn't load forms"
@@ -138,9 +167,13 @@ export function Forms() {
               </Button>
             }
           />
-        ) : isLoading ? (
+        </div>
+      ) : isLoading ? (
+        <div className={panelClass}>
           <LoadingRows />
-        ) : forms.length === 0 ? (
+        </div>
+      ) : forms.length === 0 ? (
+        <div className={panelClass}>
           <EmptyState
             icon={<FileText className="h-6 w-6 text-muted-foreground" />}
             title="No forms yet"
@@ -152,24 +185,10 @@ export function Forms() {
               </Button>
             }
           />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[34%]">Form</TableHead>
-                <TableHead>Public link</TableHead>
-                <TableHead className="w-[130px]">Submissions</TableHead>
-                <TableHead className="w-[170px]">Closes</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {forms.map((form) => (
-                <FormRow key={form.id} form={form} />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <FormsList forms={forms} />
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
@@ -215,45 +234,151 @@ export function Forms() {
   )
 }
 
-function FormRow({ form }: { form: FormSummary }) {
-  const closeAt = form.settings?.close_at ?? null
-  const closed = isClosed(closeAt)
+function FormsList({ forms }: { forms: FormWithMeta[] }) {
+  const [tab, setTab] = useState<TabKey>('all')
+  const [sort, setSort] = useState<SortKey>('newest')
+
+  const decorated = forms.map((form) => ({ form, closed: isClosed(form.settings?.close_at ?? null) }))
+  const counts = {
+    all: decorated.length,
+    open: decorated.filter((d) => !d.closed).length,
+    closed: decorated.filter((d) => d.closed).length,
+  }
+
+  const filtered = decorated.filter((d) => (tab === 'all' ? true : tab === 'open' ? !d.closed : d.closed))
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === 'submissions') return (b.form.submission_count ?? 0) - (a.form.submission_count ?? 0)
+    const ta = a.form.created_at ? Date.parse(a.form.created_at) : 0
+    const tb = b.form.created_at ? Date.parse(b.form.created_at) : 0
+    return tb - ta
+  })
 
   return (
-    <TableRow>
-      <TableCell>
-        <Link
-          to={`/forms/${form.id}`}
-          className="font-medium text-foreground transition-colors hover:text-primary"
-        >
-          {form.name || 'Untitled form'}
-        </Link>
-        <div className="mt-0.5 flex items-center gap-2">
-          {form.kind && <span className="text-xs capitalize text-muted-foreground">{form.kind}</span>}
-          {closed && <Badge variant="muted">Closed</Badge>}
+    <div className="mt-6">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+          <TabsList variant="underline" className="w-auto border-b-0">
+            <TabsTrigger value="all">
+              All
+              <TabCount n={counts.all} active={tab === 'all'} />
+            </TabsTrigger>
+            <TabsTrigger value="open">
+              Open
+              <TabCount n={counts.open} active={tab === 'open'} />
+            </TabsTrigger>
+            <TabsTrigger value="closed">
+              Closed
+              <TabCount n={counts.closed} active={tab === 'closed'} />
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex items-center pb-2">
+          <SortMenu value={sort} onChange={setSort} />
         </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1">
-          <a
-            href={publicFormPath(form.slug)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 truncate font-mono text-xs text-primary hover:underline"
-          >
-            {publicFormPath(form.slug)}
-            <ExternalLink className="h-3 w-3 shrink-0" />
-          </a>
-          <CopyButton value={publicFormUrl(form.slug)} />
+      </div>
+
+      {sorted.length === 0 ? (
+        <p className="py-12 text-center text-sm text-muted-foreground">No {tab} forms.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {sorted.map(({ form, closed }) => (
+            <FormCard key={form.id} form={form} closed={closed} />
+          ))}
         </div>
-      </TableCell>
-      <TableCell>
-        <span className="text-sm tabular-nums text-foreground">{form.submission_count ?? 0}</span>
-      </TableCell>
-      <TableCell className="text-sm tabular-nums text-muted-foreground">
-        {formatCloseDate(closeAt)}
-      </TableCell>
-    </TableRow>
+      )}
+    </div>
+  )
+}
+
+function TabCount({ n, active }: { n: number; active: boolean }) {
+  return (
+    <span
+      className={cn(
+        'rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+        active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+      )}
+    >
+      {n}
+    </span>
+  )
+}
+
+function SortMenu({ value, onChange }: { value: SortKey; onChange: (v: SortKey) => void }) {
+  const label = value === 'submissions' ? 'Most submissions' : 'Newest'
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="rounded-full">
+          <ArrowUpDown className="h-4 w-4" />
+          {label}
+          <ChevronDown className="h-4 w-4 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuRadioGroup value={value} onValueChange={(v) => onChange(v as SortKey)}>
+          <DropdownMenuRadioItem value="newest">Newest</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="submissions">Most submissions</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function FormCard({ form, closed }: { form: FormWithMeta; closed: boolean }) {
+  const count = form.submission_count ?? 0
+  const closeAt = form.settings?.close_at ?? null
+  const created = formatCreated(form.created_at)
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 shadow-soft transition-colors hover:border-primary/40">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums text-muted-foreground">
+            {count}
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                to={`/forms/${form.id}`}
+                className="font-medium text-foreground transition-colors hover:text-primary"
+              >
+                {form.name || 'Untitled form'}
+              </Link>
+              <Badge variant="solid" className="rounded-full">
+                {closed ? 'Closed' : 'Open'}
+              </Badge>
+              {form.kind && (
+                <Badge variant="outline" className="rounded-full capitalize">
+                  {form.kind}
+                </Badge>
+              )}
+            </div>
+
+            <div className="mt-1.5 flex items-center gap-1">
+              <a
+                href={publicFormPath(form.slug)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 truncate font-mono text-xs text-primary hover:underline"
+              >
+                {publicFormPath(form.slug)}
+                <ExternalLink className="h-3 w-3 shrink-0" />
+              </a>
+              <CopyButton value={publicFormUrl(form.slug)} />
+            </div>
+
+            <div className="mt-1 text-xs text-muted-foreground">
+              {count} {count === 1 ? 'submission' : 'submissions'}
+              {closeMeta(closeAt, closed)}
+            </div>
+          </div>
+        </div>
+
+        {created && (
+          <div className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{created}</div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react'
 
 import {
   getPublicForm,
@@ -213,8 +213,16 @@ export function PublicForm() {
 
   // --- form ---------------------------------------------------------------
 
+  // Optional per-user cap, surfaced by the public-form adapter in lib/api.ts.
+  const submissionLimit = form.submission_limit ?? null
+
   return (
     <PublicShell eyebrow={form.event_name ?? undefined}>
+      {submissionLimit != null && (
+        <div className="mb-6 rounded-lg border border-border bg-card px-4 py-3 text-center text-sm font-medium text-foreground">
+          Submission Limit: {submissionLimit} submission{submissionLimit === 1 ? '' : 's'} per user
+        </div>
+      )}
       <h1 className="text-3xl font-semibold tracking-tight text-foreground">{form.name}</h1>
       {form.welcome_html && (
         <div
@@ -310,8 +318,9 @@ export function PublicForm() {
           <p className="text-xs text-muted-foreground">
             Fields marked <span className="form-required-asterisk">*</span> are required.
           </p>
-          <Button type="submit" size="lg" disabled={submit.isPending}>
+          <Button type="submit" size="lg" className="rounded-full px-7" disabled={submit.isPending}>
             {submit.isPending ? 'Submitting…' : 'Submit proposal'}
+            {!submit.isPending && <ArrowRight className="h-4 w-4" />}
           </Button>
         </div>
       </form>
@@ -323,8 +332,8 @@ export function PublicForm() {
 
 function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: string }) {
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto w-full max-w-2xl px-5 py-10 sm:py-16">
+    <div className="min-h-screen bg-[#FBFBFB]">
+      <div className="mx-auto w-full max-w-[920px] px-5 py-10 sm:py-16">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
             d
@@ -337,7 +346,9 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
             </>
           )}
         </div>
-        <div className="rounded-xl border border-border bg-card p-6 shadow-soft sm:p-10">{children}</div>
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-[0_10px_30px_rgba(15,23,42,0.08)] sm:p-10">
+          {children}
+        </div>
         <p className="mt-6 text-center text-xs text-muted-foreground">Powered by dais</p>
       </div>
     </div>

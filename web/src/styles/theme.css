@@ -19,9 +19,12 @@
     --popover-foreground: 222 47% 11%;
 
     /* --- brand -------------------------------------------------------- */
-    --primary: 243 75% 59%; /* indigo-600 #4F46E5 */
-    --primary-strong: 245 58% 51%; /* indigo-700 #4338CA — hover/border */
-    --primary-subtle: 226 100% 97%; /* indigo-50  #EEF2FF — tinted fills */
+    /* Matched to Sessionboard's cornflower blue #4962E2 (measured off their
+       CFP Continue/Next buttons). Theirs leans blue (G>R); the old indigo
+       leaned violet (G<R) — the single most obvious "not Sessionboard" tell. */
+    --primary: 230 72% 59%; /* #4962E2 */
+    --primary-strong: 230 65% 54%; /* #3B54D6 — hover/border */
+    --primary-subtle: 224 100% 96%; /* #E8EEFF — tinted fills */
     --primary-foreground: 0 0% 100%;
 
     /* --- neutrals ----------------------------------------------------- */
@@ -32,7 +35,7 @@
     --placeholder-foreground: 215 20% 65%; /* slate-400 */
     --accent: 210 40% 96%; /* slate-100 — hover fill */
     --accent-foreground: 222 47% 11%;
-    --hover: 226 100% 97%; /* indigo-50 — row/card highlight */
+    --hover: 224 100% 96%; /* blue-tint — row/card highlight */
     --border: 214 32% 91%; /* slate-200 */
     --input: 213 27% 84%; /* slate-300 — one step darker on inputs */
     --ring: var(--primary);
@@ -47,6 +50,11 @@
     --destructive: 0 72% 51%; /* red-600 */
     --destructive-strong: 0 70% 42%; /* red-700 */
     --destructive-foreground: 0 0% 100%;
+
+    /* Sessionboard's solid dark-slate lifecycle pill (#1E2430), used for
+       "Open"/status badges. Amber Pending / green Accepted / red Declined stay. */
+    --status-solid: 220 23% 15%; /* #1E2430 */
+    --status-solid-foreground: 0 0% 100%;
 
     /* --- sidebar / top chrome ----------------------------------------- */
     /* The admin sidebar is white (like Sessionboard) and separated from the

@@ -79,9 +79,13 @@ export default {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
         },
-        // Transient row/card highlight (hover + selected) — faint indigo so it
+        // Transient row/card highlight (hover + selected) — faint blue so it
         // reads as "interactive" without competing with the primary fill.
         hover: 'hsl(var(--hover))',
+        'status-solid': {
+          DEFAULT: 'hsl(var(--status-solid))',
+          foreground: 'hsl(var(--status-solid-foreground))',
+        },
         popover: {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',

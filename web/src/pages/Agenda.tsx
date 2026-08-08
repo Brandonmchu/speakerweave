@@ -13,7 +13,17 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { restrictToWindowEdges } from '@dnd-kit/modifiers'
-import { AlertTriangle, CalendarDays, CheckCircle2, Inbox, RotateCcw } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarDays,
+  CalendarRange,
+  CheckCircle2,
+  Columns3,
+  Inbox,
+  List,
+  RotateCcw,
+  type LucideIcon,
+} from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import {
@@ -549,6 +559,178 @@ function ConflictsPanel({
 }
 
 /* -------------------------------------------------------------------------- */
+/* View tabs                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Sessionboard-style view switcher. "Rooms" is our drag grid (default); the
+ * others are lighter reads over the same data — no wizard, no second tool.
+ */
+type AgendaView = 'list' | 'day' | 'week' | 'rooms' | 'conflicts'
+
+const VIEW_TABS: { id: AgendaView; label: string; Icon: LucideIcon }[] = [
+  { id: 'list', label: 'List', Icon: List },
+  { id: 'day', label: 'Day', Icon: CalendarDays },
+  { id: 'week', label: 'Week', Icon: CalendarRange },
+  { id: 'rooms', label: 'Rooms', Icon: Columns3 },
+  { id: 'conflicts', label: 'Conflicts', Icon: AlertTriangle },
+]
+
+function ViewTabs({
+  value,
+  onChange,
+  conflictCount,
+}: {
+  value: AgendaView
+  onChange: (view: AgendaView) => void
+  conflictCount: number
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Agenda views"
+      className="mt-5 flex items-center gap-1 overflow-x-auto border-b border-border"
+    >
+      {VIEW_TABS.map(({ id, label, Icon }) => {
+        const active = value === id
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            data-testid={`agenda-tab-${id}`}
+            onClick={() => onChange(id)}
+            className={cn(
+              '-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors',
+              active
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+            {id === 'conflicts' && conflictCount > 0 && (
+              <span className="ml-0.5 rounded-full bg-destructive/10 px-1.5 py-0.5 text-2xs font-semibold tabular-nums text-destructive">
+                {conflictCount}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Grey helper strip that tells day/week they are riding on the room grid. */
+function ViewNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+      <CalendarDays className="h-4 w-4 shrink-0" />
+      {children}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* List view                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Every scheduled session, in start-time order — the plainest possible read. */
+function ListView({
+  sessions,
+  conflictedIds,
+}: {
+  sessions: SpikeSession[]
+  conflictedIds: Set<string>
+}) {
+  const scheduled = useMemo(
+    () => sessions.filter(isScheduled).sort((a, b) => a.startMin - b.startMin),
+    [sessions]
+  )
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      {scheduled.length === 0 ? (
+        <p className="px-5 py-12 text-center text-sm text-muted-foreground">
+          Nothing scheduled yet. Switch to the Rooms view to drag sessions onto the grid.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {scheduled.map((session) => {
+            const colors = palette(session.color)
+            const conflicted = conflictedIds.has(session.id)
+            const speakers = session.speakerIds
+              .map((id) => SPEAKERS[id]?.name ?? id)
+              .join(', ')
+            return (
+              <li key={session.id} className="flex items-center gap-4 px-5 py-3">
+                <div className="w-24 shrink-0 text-sm font-medium tabular-nums text-foreground">
+                  {formatRange(session)}
+                </div>
+                <span className={cn('h-9 w-1 shrink-0 rounded-full', colors.bar)} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-foreground">{session.title}</p>
+                    {conflicted && (
+                      <span className="shrink-0 rounded-full bg-destructive/10 px-1.5 py-0.5 text-2xs font-semibold text-destructive">
+                        Conflict
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {LABELS.rooms?.[session.roomId] ?? session.roomId} · {formatDuration(session.durationMin)}
+                    {speakers && ` · ${speakers}`}
+                  </p>
+                </div>
+                <SpeakerChips session={session} className="shrink-0" />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Conflicts view                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** Just the sessions that collide — the conflict banner plus their cards. */
+function ConflictsView({
+  conflicts,
+  sessions,
+  conflictedIds,
+  titles,
+}: {
+  conflicts: Conflict[]
+  sessions: SpikeSession[]
+  conflictedIds: Set<string>
+  titles: Map<string, string>
+}) {
+  const flagged = useMemo(
+    () => sessions.filter((s) => conflictedIds.has(s.id)),
+    [sessions, conflictedIds]
+  )
+
+  return (
+    <div className="mt-4 space-y-4">
+      <ConflictsPanel conflicts={conflicts} titles={titles} />
+      {flagged.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {flagged.map((session) => (
+            <div key={session.id} className="h-16">
+              <SessionCard session={session} conflicted />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 /* Page                                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -578,6 +760,9 @@ export function Agenda() {
   const [sessions, setSessions] = useState<SpikeSession[]>(seedSessions)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
+  // Rooms (the drag grid) is the default read; the other tabs are lighter views
+  // over the same data.
+  const [view, setView] = useState<AgendaView>('rooms')
 
   /**
    * Which slot *within* the dragged card the pointer grabbed. Without it, a
@@ -742,65 +927,93 @@ export function Agenda() {
           </div>
         </header>
 
-        <div className="mt-5">
-          <ConflictsPanel conflicts={conflicts} titles={titles} />
-        </div>
+        <ViewTabs value={view} onChange={setView} conflictCount={conflicts.length} />
 
-        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
-          <div className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
-            <UnscheduledPanel
-              sessions={unscheduled}
-              conflictedIds={conflictedIds}
-              active={activeId !== null}
-            />
-            <p className="mt-2 px-1 text-xs text-muted-foreground">
-              15-minute slots, 09:00–17:00. Drop a scheduled card back here to unschedule it.
-            </p>
-          </div>
+        {view === 'list' && <ListView sessions={sessions} conflictedIds={conflictedIds} />}
 
-          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
-            {/* Room header. Sticks to the top of the app shell's scroll area so
-                the column you are dropping into stays labelled. */}
-            <div className="sticky top-0 z-30 flex border-b border-border bg-card">
-              <div className="w-14 shrink-0 border-r border-border" />
-              {ROOMS.map((room) => (
-                <div key={room.id} className="min-w-0 flex-1 border-l border-border px-3 py-2 first:border-l-0">
-                  <div className="truncate text-sm font-semibold text-foreground">{room.name}</div>
-                  <div className="text-xs text-muted-foreground tabular-nums">
-                    Capacity {room.capacity}
-                  </div>
-                </div>
-              ))}
+        {view === 'conflicts' && (
+          <ConflictsView
+            conflicts={conflicts}
+            sessions={sessions}
+            conflictedIds={conflictedIds}
+            titles={titles}
+          />
+        )}
+
+        {(view === 'rooms' || view === 'day' || view === 'week') && (
+          <>
+            {view === 'day' && (
+              <ViewNote>
+                Day view spans every room for the event day — drag to reschedule, exactly like Rooms.
+              </ViewNote>
+            )}
+            {view === 'week' && (
+              <ViewNote>
+                Week view rolls up to the room grid for now — drag sessions the same way you do in Rooms.
+              </ViewNote>
+            )}
+
+            <div className="mt-4">
+              <ConflictsPanel conflicts={conflicts} titles={titles} />
             </div>
 
-            {/* py-3 gives the 09:00 and 17:00 gutter labels room to sit centred
-                on the day's first and last line instead of being clipped. */}
-            <div className="flex py-3">
-              {/* Time gutter — a label on every hour boundary. */}
-              <div className="relative w-14 shrink-0 border-r border-border" style={{ height: GRID_HEIGHT }}>
-                {hours.map((minutes) => (
-                  <div
-                    key={minutes}
-                    className="absolute right-2 -translate-y-1/2 text-2xs font-medium tabular-nums text-muted-foreground"
-                    style={{ top: ((minutes - DAY_START_MIN) / SLOT_MINUTES) * SLOT_PX }}
-                  >
-                    {formatMinutes(minutes)}
-                  </div>
-                ))}
+            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
+                <UnscheduledPanel
+                  sessions={unscheduled}
+                  conflictedIds={conflictedIds}
+                  active={activeId !== null}
+                />
+                <p className="mt-2 px-1 text-xs text-muted-foreground">
+                  15-minute slots, 09:00–17:00. Drop a scheduled card back here to unschedule it.
+                </p>
               </div>
 
-              {ROOMS.map((room) => (
-                <RoomColumn
-                  key={room.id}
-                  room={room}
-                  sessions={sessions}
-                  conflictedIds={conflictedIds}
-                  preview={preview}
-                />
-              ))}
+              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+                {/* Room header. Sticks to the top of the app shell's scroll area so
+                    the column you are dropping into stays labelled. */}
+                <div className="sticky top-0 z-30 flex border-b border-border bg-card">
+                  <div className="w-14 shrink-0 border-r border-border" />
+                  {ROOMS.map((room) => (
+                    <div key={room.id} className="min-w-0 flex-1 border-l border-border px-3 py-2 first:border-l-0">
+                      <div className="truncate text-sm font-semibold text-foreground">{room.name}</div>
+                      <div className="text-xs text-muted-foreground tabular-nums">
+                        Capacity {room.capacity}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* py-3 gives the 09:00 and 17:00 gutter labels room to sit centred
+                    on the day's first and last line instead of being clipped. */}
+                <div className="flex py-3">
+                  {/* Time gutter — a label on every hour boundary. */}
+                  <div className="relative w-14 shrink-0 border-r border-border" style={{ height: GRID_HEIGHT }}>
+                    {hours.map((minutes) => (
+                      <div
+                        key={minutes}
+                        className="absolute right-2 -translate-y-1/2 text-2xs font-medium tabular-nums text-muted-foreground"
+                        style={{ top: ((minutes - DAY_START_MIN) / SLOT_MINUTES) * SLOT_PX }}
+                      >
+                        {formatMinutes(minutes)}
+                      </div>
+                    ))}
+                  </div>
+
+                  {ROOMS.map((room) => (
+                    <RoomColumn
+                      key={room.id}
+                      room={room}
+                      sessions={sessions}
+                      conflictedIds={conflictedIds}
+                      preview={preview}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* Drag preview. dropAnimation is off: the card is already re-rendered at

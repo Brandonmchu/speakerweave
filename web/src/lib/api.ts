@@ -267,6 +267,7 @@ export interface PublicForm {
   welcome_html?: string | null
   confirmation_html?: string | null
   closed?: boolean
+  submission_limit?: number | null
   fields: PublicFormField[]
   /**
    * Conditional logic, evaluated live in the renderer by lib/rules.ts and again
@@ -310,7 +311,11 @@ interface PublicFormWire {
     slug: string
     name: string
     welcome_html?: string | null
-    settings?: { close_at?: string | null; confirmation_html?: string | null } | null
+    settings?: {
+      close_at?: string | null
+      confirmation_html?: string | null
+      submission_limit?: number | null
+    } | null
   }
   event: { name?: string | null } | null
   fields: Array<{
@@ -345,6 +350,7 @@ export async function getPublicForm(slug: string): Promise<PublicForm> {
     welcome_html: wire.form.welcome_html ?? null,
     confirmation_html: settings.confirmation_html ?? null,
     closed: closeAt !== null && closeAt.getTime() < Date.now(),
+    submission_limit: settings.submission_limit ?? null,
     fields: wire.fields.map((f) => ({
       id: f.id,
       label: f.label,

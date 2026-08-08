@@ -1,7 +1,26 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
-import { AlertCircle, ChevronDown, Inbox as InboxIcon, Layers, Mail } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Columns3,
+  Download,
+  Eye,
+  FileDown,
+  Filter,
+  Inbox as InboxIcon,
+  Layers,
+  Mail,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Upload,
+} from 'lucide-react'
 
 import {
   apiGet,
@@ -19,6 +38,7 @@ import { looseEquals, type AnswerValue } from '@/lib/rules'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
+import { Checkbox } from '@/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog'
 import {
   DropdownMenu,
@@ -28,6 +48,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu'
+import { Input } from '@/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
@@ -43,6 +65,9 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'decline_queue', label: 'Decline Queue' },
   { key: 'declined', label: 'Declined' },
 ]
+
+/** Rows per page in the footer's "Show:" control. */
+const PAGE_SIZES = [10, 25, 50, 100]
 
 const STATUS_META: Record<
   SubmissionStatus,
@@ -103,6 +128,15 @@ function submitterName(submission: Submission): string {
   return contactName(submission.submitter)
 }
 
+/**
+ * We never fetched the form catalog here, so "Source" is derived from whether a
+ * submission carries a form id: a public CFP submission has one, an operator's
+ * manual add does not. Enough to read like Sessionboard's Form/Manual column.
+ */
+function sourceLabel(submission: Submission): string {
+  return submission.source_form_id ? 'Form' : 'Manual'
+}
+
 /** "3 days ago" — the inbox question is freshness, not the exact timestamp. */
 function relativeDate(value?: string | null): string {
   if (!value) return '—'
@@ -139,10 +173,63 @@ function formatAnswer(value: unknown, fieldType?: string): string {
   return text.trim() === '' ? '—' : text
 }
 
+/** Which page numbers to render — windowed with ellipsis once there are many. */
+function pageItems(current: number, count: number): Array<number | 'gap'> {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1)
+  const items: Array<number | 'gap'> = [1]
+  const start = Math.max(2, current - 1)
+  const end = Math.min(count - 1, current + 1)
+  if (start > 2) items.push('gap')
+  for (let p = start; p <= end; p++) items.push(p)
+  if (end < count - 1) items.push('gap')
+  items.push(count)
+  return items
+}
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+/** Export the currently filtered rows — the one Options action that's live. */
+function downloadCsv(rows: Submission[]): void {
+  if (typeof document === 'undefined') return
+  const header = ['ID', 'Title', 'Source', 'Submitter', 'Email', 'Status', 'Submitted']
+  const lines = [header.map(csvCell).join(',')]
+  for (const s of rows) {
+    const submitter = submitterName(s)
+    lines.push(
+      [
+        s.friendly_id ?? '',
+        s.title ?? '',
+        sourceLabel(s),
+        submitter === '—' ? '' : submitter,
+        s.submitter?.email ?? '',
+        statusLabel(s.status),
+        s.submitted_at ?? s.created_at ?? '',
+      ]
+        .map((v) => csvCell(String(v)))
+        .join(',')
+    )
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'submissions.csv'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export function Inbox() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabKey>('all')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -166,10 +253,33 @@ export function Inbox() {
     return (key: TabKey) => (key === 'all' ? submissions.length : (byStatus.get(key) ?? 0))
   }, [submissions])
 
-  const rows = useMemo(
+  const tabRows = useMemo(
     () => (tab === 'all' ? submissions : submissions.filter((s) => s.status === tab)),
     [submissions, tab]
   )
+
+  /** Search is client-side over the already-fetched rows: title + submitter. */
+  const query = search.trim().toLowerCase()
+  const filteredRows = useMemo(() => {
+    if (!query) return tabRows
+    return tabRows.filter((s) => {
+      const haystack = [s.title, submitterName(s), s.submitter?.email]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [tabRows, query])
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
+  const safePage = Math.min(page, pageCount)
+  const pagedRows = useMemo(
+    () => filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filteredRows, safePage, pageSize]
+  )
+
+  const rangeStart = filteredRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1
+  const rangeEnd = Math.min(safePage * pageSize, filteredRows.length)
 
   /** The row that opened the panel — renders instantly while the detail loads. */
   const openSubmission = useMemo(
@@ -229,6 +339,50 @@ export function Inbox() {
 
   const detailSession = detailQuery.data?.session ?? openSubmission
 
+  const showToolbar = Boolean(event) && !error && !isLoading
+
+  const notReady = (feature: string) =>
+    toast({ title: `${feature} is coming soon`, description: 'Wiring this up is on the roadmap.' })
+
+  const changeTab = (next: TabKey) => {
+    setTab(next)
+    setPage(1)
+  }
+
+  const changeSearch = (next: string) => {
+    setSearch(next)
+    setPage(1)
+  }
+
+  const allPageSelected = pagedRows.length > 0 && pagedRows.every((r) => selected.has(r.id))
+  const somePageSelected = pagedRows.some((r) => selected.has(r.id))
+  const headerChecked: boolean | 'indeterminate' = allPageSelected
+    ? true
+    : somePageSelected
+      ? 'indeterminate'
+      : false
+
+  const toggleAllOnPage = () => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (pagedRows.every((r) => next.has(r.id))) {
+        pagedRows.forEach((r) => next.delete(r.id))
+      } else {
+        pagedRows.forEach((r) => next.add(r.id))
+      }
+      return next
+    })
+  }
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -243,13 +397,21 @@ export function Inbox() {
             </p>
           </div>
         </div>
-        <Button variant="secondary" size="sm" disabled>
+        <Button
+          onClick={() =>
+            toast({
+              title: 'Manual add is coming soon',
+              description: 'Share your call-for-papers form to start collecting submissions.',
+            })
+          }
+        >
+          <Plus />
           Add submission
         </Button>
       </header>
 
       <div className="mt-6">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
+        <Tabs value={tab} onValueChange={(v) => changeTab(v as TabKey)}>
           <TabsList variant="underline">
             {TABS.map(({ key, label }) => (
               <TabsTrigger key={key} value={key}>
@@ -267,6 +429,74 @@ export function Inbox() {
           </TabsList>
         </Tabs>
       </div>
+
+      {showToolbar && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => changeSearch(e.target.value)}
+              placeholder="Search all submissions…"
+              aria-label="Search all submissions"
+              className="pl-9"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => notReady('Saved views')}>
+              <Eye />
+              Saved Views
+              <ChevronDown />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => notReady('Column settings')}>
+              <Columns3 />
+              Columns
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => notReady('Sorting')}>
+              <ArrowUpDown />
+              Sort
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => notReady('Filters')}>
+              <Filter />
+              Filter
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <MoreHorizontal />
+                  Options
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Data</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => notReady('Importing sessions')}>
+                  <Upload />
+                  Import sessions
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    downloadCsv(filteredRows)
+                    toast({ title: 'Exported CSV', description: `${filteredRows.length} rows.` })
+                  }}
+                >
+                  <Download />
+                  Export .CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => notReady('XLSX export')}>
+                  <FileDown />
+                  Export .XLSX
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => notReady('File bundle download')}>
+                  <Download />
+                  Download files bundle…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
         {error ? (
@@ -295,22 +525,41 @@ export function Inbox() {
             title="No events yet"
             description="Create an event in the API, then submissions will land here."
           />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<InboxIcon className="h-6 w-6 text-muted-foreground" />}
-            title={tab === 'all' ? 'No submissions yet' : 'Nothing in this queue'}
-            description={
-              tab === 'all'
-                ? 'Share your call-for-papers form and submissions will show up here the moment they arrive.'
-                : 'Move a submission into this queue from the row menu.'
-            }
-          />
+        ) : filteredRows.length === 0 ? (
+          query ? (
+            <EmptyState
+              icon={<Search className="h-6 w-6 text-muted-foreground" />}
+              title="No matches"
+              description={`Nothing here matches “${search.trim()}”. Try a different search.`}
+            />
+          ) : (
+            <EmptyState
+              icon={<InboxIcon className="h-6 w-6 text-muted-foreground" />}
+              title={tab === 'all' ? 'No submissions yet' : 'Nothing in this queue'}
+              description={
+                tab === 'all'
+                  ? 'Share your call-for-papers form and submissions will show up here the moment they arrive.'
+                  : 'Move a submission into this queue from the row menu.'
+              }
+            />
+          )
         ) : (
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[44px] pr-0">
+                  <Checkbox
+                    checked={headerChecked}
+                    onCheckedChange={toggleAllOnPage}
+                    aria-label="Select all submissions on this page"
+                  />
+                </TableHead>
+                <TableHead className="w-[40px] px-0">
+                  <span className="sr-only">Edit</span>
+                </TableHead>
                 <TableHead className="w-[110px]">ID</TableHead>
-                <TableHead className="w-[38%]">Title</TableHead>
+                <TableHead className="w-[100px]">Source</TableHead>
+                <TableHead className="w-[34%]">Title</TableHead>
                 <TableHead>Submitter</TableHead>
                 <TableHead className="w-[150px]">Status</TableHead>
                 <TableHead className="w-[140px]">Submitted</TableHead>
@@ -318,11 +567,13 @@ export function Inbox() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((submission) => (
+              {pagedRows.map((submission) => (
                 <TableRow
                   key={submission.id}
                   className="cursor-pointer"
-                  data-state={openId === submission.id ? 'selected' : undefined}
+                  data-state={
+                    openId === submission.id || selected.has(submission.id) ? 'selected' : undefined
+                  }
                   tabIndex={0}
                   onClick={() => setOpenId(submission.id)}
                   onKeyDown={(e) => {
@@ -332,8 +583,34 @@ export function Inbox() {
                     }
                   }}
                 >
+                  <TableCell
+                    className="pr-0"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={selected.has(submission.id)}
+                      onCheckedChange={() => toggleOne(submission.id)}
+                      aria-label={`Select ${submission.title || 'submission'}`}
+                    />
+                  </TableCell>
+                  {/* Same destination as the row click; present because Sessionboard
+                      surfaces an explicit edit affordance per row. */}
+                  <TableCell className="px-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Edit ${submission.title || 'submission'}`}
+                      onClick={() => setOpenId(submission.id)}
+                    >
+                      <Pencil />
+                    </Button>
+                  </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {submission.friendly_id ?? '—'}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {sourceLabel(submission)}
                   </TableCell>
                   <TableCell>
                     <div className="font-medium text-foreground">{submission.title || 'Untitled'}</div>
@@ -390,10 +667,82 @@ export function Inbox() {
         )}
       </div>
 
-      {rows.length > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {rows.length} of {submissions.length} submissions
-        </p>
+      {!error && !isLoading && filteredRows.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>
+              {rangeStart}–{rangeEnd} of {filteredRows.length} rows
+            </span>
+            {selected.size > 0 && (
+              <span className="text-foreground">· {selected.size} selected</span>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                disabled={safePage <= 1}
+                onClick={() => setPage(safePage - 1)}
+                aria-label="Previous page"
+              >
+                <ChevronLeft />
+              </Button>
+              {pageItems(safePage, pageCount).map((item, i) =>
+                item === 'gap' ? (
+                  <span key={`gap-${i}`} className="px-1.5 text-muted-foreground">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setPage(item)}
+                    aria-current={item === safePage ? 'page' : undefined}
+                    className={cn(
+                      'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-sm tabular-nums transition-colors',
+                      item === safePage
+                        ? 'border-primary-strong bg-primary text-primary-foreground'
+                        : 'border-input bg-card text-foreground hover:bg-accent'
+                    )}
+                  >
+                    {item}
+                  </button>
+                )
+              )}
+              <Button
+                variant="outline"
+                size="icon-sm"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage(safePage + 1)}
+                aria-label="Next page"
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Show:</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(Number(v))
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="h-8 w-[74px]" aria-label="Rows per page">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZES.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
       )}
 
       <Dialog
