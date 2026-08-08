@@ -40,9 +40,12 @@ export function registerClerkTokenGetter(getter: (() => Promise<string | null>) 
 export async function getToken(): Promise<string | null> {
   if (clerkTokenGetter) {
     try {
-      return await clerkTokenGetter()
+      const clerkToken = await clerkTokenGetter()
+      if (clerkToken) return clerkToken
+      // Fall through: a dev/demo token in localStorage lets the one-click demo
+      // work even in a Clerk-enabled build where the user isn't Clerk-signed-in.
     } catch {
-      return null
+      // ignore and fall through to the local token
     }
   }
   try {

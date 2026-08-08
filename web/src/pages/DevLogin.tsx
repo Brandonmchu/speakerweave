@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { KeyRound } from 'lucide-react'
+import { ArrowRight, KeyRound } from 'lucide-react'
 
 import { peekToken, setToken } from '@/lib/api'
+import { fetchDemoToken } from '@/lib/demoApi'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 
 /**
- * Temporary sign-in: paste a locally minted dev JWT.
+ * Temporary sign-in: one-click into the seeded demo workspace, or paste a
+ * locally minted dev JWT for a specific org.
  *
  * This whole page goes away when Clerk lands — the app only ever reads the
  * token through `getToken()` in lib/api.ts.
@@ -17,7 +19,21 @@ export function DevLogin() {
   const navigate = useNavigate()
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [demoLoading, setDemoLoading] = useState(false)
   const hasExistingToken = Boolean(peekToken())
+
+  async function enterDemo() {
+    setError(null)
+    setDemoLoading(true)
+    try {
+      const token = await fetchDemoToken()
+      setToken(token)
+      navigate('/dashboard', { replace: true })
+    } catch {
+      setError("Couldn't start the demo. Give it a moment and try again.")
+      setDemoLoading(false)
+    }
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -41,6 +57,30 @@ export function DevLogin() {
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 shadow-soft">
+          <div className="mb-5">
+            <h1 className="text-lg font-semibold tracking-tight text-foreground">
+              Enter the demo workspace
+            </h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Jump straight into the fully seeded demo org — no token needed.
+            </p>
+            <Button type="button" onClick={enterDemo} disabled={demoLoading} className="mt-3 w-full">
+              {demoLoading ? 'Starting the demo…' : 'Enter the demo workspace'}
+              {!demoLoading && <ArrowRight className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-card px-2 text-xs uppercase tracking-wider text-muted-foreground">
+                or
+              </span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <KeyRound className="h-4 w-4 text-primary" />
             <h1 className="text-lg font-semibold tracking-tight text-foreground">Developer sign-in</h1>

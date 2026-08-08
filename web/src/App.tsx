@@ -7,6 +7,7 @@ import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
 import { Comms } from '@/pages/Comms'
 import { Dashboard } from '@/pages/Dashboard'
+import { DemoLanding } from '@/pages/DemoLanding'
 import { DevLogin } from '@/pages/DevLogin'
 import { Evaluation } from '@/pages/Evaluation'
 import { FormEditor } from '@/pages/FormEditor'
@@ -36,9 +37,10 @@ function RequireToken({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** Clerk when configured, dev-token flow otherwise. */
+/** Clerk when configured, dev-token flow otherwise. A dev/demo token in
+ *  localStorage always wins, so the one-click demo works even under Clerk. */
 function RequireAuth({ children }: { children: ReactNode }) {
-  if (CLERK_ENABLED) return <ClerkRequireAuth>{children}</ClerkRequireAuth>
+  if (CLERK_ENABLED && !peekToken()) return <ClerkRequireAuth>{children}</ClerkRequireAuth>
   return <RequireToken>{children}</RequireToken>
 }
 
@@ -49,6 +51,7 @@ export default function App() {
         {/* Public, unauthenticated surfaces. */}
         <Route path="/dev-login" element={<DevLogin />} />
         <Route path="/submit/:slug" element={<PublicForm />} />
+        <Route path="/demo" element={<DemoLanding />} />
         {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
         <Route path="/portal/:token" element={<Portal />} />
         <Route path="/portal" element={<Portal />} />

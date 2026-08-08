@@ -21,6 +21,7 @@ import {
 
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import {
   DropdownMenu,
@@ -78,6 +79,24 @@ function initialOf(name?: string | null): string {
   return (name?.trim().charAt(0) || 'd').toUpperCase()
 }
 
+/**
+ * True when the current session is the shared demo token (org_id === 'org_dev').
+ * Decodes the JWT payload segment inline — no dependency, best-effort: any
+ * malformed token simply reads as "not a demo session".
+ */
+function isDemoSession(): boolean {
+  try {
+    const token = window.localStorage.getItem('dais.token')
+    const payload = token?.split('.')[1]
+    if (!payload) return false
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+    return (JSON.parse(atob(padded)) as { org_id?: string }).org_id === 'org_dev'
+  } catch {
+    return false
+  }
+}
+
 export function AppShell() {
   const navigate = useNavigate()
 
@@ -88,6 +107,7 @@ export function AppShell() {
   })
   const event = data?.[0]
   const eventInitial = initialOf(event?.name)
+  const isDemo = isDemoSession()
 
   // The shell owns the viewport; public pages keep natural document flow.
   useEffect(() => {
@@ -101,7 +121,8 @@ export function AppShell() {
 
   const signOut = () => {
     clearToken()
-    navigate('/dev-login')
+    // Demo visitors came in through /demo; send them back there, not /dev-login.
+    navigate(isDemo ? '/demo' : '/dev-login')
   }
 
   return (
@@ -195,6 +216,16 @@ export function AppShell() {
           </div>
 
           <div className="ml-auto flex items-center gap-1.5 md:gap-2">
+            {isDemo && (
+              <Badge
+                variant="default"
+                title="You're exploring the shared demo workspace"
+                className="hidden sm:inline-flex"
+              >
+                Demo workspace
+              </Badge>
+            )}
+
             <Button
               variant="outline"
               size="sm"

@@ -10,6 +10,7 @@ from app.core.settings import settings
 from routes.admin_routes import router as admin_router
 from routes.comms_routes import router as comms_router
 from routes.dashboard_routes import router as dashboard_router
+from routes.demo_routes import router as demo_router
 from routes.evaluation_routes import router as evaluation_router
 from routes.field_routes import router as field_router
 from routes.form_admin_routes import router as form_admin_router
@@ -54,6 +55,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(public_router)
+app.include_router(demo_router)
 app.include_router(portal_session_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
