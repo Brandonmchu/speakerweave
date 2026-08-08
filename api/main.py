@@ -8,6 +8,7 @@ from app.core.logging_config import get_logger, setup_logging
 from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
 from routes.admin_routes import router as admin_router
+from routes.comms_routes import router as comms_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.evaluation_routes import router as evaluation_router
 from routes.field_routes import router as field_router
@@ -65,6 +66,7 @@ app.include_router(evaluation_router)
 app.include_router(review_router)
 app.include_router(portal_router)
 app.include_router(portal_admin_router)
+app.include_router(comms_router)
 
 
 if __name__ == "__main__":

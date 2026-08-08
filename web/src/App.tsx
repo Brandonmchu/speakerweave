@@ -5,7 +5,7 @@ import { peekToken, subscribeToken } from '@/lib/api'
 import { CLERK_ENABLED, ClerkRequireAuth, SignInPage, SignUpPage } from '@/auth/clerk'
 import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
-import { ComingSoon } from '@/pages/ComingSoon'
+import { Comms } from '@/pages/Comms'
 import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
 import { Evaluation } from '@/pages/Evaluation'
@@ -77,7 +77,7 @@ export default function App() {
           <Route path="/evaluation" element={<Evaluation />} />
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/speakers" element={<Speakers />} />
-          <Route path="/comms" element={<ComingSoon title="Comms" />} />
+          <Route path="/comms" element={<Comms />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* First run: no event yet. Forms/Settings redirect here. */}
           <Route path="/onboarding" element={<Onboarding />} />
