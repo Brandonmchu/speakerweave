@@ -11,6 +11,13 @@ import {
   type SubmissionInput,
   type SubmissionReceipt,
 } from '@/lib/api'
+import {
+  evaluateRules,
+  isFieldRequired,
+  isFieldVisible,
+  visibleAnswers,
+  type RuleStates,
+} from '@/lib/rules'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
 import { Input } from '@/ui/input'
@@ -59,6 +66,21 @@ export function PublicForm() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null)
 
+  // Conditional logic, re-resolved on every keystroke that changes an answer.
+  // Same evaluator the server runs at submit time (lib/rules.ts ↔
+  // api/services/question_rules.py), so what a speaker sees is what validates.
+  const ruleStates: RuleStates = useMemo(
+    () => evaluateRules(form?.question_rules, answers),
+    [form?.question_rules, answers]
+  )
+
+  // Hidden fields unmount entirely: they are not rendered, not validated, and
+  // their answers never reach the payload.
+  const visibleFields = useMemo(
+    () => fields.filter((field) => isFieldVisible(ruleStates, field.id)),
+    [fields, ruleStates]
+  )
+
   const submit = useMutation({
     mutationFn: (payload: SubmissionInput) => submitPublicForm(slug, payload),
     onSuccess: (data) => setReceipt(data ?? { id: '' }),
@@ -81,9 +103,9 @@ export function PublicForm() {
     else if (!EMAIL_RE.test(email.trim())) next.email = 'Enter a valid email address'
     if (!title.trim()) next.title = 'Required'
 
-    for (const field of fields) {
+    for (const field of visibleFields) {
       const value = answers[field.id]
-      if (field.required && isBlank(value)) {
+      if (isFieldRequired(ruleStates, field.id, Boolean(field.required)) && isBlank(value)) {
         next[field.id] = field.type === 'checkbox' ? 'Please confirm to continue' : 'Required'
         continue
       }
@@ -108,7 +130,10 @@ export function PublicForm() {
       last_name: lastName.trim(),
       email: email.trim(),
       title: title.trim(),
-      answers,
+      // A branch the speaker abandoned leaves no residue: answers to fields a
+      // rule has since hidden are dropped here, exactly as the server drops
+      // them in validate_submission.
+      answers: visibleAnswers(answers, ruleStates),
     })
   }
 
@@ -247,19 +272,30 @@ export function PublicForm() {
               }}
             />
           </Field>
-          {fields.length > 0 && (
-            <>
-              {fields.map((field) => (
-              <FormField
+          {visibleFields.map((field) => {
+            // Rule-targeted fields fade in when a branch opens; fields nobody
+            // conditions on render plainly, so a first paint isn't an animation
+            // of the whole form.
+            const conditional = Boolean(ruleStates[field.id])
+            return (
+              <div
                 key={field.id}
-                field={field}
-                value={answers[field.id]}
-                error={errors[field.id]}
-                onChange={(value) => setAnswer(field.id, value)}
-              />
-              ))}
-            </>
-          )}
+                className={
+                  conditional
+                    ? 'animate-in fade-in-0 slide-in-from-top-1 duration-200 ease-out'
+                    : undefined
+                }
+              >
+                <FormField
+                  field={field}
+                  value={answers[field.id]}
+                  required={isFieldRequired(ruleStates, field.id, Boolean(field.required))}
+                  error={errors[field.id]}
+                  onChange={(value) => setAnswer(field.id, value)}
+                />
+              </div>
+            )
+          })}
         </section>
 
         {submit.error && (
@@ -340,15 +376,19 @@ function Field({
 function FormField({
   field,
   value,
+  required,
   error,
   onChange,
 }: {
   field: PublicFormField
   value: AnswerValue | undefined
+  /** Effective required flag — a matched `require` rule can promote a field. */
+  required?: boolean
   error?: string
   onChange: (value: AnswerValue) => void
 }) {
   const invalid = error ? true : undefined
+  const isRequired = required ?? Boolean(field.required)
 
   if (field.type === 'checkbox') {
     return (
@@ -360,7 +400,7 @@ function FormField({
             onCheckedChange={(checked) => onChange(checked === true)}
             className="mt-0.5"
           />
-          <Label htmlFor={field.id} required={field.required} className="leading-snug">
+          <Label htmlFor={field.id} required={isRequired} className="leading-snug">
             {field.label}
           </Label>
         </div>
@@ -373,7 +413,7 @@ function FormField({
   if (field.type === 'select') {
     const options = normalizeOptions(field.options)
     return (
-      <Field id={field.id} label={field.label} required={field.required} help={field.help_text} error={error}>
+      <Field id={field.id} label={field.label} required={isRequired} help={field.help_text} error={error}>
         <Select value={typeof value === 'string' ? value : ''} onValueChange={onChange}>
           <SelectTrigger id={field.id} aria-invalid={invalid}>
             <SelectValue placeholder={field.placeholder ?? 'Select an option'} />
@@ -392,7 +432,7 @@ function FormField({
 
   if (field.type === 'textarea') {
     return (
-      <Field id={field.id} label={field.label} required={field.required} help={field.help_text} error={error}>
+      <Field id={field.id} label={field.label} required={isRequired} help={field.help_text} error={error}>
         <Textarea
           id={field.id}
           value={typeof value === 'string' ? value : ''}
@@ -406,7 +446,7 @@ function FormField({
 
   // text, email, and anything unrecognized: render as a single-line input.
   return (
-    <Field id={field.id} label={field.label} required={field.required} help={field.help_text} error={error}>
+    <Field id={field.id} label={field.label} required={isRequired} help={field.help_text} error={error}>
       <Input
         id={field.id}
         type={field.type === 'email' ? 'email' : 'text'}

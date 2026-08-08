@@ -1,0 +1,542 @@
+[
+  {
+    "name": "show rule hides its target until it matches",
+    "rules": [
+      {
+        "id": "r-show-prior-talk",
+        "target_field_id": "prior_talk",
+        "logic": {
+          "when": [{ "field": "spoken_before", "op": "eq", "value": true }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "spoken_before": false },
+    "expected": { "prior_talk": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "show rule matches a boolean answer",
+    "rules": [
+      {
+        "id": "r-show-prior-talk",
+        "target_field_id": "prior_talk",
+        "logic": {
+          "when": [{ "field": "spoken_before", "op": "eq", "value": true }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "spoken_before": true },
+    "expected": { "prior_talk": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "eq is loose: the string \"true\" equals boolean true",
+    "rules": [
+      {
+        "id": "r-show-prior-talk",
+        "target_field_id": "prior_talk",
+        "logic": {
+          "when": [{ "field": "spoken_before", "op": "eq", "value": true }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "spoken_before": "true" },
+    "expected": { "prior_talk": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "eq is loose: the string \"30\" equals the number 30",
+    "rules": [
+      {
+        "id": "r-show-half-hour",
+        "target_field_id": "half_hour_note",
+        "logic": {
+          "when": [{ "field": "duration", "op": "eq", "value": 30 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "duration": "30" },
+    "expected": { "half_hour_note": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "neq matches when the field is answered differently",
+    "rules": [
+      {
+        "id": "r-hide-supplies",
+        "target_field_id": "workshop_supplies",
+        "logic": {
+          "when": [{ "field": "format", "op": "neq", "value": "Workshop" }],
+          "match": "all",
+          "action": "hide"
+        }
+      }
+    ],
+    "answers": { "format": "Talk" },
+    "expected": { "workshop_supplies": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "an unmatched hide rule leaves the field visible",
+    "rules": [
+      {
+        "id": "r-hide-supplies",
+        "target_field_id": "workshop_supplies",
+        "logic": {
+          "when": [{ "field": "format", "op": "neq", "value": "Workshop" }],
+          "match": "all",
+          "action": "hide"
+        }
+      }
+    ],
+    "answers": { "format": "Workshop" },
+    "expected": { "workshop_supplies": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "neq matches an unanswered field",
+    "rules": [
+      {
+        "id": "r-show-followup",
+        "target_field_id": "followup",
+        "logic": {
+          "when": [{ "field": "format", "op": "neq", "value": "Workshop" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": {},
+    "expected": { "followup": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "a matched hide rule beats a matched show rule",
+    "rules": [
+      {
+        "id": "r-show-eng",
+        "target_field_id": "repo_url",
+        "logic": {
+          "when": [{ "field": "track", "op": "eq", "value": "Engineering" }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-hide-experimental",
+        "target_field_id": "repo_url",
+        "logic": {
+          "when": [{ "field": "experimental", "op": "eq", "value": true }],
+          "match": "all",
+          "action": "hide"
+        }
+      }
+    ],
+    "answers": { "track": "Engineering", "experimental": true },
+    "expected": { "repo_url": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "multiple show rules OR together",
+    "rules": [
+      {
+        "id": "r-show-a",
+        "target_field_id": "extra_notes",
+        "logic": {
+          "when": [{ "field": "a", "op": "eq", "value": 1 }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-b",
+        "target_field_id": "extra_notes",
+        "logic": {
+          "when": [{ "field": "b", "op": "eq", "value": "yes" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "a": 2, "b": "yes" },
+    "expected": { "extra_notes": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "a field is hidden when no show rule matches",
+    "rules": [
+      {
+        "id": "r-show-a",
+        "target_field_id": "extra_notes",
+        "logic": {
+          "when": [{ "field": "a", "op": "eq", "value": 1 }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-b",
+        "target_field_id": "extra_notes",
+        "logic": {
+          "when": [{ "field": "b", "op": "eq", "value": "yes" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "a": 2, "b": "no" },
+    "expected": { "extra_notes": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "match all needs every condition",
+    "rules": [
+      {
+        "id": "r-show-budget",
+        "target_field_id": "budget_note",
+        "logic": {
+          "when": [
+            { "field": "needs_travel", "op": "eq", "value": true },
+            { "field": "country", "op": "neq", "value": "US" }
+          ],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "needs_travel": true, "country": "US" },
+    "expected": { "budget_note": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "match any needs only one condition",
+    "rules": [
+      {
+        "id": "r-show-budget",
+        "target_field_id": "budget_note",
+        "logic": {
+          "when": [
+            { "field": "needs_travel", "op": "eq", "value": true },
+            { "field": "country", "op": "neq", "value": "US" }
+          ],
+          "match": "any",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "needs_travel": true, "country": "US" },
+    "expected": { "budget_note": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "contains is membership for a multi-select answer",
+    "rules": [
+      {
+        "id": "r-show-security",
+        "target_field_id": "security_details",
+        "logic": {
+          "when": [{ "field": "topics", "op": "contains", "value": "security" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "topics": ["llms", "security"] },
+    "expected": { "security_details": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "contains does not match a value absent from the list",
+    "rules": [
+      {
+        "id": "r-show-security",
+        "target_field_id": "security_details",
+        "logic": {
+          "when": [{ "field": "topics", "op": "contains", "value": "security" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "topics": ["llms", "agents"] },
+    "expected": { "security_details": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "contains is a case-insensitive substring for text answers",
+    "rules": [
+      {
+        "id": "r-require-ops-review",
+        "target_field_id": "ops_review",
+        "logic": {
+          "when": [{ "field": "abstract", "op": "contains", "value": "Kubernetes" }],
+          "match": "all",
+          "action": "require"
+        }
+      }
+    ],
+    "answers": { "abstract": "Scaling kubernetes for inference" },
+    "expected": { "ops_review": { "visible": true, "required_override": true } }
+  },
+  {
+    "name": "gt and gte coerce a string answer to a number",
+    "rules": [
+      {
+        "id": "r-show-capacity",
+        "target_field_id": "capacity_warning",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gt", "value": 100 }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-big-room",
+        "target_field_id": "big_room_note",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gte", "value": 250 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "attendees": "250" },
+    "expected": {
+      "capacity_warning": { "visible": true, "required_override": null },
+      "big_room_note": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "gt is strict and gte is not",
+    "rules": [
+      {
+        "id": "r-show-capacity",
+        "target_field_id": "capacity_warning",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gt", "value": 100 }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-exactly-100",
+        "target_field_id": "exactly_100",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gte", "value": 100 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "attendees": 100 },
+    "expected": {
+      "capacity_warning": { "visible": false, "required_override": null },
+      "exactly_100": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "lt is strict and lte is not",
+    "rules": [
+      {
+        "id": "r-show-short",
+        "target_field_id": "short_talk_tip",
+        "logic": {
+          "when": [{ "field": "duration", "op": "lt", "value": 30 }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-half-hour",
+        "target_field_id": "half_hour_note",
+        "logic": {
+          "when": [{ "field": "duration", "op": "lte", "value": 30 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "duration": 30 },
+    "expected": {
+      "short_talk_tip": { "visible": false, "required_override": null },
+      "half_hour_note": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "numeric ops never match a non-numeric answer",
+    "rules": [
+      {
+        "id": "r-show-capacity",
+        "target_field_id": "capacity_warning",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "gt", "value": 100 }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "attendees": "lots" },
+    "expected": { "capacity_warning": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "empty and not_empty treat whitespace as blank",
+    "rules": [
+      {
+        "id": "r-show-bio-reminder",
+        "target_field_id": "bio_reminder",
+        "logic": {
+          "when": [{ "field": "bio", "op": "empty" }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-bio-thanks",
+        "target_field_id": "bio_thanks",
+        "logic": {
+          "when": [{ "field": "bio", "op": "not_empty" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "bio": "   " },
+    "expected": {
+      "bio_reminder": { "visible": true, "required_override": null },
+      "bio_thanks": { "visible": false, "required_override": null }
+    }
+  },
+  {
+    "name": "empty treats an unchecked box and a missing answer as blank",
+    "rules": [
+      {
+        "id": "r-show-why-not",
+        "target_field_id": "why_not",
+        "logic": {
+          "when": [{ "field": "opt_in", "op": "empty" }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-show-never-answered",
+        "target_field_id": "never_answered",
+        "logic": {
+          "when": [{ "field": "nothing_here", "op": "empty" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "opt_in": false },
+    "expected": {
+      "why_not": { "visible": true, "required_override": null },
+      "never_answered": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "not_empty sees a checked box and a zero as answered",
+    "rules": [
+      {
+        "id": "r-require-details",
+        "target_field_id": "details",
+        "logic": {
+          "when": [{ "field": "opt_in", "op": "not_empty" }],
+          "match": "all",
+          "action": "require"
+        }
+      },
+      {
+        "id": "r-show-zero-note",
+        "target_field_id": "zero_note",
+        "logic": {
+          "when": [{ "field": "attendees", "op": "not_empty" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "opt_in": true, "attendees": 0 },
+    "expected": {
+      "details": { "visible": true, "required_override": true },
+      "zero_note": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "an unmatched require rule leaves required_override null",
+    "rules": [
+      {
+        "id": "r-require-coc",
+        "target_field_id": "coc_ack",
+        "logic": {
+          "when": [{ "field": "format", "op": "eq", "value": "Workshop" }],
+          "match": "all",
+          "action": "require"
+        }
+      }
+    ],
+    "answers": { "format": "Talk" },
+    "expected": { "coc_ack": { "visible": true, "required_override": null } }
+  },
+  {
+    "name": "require is independent of visibility",
+    "rules": [
+      {
+        "id": "r-show-repo",
+        "target_field_id": "repo_url",
+        "logic": {
+          "when": [{ "field": "track", "op": "eq", "value": "Engineering" }],
+          "match": "all",
+          "action": "show"
+        }
+      },
+      {
+        "id": "r-require-repo",
+        "target_field_id": "repo_url",
+        "logic": {
+          "when": [{ "field": "open_source", "op": "eq", "value": true }],
+          "match": "all",
+          "action": "require"
+        }
+      }
+    ],
+    "answers": { "track": "Product", "open_source": true },
+    "expected": { "repo_url": { "visible": false, "required_override": true } }
+  },
+  {
+    "name": "a rule with no conditions never fires",
+    "rules": [
+      {
+        "id": "r-empty-show",
+        "target_field_id": "shown_by_nothing",
+        "logic": { "when": [], "match": "all", "action": "show" }
+      },
+      {
+        "id": "r-empty-hide",
+        "target_field_id": "hidden_by_nothing",
+        "logic": { "when": [], "match": "all", "action": "hide" }
+      }
+    ],
+    "answers": { "anything": "at all" },
+    "expected": {
+      "shown_by_nothing": { "visible": false, "required_override": null },
+      "hidden_by_nothing": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "an unknown operator never matches",
+    "rules": [
+      {
+        "id": "r-bogus",
+        "target_field_id": "mystery",
+        "logic": {
+          "when": [{ "field": "format", "op": "starts_with", "value": "Work" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "format": "Workshop" },
+    "expected": { "mystery": { "visible": false, "required_override": null } }
+  },
+  {
+    "name": "no rules means no opinions",
+    "rules": [],
+    "answers": { "spoken_before": true },
+    "expected": {}
+  }
+]

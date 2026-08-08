@@ -12,6 +12,12 @@ if (!globalThis.ResizeObserver) {
   } as unknown as typeof ResizeObserver
 }
 
+// jsdom does no layout, so this one is missing outright — and the public form
+// calls it to scroll to the first validation error.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}
+
 if (!window.matchMedia) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,
@@ -31,5 +37,6 @@ afterEach(() => {
 
 // Tests exercise the dev-token auth path deterministically — Clerk mode is
 // env-driven and would otherwise flip on whenever a local .env holds a key.
-import { vi } from 'vitest'
+// (`vi` is already imported at the top — re-importing it here is a duplicate
+// identifier under tsc.)
 vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', '')

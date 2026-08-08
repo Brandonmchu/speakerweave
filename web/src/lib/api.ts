@@ -11,6 +11,8 @@
  * awaits it), not touching a single call site.
  */
 
+import type { QuestionRule } from '@/lib/rules'
+
 const TOKEN_STORAGE_KEY = 'dais.token'
 
 /** Base origin for API calls. Empty string = same-origin (Vite proxy in dev, nginx in prod). */
@@ -266,6 +268,12 @@ export interface PublicForm {
   confirmation_html?: string | null
   closed?: boolean
   fields: PublicFormField[]
+  /**
+   * Conditional logic, evaluated live in the renderer by lib/rules.ts and again
+   * on submit by the server. Always an array — an older backend that doesn't
+   * send the key yields a form with no conditions rather than a crash.
+   */
+  question_rules: QuestionRule[]
 }
 
 export interface SubmissionReceipt {
@@ -315,6 +323,7 @@ interface PublicFormWire {
     page?: number
     order?: number
   }>
+  question_rules?: QuestionRule[] | null
 }
 
 const WIRE_TYPE_MAP: Record<string, FormFieldType> = {
@@ -345,6 +354,9 @@ export async function getPublicForm(slug: string): Promise<PublicForm> {
       order: f.order,
       options: f.options?.choices ?? null,
     })),
+    // Rules key off field ids, which is exactly what `fields[].id` above is —
+    // so they pass through untouched and lib/rules.ts can read them directly.
+    question_rules: wire.question_rules ?? [],
   }
 }
 
@@ -355,6 +367,58 @@ export interface SubmissionInput {
   title: string
   description?: string
   answers: Record<string, string | boolean>
+}
+
+// ── Submission detail (organizer inbox) ─────────────────────────────────────
+
+/**
+ * One answer, already resolved against the form that collected it. The backend
+ * joins `sessions.form_answers` (keyed by field id) to the field definitions so
+ * the inbox never has to fetch a form to render a label — and so answers to
+ * fields that were later deleted still read as something.
+ */
+export interface SessionAnswer {
+  field_id: string
+  label: string
+  field_type: FormFieldType
+  value: unknown
+}
+
+export type ParticipantRole = 'speaker' | 'chairperson' | 'moderator' | 'submitter' | (string & {})
+
+export interface SessionParticipant {
+  contact_id: string
+  role: ParticipantRole
+  is_primary?: boolean
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+}
+
+export interface SessionDetail {
+  session: Submission
+  answers: SessionAnswer[]
+  participants: SessionParticipant[]
+}
+
+/** GET /api/sessions/{id} → {session, answers, participants}. */
+export async function getSessionDetail(id: string): Promise<SessionDetail> {
+  const wire = await apiGet<Partial<SessionDetail>>(`/api/sessions/${encodeURIComponent(id)}`)
+  return {
+    session: (wire.session ?? { id, title: '', status: 'pending' }) as Submission,
+    answers: Array.isArray(wire.answers) ? wire.answers : [],
+    participants: Array.isArray(wire.participants) ? wire.participants : [],
+  }
+}
+
+/** PATCH /api/sessions/{id} {status} → {session}. Bare rows tolerated. */
+export async function updateSessionStatus(id: string, status: SubmissionStatus): Promise<Submission> {
+  const wire = await apiPatch<{ session?: Submission } | Submission>(
+    `/api/sessions/${encodeURIComponent(id)}`,
+    { status }
+  )
+  const session = (wire as { session?: Submission })?.session
+  return session ?? (wire as Submission)
 }
 
 export function submitPublicForm(slug: string, input: SubmissionInput): Promise<SubmissionReceipt> {

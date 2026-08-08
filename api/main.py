@@ -8,9 +8,12 @@ from app.core.logging_config import get_logger, setup_logging
 from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
 from routes.admin_routes import router as admin_router
+from routes.field_routes import router as field_router
+from routes.form_admin_routes import router as form_admin_router
 from routes.health_routes import router as health_router
 from routes.ics_routes import router as ics_router
 from routes.public_routes import router as public_router
+from routes.taxonomy_routes import router as taxonomy_router
 from security.rate_limiting import limiter, rate_limit_exceeded_handler
 
 setup_logging(default_level=settings.log_level)
@@ -45,6 +48,9 @@ app.include_router(health_router)
 app.include_router(public_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
+app.include_router(taxonomy_router)
+app.include_router(form_admin_router)
+app.include_router(field_router)
 
 
 if __name__ == "__main__":

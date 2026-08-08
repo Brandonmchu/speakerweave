@@ -16,7 +16,9 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, EmailStr, Field
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
-from services.supabase_helpers import db, first, rows
+from services.forms import load_form_layout, load_question_rules, to_public_field
+from services.question_rules import validate_submission
+from services.supabase_helpers import db, first
 from supabase_client import supabase
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -43,10 +45,16 @@ async def _get_form_by_slug(slug: str) -> dict:
     return form
 
 
+async def _public_fields(form: dict) -> list[dict]:
+    layout = await load_form_layout(form["id"], form["org_id"])
+    return [to_public_field(entry) for entry in layout]
+
+
 @router.get("/forms/{slug}")
 @limiter.limit(RATE_PUBLIC_DEFAULT)
 async def get_public_form(request: Request, slug: str):
-    """Form + its ordered fields, everything the public renderer needs."""
+    """Form + its ordered fields + its conditional logic — everything the
+    public renderer needs to show the same form the server will validate."""
     form = await _get_form_by_slug(slug)
 
     event_res = await db(
@@ -60,50 +68,6 @@ async def get_public_form(request: Request, slug: str):
     )
     event = first(event_res)
 
-    ff_res = await db(
-        lambda: supabase.table("form_fields")
-        .select("id, field_id, page, order, label_override, help_text, required")
-        .eq("form_id", form["id"])
-        .eq("org_id", form["org_id"])
-        .execute(),
-        "public_form_fields",
-    )
-    # Sorted here rather than in PostgREST: `order` is also the name of the
-    # PostgREST sort parameter, and these lists are tiny.
-    form_fields = sorted(rows(ff_res), key=lambda r: (r.get("page") or 1, r.get("order") or 0))
-
-    fields_by_id: dict[str, dict] = {}
-    if form_fields:
-        field_ids = [ff["field_id"] for ff in form_fields]
-        f_res = await db(
-            lambda: supabase.table("fields")
-            .select("id, public_name, field_type, options, required")
-            .in_("id", field_ids)
-            .eq("org_id", form["org_id"])
-            .execute(),
-            "public_form_field_defs",
-        )
-        fields_by_id = {row["id"]: row for row in rows(f_res)}
-
-    fields = []
-    for ff in form_fields:
-        field = fields_by_id.get(ff["field_id"])
-        if not field:
-            continue
-        fields.append(
-            {
-                "id": field["id"],
-                "form_field_id": ff["id"],
-                "label": ff.get("label_override") or field["public_name"],
-                "type": field["field_type"],
-                "options": field.get("options") or {},
-                "required": bool(ff.get("required") or field.get("required")),
-                "help_text": ff.get("help_text"),
-                "page": ff.get("page") or 1,
-                "order": ff.get("order") or 0,
-            }
-        )
-
     return {
         "form": {
             "id": form["id"],
@@ -114,7 +78,8 @@ async def get_public_form(request: Request, slug: str):
             "settings": form.get("settings") or {},
         },
         "event": event,
-        "fields": fields,
+        "fields": await _public_fields(form),
+        "question_rules": await load_question_rules(form["id"], form["org_id"]),
     }
 
 
@@ -192,6 +157,15 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     form = await _get_form_by_slug(slug)
     org_id, event_id = form["org_id"], form["event_id"]
 
+    # Re-run the renderer's own validation server-side, rules included: the
+    # browser is not a trusted validator, and a hidden branch's leftover answers
+    # must not be stored as if the speaker had given them.
+    fields = await _public_fields(form)
+    rules = await load_question_rules(form["id"], org_id)
+    answers, problem = validate_submission(fields, rules, payload.answers)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+
     contact = await _upsert_contact(org_id, event_id, payload)
 
     # friendly_id_raw comes from a DB counter (migration 001): atomic upsert,
@@ -215,7 +189,7 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
         "status": "pending",
         "is_abstract": True,
         "source_form_id": form["id"],
-        "form_answers": payload.answers,
+        "form_answers": answers,
         "submitter_contact_id": contact["id"],
         "submitted_at": datetime.now(timezone.utc).isoformat(),
     }

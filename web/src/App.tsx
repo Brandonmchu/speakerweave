@@ -7,8 +7,12 @@ import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
 import { ComingSoon } from '@/pages/ComingSoon'
 import { DevLogin } from '@/pages/DevLogin'
+import { FormEditor } from '@/pages/FormEditor'
+import { Forms } from '@/pages/Forms'
 import { Inbox } from '@/pages/Inbox'
+import { Onboarding } from '@/pages/Onboarding'
 import { PublicForm } from '@/pages/PublicForm'
+import { SettingsPage } from '@/pages/SettingsPage'
 import { Toaster } from '@/ui/toaster'
 
 /**
@@ -58,12 +62,15 @@ export default function App() {
           <Route index element={<Navigate to="/submissions" replace />} />
           <Route path="/submissions" element={<Inbox />} />
           <Route path="/dashboard" element={<ComingSoon title="Dashboard" />} />
-          <Route path="/forms" element={<ComingSoon title="Forms" />} />
+          <Route path="/forms" element={<Forms />} />
+          <Route path="/forms/:formId" element={<FormEditor />} />
           <Route path="/evaluation" element={<ComingSoon title="Evaluation" />} />
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/speakers" element={<ComingSoon title="Speakers" />} />
           <Route path="/comms" element={<ComingSoon title="Comms" />} />
-          <Route path="/settings" element={<ComingSoon title="Settings" />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          {/* First run: no event yet. Forms/Settings redirect here. */}
+          <Route path="/onboarding" element={<Onboarding />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
