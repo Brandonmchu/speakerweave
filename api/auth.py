@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import jwt
 from dotenv import load_dotenv
@@ -77,7 +78,32 @@ async def get_current_user_and_org(request: Request) -> tuple[str, str]:
         logger.info("auth: authed user has no org_id claim user_id=%s", user_id)
         raise HTTPException(status_code=401, detail="Organization ID not found in token")
 
+    await _ensure_org_exists(org_id)
     return user_id, org_id
+
+
+# Clerk creates orgs; our orgs table learns about them lazily on first
+# authenticated request. Positive-only TTL cache so the upsert isn't per-call.
+_ORG_SEEN: dict[str, float] = {}
+_ORG_SEEN_TTL = 300.0
+
+
+async def _ensure_org_exists(org_id: str) -> None:
+    now = time.monotonic()
+    seen = _ORG_SEEN.get(org_id)
+    if seen is not None and now - seen < _ORG_SEEN_TTL:
+        return
+    from services.supabase_helpers import db  # local import: avoid module cycle
+    from supabase_client import supabase
+
+    try:
+        await db(
+            lambda: supabase.table("orgs").upsert({"org_id": org_id}, on_conflict="org_id").execute(),
+            "ensure_org_exists",
+        )
+        _ORG_SEEN[org_id] = now
+    except Exception:  # noqa: BLE001 — an org-row race must never fail auth
+        logger.warning("auth: org upsert failed org_id=%s", org_id, exc_info=True)
 
 
 def verify_org_access(row: dict | None, org_id: str, resource: str = "Resource") -> dict:
