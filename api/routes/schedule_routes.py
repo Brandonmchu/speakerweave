@@ -298,6 +298,7 @@ async def _assemble_agenda(event_id: str, org_id: str) -> dict:
         "event": {
             "id": event["id"],
             "name": event.get("name"),
+            "slug": event.get("slug"),
             "timezone": event.get("timezone"),
             "starts_at": event.get("starts_at"),
             "ends_at": event.get("ends_at"),
@@ -452,3 +453,51 @@ async def update_session_schedule(
     if not updated:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session": updated}
+
+
+@router.post("/events/{event_id}/schedule/publish")
+async def publish_schedule(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
+    """Mark the programme published and hand back the public schedule link.
+
+    This is an explicit, visible affirmation — NOT a visibility switch. The
+    public schedule (routes/program_routes.py) already returns accepted+scheduled
+    sessions regardless of this flag, and keeps doing so; publishing only records
+    *when* the organizer pressed the button and surfaces the URL to share.
+
+    The `program_published_at` column is additive (migration 005) and may not
+    exist in every environment yet, so the write is best-effort: if it fails the
+    endpoint still returns a success with the public URL and a fresh timestamp,
+    so the organizer never sees the affordance break.
+    """
+    _user_id, org_id = auth
+    event = await _load_event(event_id, org_id)  # 404s a foreign / unknown event
+
+    published_at = datetime.now(timezone.utc).isoformat()
+    try:
+        updated = first(
+            await db(
+                lambda: supabase.table("events")
+                .update({"program_published_at": published_at})
+                .eq("id", event_id)
+                .eq("org_id", org_id)
+                .execute(),
+                "schedule_publish",
+            )
+        )
+        if updated and updated.get("program_published_at"):
+            published_at = updated["program_published_at"]
+    except APIError as exc:
+        # Missing column (migration not applied here) or any transient write
+        # error: publishing must still succeed and return the link. The
+        # timestamp is a best-effort record, never a hard dependency.
+        logger.warning("publish: could not persist program_published_at: %s", exc)
+
+    slug = event.get("slug")
+    return {
+        "event": {
+            "id": event["id"],
+            "slug": slug,
+            "program_published_at": published_at,
+        },
+        "public_url": f"/e/{slug}/schedule" if slug else None,
+    }

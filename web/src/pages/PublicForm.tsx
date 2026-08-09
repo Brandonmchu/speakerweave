@@ -1,10 +1,11 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, ArrowRight, CalendarClock, CheckCircle2, Lock, Mail } from 'lucide-react'
 
 import {
   getPublicForm,
+  requestManageLink,
   submitPublicForm,
   type FormFieldOption,
   type PublicFormField,
@@ -43,6 +44,71 @@ function isBlank(value: AnswerValue | undefined): boolean {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// --- draft persistence ----------------------------------------------------
+// A CFP proposal is a lot of typing. We autosave the in-progress form to
+// localStorage keyed by slug so a refresh, a closed tab, or a "let me finish
+// tomorrow" never loses it. The draft is cleared the moment a submit succeeds.
+
+interface FormDraft {
+  firstName: string
+  lastName: string
+  email: string
+  title: string
+  answers: Answers
+}
+
+function draftStorageKey(slug: string): string {
+  return `dais.cfp-draft:${slug}`
+}
+
+function readStoredDraft(key: string): FormDraft | null {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<FormDraft>
+    return {
+      firstName: typeof parsed.firstName === 'string' ? parsed.firstName : '',
+      lastName: typeof parsed.lastName === 'string' ? parsed.lastName : '',
+      email: typeof parsed.email === 'string' ? parsed.email : '',
+      title: typeof parsed.title === 'string' ? parsed.title : '',
+      answers: parsed.answers && typeof parsed.answers === 'object' ? (parsed.answers as Answers) : {},
+    }
+  } catch {
+    return null
+  }
+}
+
+function draftHasContent(draft: FormDraft | null): boolean {
+  if (!draft) return false
+  if (draft.firstName || draft.lastName || draft.email || draft.title) return true
+  return Object.values(draft.answers).some((value) =>
+    typeof value === 'boolean' ? value : String(value ?? '').trim() !== ''
+  )
+}
+
+// --- deadline formatting --------------------------------------------------
+
+function formatDeadline(date: Date): string {
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+/** Human "closes in N days" phrasing from a future deadline. */
+function countdownLabel(date: Date): string {
+  const ms = date.getTime() - Date.now()
+  if (ms <= 0) return 'Closed'
+  const days = Math.floor(ms / 86_400_000)
+  if (days >= 2) return `Closes in ${days} days`
+  const hours = Math.floor(ms / 3_600_000)
+  if (hours >= 2) return `Closes in ${hours} hours`
+  return 'Closing soon'
+}
+
 export function PublicForm() {
   const { slug = '' } = useParams()
 
@@ -59,13 +125,47 @@ export function PublicForm() {
     return [...list].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   }, [form])
 
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
-  const [title, setTitle] = useState('')
-  const [answers, setAnswers] = useState<Answers>({})
+  const draftKey = draftStorageKey(slug)
+  // Read any saved draft ONCE, synchronously, so state starts hydrated and the
+  // persist effect below never clobbers it on the first render.
+  const [initialDraft] = useState(() => readStoredDraft(draftKey))
+
+  const [firstName, setFirstName] = useState(initialDraft?.firstName ?? '')
+  const [lastName, setLastName] = useState(initialDraft?.lastName ?? '')
+  const [email, setEmail] = useState(initialDraft?.email ?? '')
+  const [title, setTitle] = useState(initialDraft?.title ?? '')
+  const [answers, setAnswers] = useState<Answers>(initialDraft?.answers ?? {})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null)
+  const [draftRestored, setDraftRestored] = useState(() => draftHasContent(initialDraft))
+
+  // Autosave: mirror the in-progress form to localStorage on every change, and
+  // drop the key once the form is empty. Stops the moment a submit succeeds.
+  useEffect(() => {
+    if (receipt) return
+    const draft: FormDraft = { firstName, lastName, email, title, answers }
+    try {
+      if (draftHasContent(draft)) window.localStorage.setItem(draftKey, JSON.stringify(draft))
+      else window.localStorage.removeItem(draftKey)
+    } catch {
+      // Private-mode Safari and friends — autosave is a nicety, not load-bearing.
+    }
+  }, [firstName, lastName, email, title, answers, draftKey, receipt])
+
+  function clearDraft() {
+    try {
+      window.localStorage.removeItem(draftKey)
+    } catch {
+      // ignore
+    }
+    setFirstName('')
+    setLastName('')
+    setEmail('')
+    setTitle('')
+    setAnswers({})
+    setErrors({})
+    setDraftRestored(false)
+  }
 
   // Conditional logic, re-resolved on every keystroke that changes an answer.
   // Same evaluator the server runs at submit time (lib/rules.ts ↔
@@ -84,7 +184,16 @@ export function PublicForm() {
 
   const submit = useMutation({
     mutationFn: (payload: SubmissionInput) => submitPublicForm(slug, payload),
-    onSuccess: (data) => setReceipt(data ?? { id: '' }),
+    onSuccess: (data) => {
+      // The draft has served its purpose — clear it so a later visit starts fresh.
+      try {
+        window.localStorage.removeItem(draftKey)
+      } catch {
+        // ignore
+      }
+      setDraftRestored(false)
+      setReceipt(data ?? { id: '' })
+    },
   })
 
   function setAnswer(id: string, value: AnswerValue) {
@@ -175,17 +284,29 @@ export function PublicForm() {
           </div>
           <h1 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">Submission received</h1>
           <p className="mt-2 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-            Thanks, {firstName}. We&rsquo;ve emailed a copy to {email}. You can reference this submission
-            with the code below.
+            Thanks{firstName ? `, ${firstName}` : ''}. We&rsquo;ve emailed a copy to {email}. You can
+            reference this submission with the code below.
           </p>
-          {receipt.friendly_id && (
-            <div className="mt-6 rounded-lg border border-border bg-muted/50 px-5 py-4">
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Reference
-              </div>
-              <div className="mt-1 font-mono text-xl font-semibold text-foreground">
-                {receipt.friendly_id}
-              </div>
+          {(receipt.friendly_id || title) && (
+            <div className="mt-6 w-full max-w-sm rounded-lg border border-border bg-muted/50 px-5 py-4 text-left">
+              {receipt.friendly_id && (
+                <>
+                  <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Reference
+                  </div>
+                  <div className="mt-1 font-mono text-xl font-semibold text-foreground">
+                    {receipt.friendly_id}
+                  </div>
+                </>
+              )}
+              {title && (
+                <div className={receipt.friendly_id ? 'mt-3' : undefined}>
+                  <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Title
+                  </div>
+                  <div className="mt-1 text-[15px] font-medium text-foreground">{title}</div>
+                </div>
+              )}
             </div>
           )}
           {form.confirmation_html && (
@@ -194,19 +315,34 @@ export function PublicForm() {
               dangerouslySetInnerHTML={{ __html: stripUnsafeHtml(form.confirmation_html) }}
             />
           )}
+          <div className="mt-8 w-full max-w-sm border-t border-border pt-6">
+            <ManageLinkPrompt slug={slug} />
+          </div>
         </div>
       </PublicShell>
     )
   }
 
   if (form.closed) {
+    const closedAt = form.close_at ? new Date(form.close_at) : null
     return (
       <PublicShell eyebrow={form.event_name ?? undefined}>
-        <Notice
-          tone="error"
-          title={`${form.name} is closed`}
-          description="This call for papers is no longer accepting submissions."
-        />
+        <div className="flex flex-col items-center py-6 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+            <Lock className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">Submissions are closed</h1>
+          <p className="mt-2 max-w-md text-[15px] leading-relaxed text-muted-foreground">
+            {form.name} is no longer accepting submissions
+            {closedAt ? ` — the deadline was ${formatDeadline(closedAt)}.` : '.'}
+          </p>
+          <div className="mt-8 w-full max-w-sm border-t border-border pt-6 text-left">
+            <p className="mb-3 text-center text-sm text-muted-foreground">
+              Already submitted? You can still view your submissions.
+            </p>
+            <ManageLinkPrompt slug={slug} />
+          </div>
+        </div>
       </PublicShell>
     )
   }
@@ -215,12 +351,41 @@ export function PublicForm() {
 
   // Optional per-user cap, surfaced by the public-form adapter in lib/api.ts.
   const submissionLimit = form.submission_limit ?? null
+  const closeAt = form.close_at ? new Date(form.close_at) : null
 
   return (
     <PublicShell eyebrow={form.event_name ?? undefined}>
       {submissionLimit != null && (
         <div className="mb-6 rounded-lg border border-border bg-card px-4 py-3 text-center text-sm font-medium text-foreground">
           Submission Limit: {submissionLimit} submission{submissionLimit === 1 ? '' : 's'} per user
+        </div>
+      )}
+      {closeAt && (
+        <div className="mb-6 flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary-subtle/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2.5">
+            <CalendarClock className="h-4 w-4 shrink-0 text-primary" />
+            <span className="text-sm text-foreground">
+              Submissions close <span className="font-semibold">{formatDeadline(closeAt)}</span>
+            </span>
+          </div>
+          <span className="text-xs font-semibold uppercase tracking-wide text-primary">
+            {countdownLabel(closeAt)}
+          </span>
+        </div>
+      )}
+      {draftRestored && (
+        <div className="mb-6 flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">Draft restored.</span>{' '}
+            <span className="text-muted-foreground">We saved what you started earlier.</span>
+          </p>
+          <button
+            type="button"
+            onClick={clearDraft}
+            className="self-start text-sm font-medium text-primary hover:underline sm:self-auto"
+          >
+            Clear draft
+          </button>
         </div>
       )}
       <h1 className="text-3xl font-semibold tracking-tight text-foreground">{form.name}</h1>
@@ -480,5 +645,72 @@ function Notice({ title, description }: { tone: 'error'; title: string; descript
         {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
       </div>
     </div>
+  )
+}
+
+/**
+ * "Manage my submissions": collect the submitter's email and ask the backend to
+ * mail a magic link. The backend always returns the same generic 200, so this
+ * never reveals whether the address has any submissions — we show the same
+ * "check your email" message regardless.
+ */
+function ManageLinkPrompt({ slug }: { slug: string }) {
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: (value: string) => requestManageLink(slug, value),
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = email.trim()
+    if (!EMAIL_RE.test(trimmed)) {
+      setError('Enter a valid email address')
+      return
+    }
+    setError(null)
+    mutation.mutate(trimmed)
+  }
+
+  if (mutation.isSuccess) {
+    return (
+      <div className="flex items-start gap-2.5 rounded-lg border border-success/30 bg-success/5 px-4 py-3 text-left">
+        <Mail className="mt-0.5 h-4 w-4 shrink-0 text-success-strong" />
+        <p className="text-sm text-foreground">
+          {mutation.data?.message ??
+            'Check your email for a link to view, edit, or withdraw your submissions.'}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-2 text-left">
+      <Label htmlFor="manage-email">Manage my submissions</Label>
+      <p className="text-xs text-muted-foreground">
+        Enter your email and we&rsquo;ll send a private link to view, edit, or withdraw your submissions.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          id="manage-email"
+          type="email"
+          value={email}
+          placeholder="you@example.com"
+          autoComplete="email"
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setEmail(e.target.value)
+            if (error) setError(null)
+          }}
+        />
+        <Button type="submit" disabled={mutation.isPending} className="shrink-0">
+          {mutation.isPending ? 'Sending…' : 'Send link'}
+        </Button>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {mutation.error && (
+        <p className="text-sm text-destructive">{(mutation.error as Error).message}</p>
+      )}
+    </form>
   )
 }

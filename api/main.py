@@ -1,4 +1,6 @@
+import asyncio
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,11 +29,39 @@ from routes.schedule_routes import router as schedule_router
 from routes.taxonomy_routes import router as taxonomy_router
 from routes.v1_routes import router as v1_router
 from security.rate_limiting import limiter, rate_limit_exceeded_handler
+from services import outbox_worker
 
 setup_logging(default_level=settings.log_level)
 logger = get_logger(__name__)
 
-app = FastAPI(title="dais api", description="Conference speaker management", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the email_outbox drain loop where enabled (prod), stop it on
+    shutdown. Off by default so the test suite runs without a background task."""
+    task = None
+    if outbox_worker.is_enabled():
+        task = asyncio.create_task(outbox_worker.run_forever())
+        logger.info("outbox worker enabled")
+    else:
+        logger.info("outbox worker disabled (set OUTBOX_WORKER_ENABLED=1 to enable)")
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(
+    title="dais api",
+    description="Conference speaker management",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 # Rate limiting (in-process, per worker; see security/rate_limiting.py)
 app.state.limiter = limiter

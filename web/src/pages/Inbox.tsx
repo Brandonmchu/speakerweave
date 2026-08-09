@@ -7,9 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Columns3,
   Download,
-  Eye,
   FileDown,
   Filter,
   Inbox as InboxIcon,
@@ -19,11 +17,13 @@ import {
   Pencil,
   Plus,
   Search,
+  Star,
   Upload,
 } from 'lucide-react'
 
 import {
   apiGet,
+  createSubmission,
   decideSubmission,
   getSessionDetail,
   unwrapList,
@@ -32,17 +32,26 @@ import {
   type SessionAnswer,
   type SessionDetail,
   type SessionParticipant,
+  type SessionReviewAggregate,
   type Submission,
   type SubmissionDecision,
   type SubmissionDecisionResult,
   type SubmissionStatus,
 } from '@/lib/api'
+import { listTaxonomy, type TaxonomyRow } from '@/lib/adminApi'
 import { looseEquals, type AnswerValue } from '@/lib/rules'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu'
 import { Input } from '@/ui/input'
+import { NativeSelect } from '@/ui/native-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
@@ -111,6 +121,44 @@ const DECISION_STATUS: Record<SubmissionDecision, SubmissionStatus> = {
   approve: 'accepted',
   maybe: 'accept_queue',
   deny: 'declined',
+}
+
+/** Client-side sort orders for the fetched rows. */
+type SortKey = 'newest' | 'oldest' | 'title' | 'status' | 'review'
+
+const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'title', label: 'Title A–Z' },
+  { value: 'status', label: 'Status' },
+  { value: 'review', label: 'Review score' },
+]
+
+/** Tab order doubles as the sort order when sorting by status. */
+const STATUS_RANK: Record<SubmissionStatus, number> = {
+  draft: 0,
+  pending: 1,
+  accept_queue: 2,
+  accepted: 3,
+  decline_queue: 4,
+  declined: 5,
+  withdrawn: 6,
+}
+
+function submittedTime(submission: Submission): number {
+  const value = submission.submitted_at ?? submission.created_at
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+/** Max score on the plan's scale — reviewers score 1–5 or 1–10. */
+function scaleMax(scale?: string | null): number {
+  return scale === '1_10' ? 10 : 5
+}
+
+function formatScore(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : value.toFixed(1)
 }
 
 function statusLabel(status: SubmissionStatus): string {
@@ -239,6 +287,10 @@ export function Inbox() {
   const [pendingDecision, setPendingDecision] = useState<SubmissionDecision | null>(null)
   const [speakerMessage, setSpeakerMessage] = useState('')
   const [emailDecision, setEmailDecision] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('newest')
+  const [filterTrack, setFilterTrack] = useState<string>('all')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [addOpen, setAddOpen] = useState(false)
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -254,6 +306,21 @@ export function Inbox() {
     enabled: Boolean(event?.id),
   })
 
+  // Tracks and formats power the Add-submission selects and the track filter.
+  // They are small per-event lists; a failure just leaves those controls empty.
+  const tracksQuery = useQuery({
+    queryKey: ['tracks', event?.id],
+    queryFn: () => listTaxonomy(event!.id, 'tracks'),
+    enabled: Boolean(event?.id),
+  })
+  const formatsQuery = useQuery({
+    queryKey: ['formats', event?.id],
+    queryFn: () => listTaxonomy(event!.id, 'formats'),
+    enabled: Boolean(event?.id),
+  })
+  const tracks = useMemo(() => tracksQuery.data ?? [], [tracksQuery.data])
+  const formats = useMemo(() => formatsQuery.data ?? [], [formatsQuery.data])
+
   const submissions = useMemo(() => submissionsQuery.data ?? [], [submissionsQuery.data])
 
   const counts = useMemo(() => {
@@ -267,18 +334,55 @@ export function Inbox() {
     [submissions, tab]
   )
 
-  /** Search is client-side over the already-fetched rows: title + submitter. */
+  /**
+   * Search, filter, and sort are all client-side over the already-fetched rows.
+   * Search matches title + submitter; the filters narrow by track and status;
+   * the sort reorders what's left. Kept in one memo so pagination sees the final
+   * list.
+   */
   const query = search.trim().toLowerCase()
   const filteredRows = useMemo(() => {
-    if (!query) return tabRows
-    return tabRows.filter((s) => {
-      const haystack = [s.title, submitterName(s), s.submitter?.email]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(query)
+    let rows = tabRows
+    if (query) {
+      rows = rows.filter((s) => {
+        const haystack = [s.title, submitterName(s), s.submitter?.email]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return haystack.includes(query)
+      })
+    }
+    if (filterTrack !== 'all') {
+      rows = rows.filter((s) => (s.track_id ?? null) === filterTrack)
+    }
+    if (filterStatus !== 'all') {
+      rows = rows.filter((s) => s.status === filterStatus)
+    }
+    const sorted = [...rows]
+    sorted.sort((a, b) => {
+      switch (sortKey) {
+        case 'oldest':
+          return submittedTime(a) - submittedTime(b)
+        case 'title':
+          return (a.title || '').localeCompare(b.title || '')
+        case 'status':
+          return (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99)
+        case 'review': {
+          // Highest score first; submissions without a score sort to the bottom.
+          const av = a.review_score ?? null
+          const bv = b.review_score ?? null
+          if (av === null && bv === null) return submittedTime(b) - submittedTime(a)
+          if (av === null) return 1
+          if (bv === null) return -1
+          return bv - av
+        }
+        case 'newest':
+        default:
+          return submittedTime(b) - submittedTime(a)
+      }
     })
-  }, [tabRows, query])
+    return sorted
+  }, [tabRows, query, filterTrack, filterStatus, sortKey])
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const safePage = Math.min(page, pageCount)
@@ -410,6 +514,19 @@ export function Inbox() {
     },
   })
 
+  const addSubmission = useMutation({
+    mutationFn: (input: Parameters<typeof createSubmission>[1]) =>
+      createSubmission(event!.id, input),
+    onSuccess: (session) => {
+      toast({ title: 'Submission added', description: `${session.title || 'Untitled'} is now pending.` })
+      setAddOpen(false)
+      queryClient.invalidateQueries({ queryKey: submissionsKey })
+    },
+    onError: (mutationError: Error) => {
+      toast({ variant: 'destructive', title: "Couldn't add submission", description: mutationError.message })
+    },
+  })
+
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && submissionsQuery.isPending)
   const error = eventsQuery.error ?? submissionsQuery.error
 
@@ -432,6 +549,22 @@ export function Inbox() {
     setSearch(next)
     setPage(1)
   }
+
+  // Any reorder/narrow sends the reader back to page 1 — page 3 of the old list
+  // is meaningless against the new one.
+  const changeSort = (next: SortKey) => {
+    setSortKey(next)
+    setPage(1)
+  }
+  const changeFilterTrack = (next: string) => {
+    setFilterTrack(next)
+    setPage(1)
+  }
+  const changeFilterStatus = (next: string) => {
+    setFilterStatus(next)
+    setPage(1)
+  }
+  const filtersActive = filterTrack !== 'all' || filterStatus !== 'all'
 
   const allPageSelected = pagedRows.length > 0 && pagedRows.every((r) => selected.has(r.id))
   const somePageSelected = pagedRows.some((r) => selected.has(r.id))
@@ -476,14 +609,7 @@ export function Inbox() {
             </p>
           </div>
         </div>
-        <Button
-          onClick={() =>
-            toast({
-              title: 'Manual add is coming soon',
-              description: 'Share your call-for-papers form to start collecting submissions.',
-            })
-          }
-        >
+        <Button onClick={() => setAddOpen(true)} disabled={!event}>
           <Plus />
           Add submission
         </Button>
@@ -522,23 +648,59 @@ export function Inbox() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => notReady('Saved views')}>
-              <Eye />
-              Saved Views
-              <ChevronDown />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => notReady('Column settings')}>
-              <Columns3 />
-              Columns
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => notReady('Sorting')}>
-              <ArrowUpDown />
-              Sort
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => notReady('Filters')}>
-              <Filter />
-              Filter
-            </Button>
+            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <ArrowUpDown className="h-4 w-4" />
+              <span className="sr-only sm:not-sr-only">Sort</span>
+              <NativeSelect
+                aria-label="Sort submissions"
+                value={sortKey}
+                onValueChange={(value) => changeSort(value as SortKey)}
+                options={SORT_OPTIONS}
+                className="h-9 w-[150px]"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Filter className="h-4 w-4" />
+              <span className="sr-only sm:not-sr-only">Track</span>
+              <NativeSelect
+                aria-label="Filter by track"
+                value={filterTrack}
+                onValueChange={changeFilterTrack}
+                options={[
+                  { value: 'all', label: 'All tracks' },
+                  ...tracks.map((t) => ({ value: t.id, label: t.name })),
+                ]}
+                className="h-9 w-[150px]"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <span className="sr-only sm:not-sr-only">Status</span>
+              <NativeSelect
+                aria-label="Filter by status"
+                value={filterStatus}
+                onValueChange={changeFilterStatus}
+                options={[
+                  { value: 'all', label: 'All statuses' },
+                  ...STATUS_ACTIONS.map((status) => ({
+                    value: status,
+                    label: STATUS_META[status].label,
+                  })),
+                ]}
+                className="h-9 w-[150px]"
+              />
+            </label>
+            {filtersActive && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  changeFilterTrack('all')
+                  changeFilterStatus('all')
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -638,8 +800,9 @@ export function Inbox() {
                 </TableHead>
                 <TableHead className="w-[110px]">ID</TableHead>
                 <TableHead className="w-[100px]">Source</TableHead>
-                <TableHead className="w-[34%]">Title</TableHead>
+                <TableHead className="w-[30%]">Title</TableHead>
                 <TableHead>Submitter</TableHead>
+                <TableHead className="w-[90px]">Score</TableHead>
                 <TableHead className="w-[150px]">Status</TableHead>
                 <TableHead className="w-[140px]">Submitted</TableHead>
                 <TableHead className="w-[60px] text-right sr-only">Actions</TableHead>
@@ -701,6 +864,12 @@ export function Inbox() {
                         {submission.submitter.email}
                       </div>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <ReviewScoreBadge
+                      score={submission.review_score}
+                      count={submission.review_count}
+                    />
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={submission.status} />
@@ -1011,7 +1180,184 @@ export function Inbox() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AddSubmissionDialog
+        open={addOpen}
+        onOpenChange={(next) => {
+          if (!addSubmission.isPending) setAddOpen(next)
+        }}
+        tracks={tracks}
+        formats={formats}
+        isSubmitting={addSubmission.isPending}
+        onSubmit={(input) => addSubmission.mutate(input)}
+      />
     </div>
+  )
+}
+
+// --- add submission dialog -------------------------------------------------
+
+function AddSubmissionDialog({
+  open,
+  onOpenChange,
+  tracks,
+  formats,
+  isSubmitting,
+  onSubmit,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  tracks: TaxonomyRow[]
+  formats: TaxonomyRow[]
+  isSubmitting: boolean
+  onSubmit: (input: Parameters<typeof createSubmission>[1]) => void
+}) {
+  const [title, setTitle] = useState('')
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [abstract, setAbstract] = useState('')
+  const [trackId, setTrackId] = useState('')
+  const [formatId, setFormatId] = useState('')
+
+  // Reset the form each time the dialog opens, so a second add never starts
+  // pre-filled with the last one.
+  const reset = () => {
+    setTitle('')
+    setName('')
+    setEmail('')
+    setAbstract('')
+    setTrackId('')
+    setFormatId('')
+  }
+
+  const canSubmit = title.trim() !== '' && email.trim() !== '' && !isSubmitting
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) reset()
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add submission</DialogTitle>
+          <DialogDescription>
+            Enter a submission by hand. It lands in Pending, exactly like a form submission.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!canSubmit) return
+            onSubmit({
+              title: title.trim(),
+              submitter_name: name.trim(),
+              submitter_email: email.trim(),
+              abstract: abstract.trim(),
+              track_id: trackId || undefined,
+              format_id: formatId || undefined,
+            })
+          }}
+        >
+          <div className="space-y-1.5">
+            <label htmlFor="add-title" className="text-sm font-medium text-foreground">
+              Title <span className="text-destructive">*</span>
+            </label>
+            <Input
+              id="add-title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Talk title"
+              required
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="add-name" className="text-sm font-medium text-foreground">
+                Submitter name
+              </label>
+              <Input
+                id="add-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Ada Lovelace"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="add-email" className="text-sm font-medium text-foreground">
+                Submitter email <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="add-email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="ada@example.com"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="add-track" className="text-sm font-medium text-foreground">
+                Track
+              </label>
+              <NativeSelect
+                id="add-track"
+                value={trackId}
+                onValueChange={setTrackId}
+                placeholder="No track"
+                options={tracks.map((track) => ({ value: track.id, label: track.name }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="add-format" className="text-sm font-medium text-foreground">
+                Format
+              </label>
+              <NativeSelect
+                id="add-format"
+                value={formatId}
+                onValueChange={setFormatId}
+                placeholder="No format"
+                options={formats.map((format) => ({ value: format.id, label: format.name }))}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="add-abstract" className="text-sm font-medium text-foreground">
+              Abstract
+            </label>
+            <Textarea
+              id="add-abstract"
+              value={abstract}
+              onChange={(event) => setAbstract(event.target.value)}
+              placeholder="A short description of the session."
+              className="min-h-[96px]"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSubmit}>
+              {isSubmitting ? 'Adding…' : 'Add submission'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -1061,6 +1407,8 @@ function SubmissionDetail({
           </p>
         </section>
       )}
+
+      <ReviewsSection reviews={detail.reviews} />
 
       <section>
         <PanelHeading title="Answers" />
@@ -1126,6 +1474,122 @@ function SubmissionDetail({
 function PanelHeading({ title }: { title: string }) {
   return (
     <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+  )
+}
+
+/** The average review score shown in the table's Score column. */
+function ReviewScoreBadge({
+  score,
+  count,
+}: {
+  score?: number | null
+  count?: number | null
+}) {
+  if (score === null || score === undefined) {
+    return <span className="text-sm text-muted-foreground">—</span>
+  }
+  return (
+    <Badge
+      variant="default"
+      className="gap-1 tabular-nums"
+      title={`${formatScore(score)} average across ${count ?? 0} review${count === 1 ? '' : 's'}`}
+    >
+      <Star className="h-3 w-3" />
+      {formatScore(score)}
+    </Badge>
+  )
+}
+
+/**
+ * The organizer's read of what reviewers scored and wrote — the far side of the
+ * review roundtrip. Reviewer identity is already anonymized server-side when the
+ * plan requires it, so this only has to render what it's given.
+ */
+function ReviewsSection({ reviews }: { reviews: SessionReviewAggregate }) {
+  const max = scaleMax(reviews.scale)
+  const scored = reviews.criteria.filter((criterion) => criterion.average !== null)
+
+  return (
+    <section>
+      <PanelHeading title="Reviews" />
+      {reviews.review_count === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          No reviews yet. Scores appear here once reviewers submit their scorecards.
+        </p>
+      ) : (
+        <div className="mt-2 space-y-4">
+          <div className="rounded-lg border border-border bg-muted/40 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                <span className="text-lg font-semibold tabular-nums">
+                  {formatScore(reviews.avg_overall)}
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {formatScore(reviews.avg_overall)}{' '}
+                  <span className="font-normal text-muted-foreground">/ {max} average</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {reviews.review_count} review{reviews.review_count === 1 ? '' : 's'}
+                  {reviews.any_abstained
+                    ? ` · ${reviews.abstained_count} abstained`
+                    : ''}
+                </p>
+              </div>
+            </div>
+            {scored.length > 0 && (
+              <dl className="mt-3 flex flex-wrap gap-2">
+                {scored.map((criterion) => (
+                  <div
+                    key={criterion.name}
+                    className="rounded-md border border-border bg-card px-2.5 py-1.5"
+                  >
+                    <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                      {criterion.name}
+                    </dt>
+                    <dd className="text-sm font-medium tabular-nums text-foreground">
+                      {formatScore(criterion.average)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+
+          <ul className="space-y-2">
+            {reviews.reviews.map((verdict, index) => (
+              <li
+                key={`${verdict.reviewer}-${index}`}
+                className="rounded-lg border border-border px-3 py-2.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">{verdict.reviewer}</p>
+                  {verdict.abstained ? (
+                    <Badge variant="muted">Abstained</Badge>
+                  ) : (
+                    <Badge variant="default" className="gap-1 tabular-nums">
+                      <Star className="h-3 w-3" />
+                      {formatScore(verdict.overall)}
+                    </Badge>
+                  )}
+                </div>
+                {verdict.comment && (
+                  <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                    {verdict.comment}
+                  </p>
+                )}
+                {verdict.abstained && verdict.abstain_reason && (
+                  <p className="mt-1.5 text-sm italic leading-relaxed text-muted-foreground">
+                    {verdict.abstain_reason}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }
 

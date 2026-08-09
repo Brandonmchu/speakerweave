@@ -208,3 +208,18 @@ async def evaluation_summary(
 ):
     _user_id, org_id = auth
     return await evaluations.get_summary(org_id, plan_id)
+
+
+@router.get("/sessions/{session_id}/reviews")
+async def session_reviews(
+    session_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Organizer read of every reviewer verdict on one session.
+
+    The same aggregate GET /api/sessions/{id} embeds, exposed on its own so a
+    caller that only wants the scores doesn't refetch the whole submission.
+    Reviewer identity honours each review's plan `anonymized` flag.
+    """
+    _user_id, org_id = auth
+    return await evaluations.get_session_reviews(org_id, session_id)

@@ -233,7 +233,13 @@ export interface Submission {
   submitted_at?: string | null
   created_at?: string | null
   source_form_id?: string | null
+  track_id?: string | null
+  format_id?: string | null
   submitter?: SubmitterSummary | null
+  /** Average reviewer score across completed reviews (null = none yet). */
+  review_score?: number | null
+  /** How many completed reviews the average is drawn from. */
+  review_count?: number | null
 }
 
 export type SubmissionDecision = 'approve' | 'maybe' | 'deny'
@@ -284,6 +290,8 @@ export interface PublicForm {
   welcome_html?: string | null
   confirmation_html?: string | null
   closed?: boolean
+  /** Raw submission deadline (ISO), so the form can show it and count down. */
+  close_at?: string | null
   submission_limit?: number | null
   fields: PublicFormField[]
   /**
@@ -367,6 +375,7 @@ export async function getPublicForm(slug: string): Promise<PublicForm> {
     welcome_html: wire.form.welcome_html ?? null,
     confirmation_html: settings.confirmation_html ?? null,
     closed: closeAt !== null && closeAt.getTime() < Date.now(),
+    close_at: settings.close_at ?? null,
     submission_limit: settings.submission_limit ?? null,
     fields: wire.fields.map((f) => ({
       id: f.id,
@@ -418,20 +427,95 @@ export interface SessionParticipant {
   email?: string | null
 }
 
+/**
+ * One reviewer's verdict on a submission, resolved for the organizer. The
+ * `reviewer` label is already anonymized server-side ("Reviewer 1") when the
+ * plan hides identity, so the UI never has to decide what to reveal.
+ */
+export interface SessionReviewVerdict {
+  reviewer: string
+  anonymized: boolean
+  overall: number | null
+  comment?: string | null
+  scores?: Record<string, number>
+  abstained: boolean
+  abstain_reason?: string | null
+}
+
+export interface SessionReviewCriterion {
+  name: string
+  weight?: number | null
+  average: number | null
+}
+
+/** The aggregate of what reviewers scored and wrote about one submission. */
+export interface SessionReviewAggregate {
+  review_count: number
+  completed_count: number
+  abstained_count: number
+  any_abstained: boolean
+  avg_overall: number | null
+  scale: string
+  criteria: SessionReviewCriterion[]
+  reviews: SessionReviewVerdict[]
+}
+
+const EMPTY_REVIEW_AGGREGATE: SessionReviewAggregate = {
+  review_count: 0,
+  completed_count: 0,
+  abstained_count: 0,
+  any_abstained: false,
+  avg_overall: null,
+  scale: '1_5',
+  criteria: [],
+  reviews: [],
+}
+
 export interface SessionDetail {
   session: Submission
   answers: SessionAnswer[]
   participants: SessionParticipant[]
+  reviews: SessionReviewAggregate
 }
 
-/** GET /api/sessions/{id} → {session, answers, participants}. */
+/** GET /api/sessions/{id} → {session, answers, participants, reviews}. */
 export async function getSessionDetail(id: string): Promise<SessionDetail> {
   const wire = await apiGet<Partial<SessionDetail>>(`/api/sessions/${encodeURIComponent(id)}`)
   return {
     session: (wire.session ?? { id, title: '', status: 'pending' }) as Submission,
     answers: Array.isArray(wire.answers) ? wire.answers : [],
     participants: Array.isArray(wire.participants) ? wire.participants : [],
+    reviews: wire.reviews ?? EMPTY_REVIEW_AGGREGATE,
   }
+}
+
+export interface ManualSubmissionInput {
+  title: string
+  submitter_name?: string
+  submitter_email: string
+  abstract?: string
+  track_id?: string | null
+  format_id?: string | null
+}
+
+/** POST /api/events/{eventId}/sessions → the new pending submission. */
+export async function createSubmission(
+  eventId: string,
+  input: ManualSubmissionInput
+): Promise<Submission> {
+  const wire = await apiPost<{ session?: Submission } | Submission>(
+    `/api/events/${encodeURIComponent(eventId)}/sessions`,
+    {
+      title: input.title,
+      submitter_name: input.submitter_name ?? '',
+      submitter_email: input.submitter_email,
+      abstract: input.abstract ?? '',
+      track_id: input.track_id || undefined,
+      format_id: input.format_id || undefined,
+    }
+  )
+  const session = (wire as { session?: Submission })?.session
+  return session ?? (wire as Submission)
 }
 
 /** PATCH /api/sessions/{id} {status} → {session}. Bare rows tolerated. */
@@ -461,4 +545,104 @@ export function submitPublicForm(slug: string, input: SubmissionInput): Promise<
     description: input.description ?? '',
     answers: input.answers,
   })
+}
+
+// ── Submitter self-service (magic-link, no Clerk) ────────────────────────────
+// After submitting, a speaker asks for a link to their email, then views /
+// edits / withdraws their own submissions while the CFP is open. The token is
+// the bearer credential every call carries; /public paths never send Authorization.
+
+export interface SubmitterSubmission {
+  id: string
+  friendly_id?: string | null
+  title: string
+  abstract: string
+  track?: string | null
+  track_id?: string | null
+  format?: string | null
+  format_id?: string | null
+  status: SubmissionStatus
+  submitted_at?: string | null
+  /** The CFP is still open AND the submission is still pending. */
+  editable: boolean
+  /** A final accept/decline has been made. */
+  decided: boolean
+  decision?: string | null
+  feedback?: string | null
+}
+
+export interface SubmitterTaxonomyItem {
+  id: string
+  name: string
+}
+
+export interface SubmitterEventInfo {
+  id?: string | null
+  name?: string | null
+  close_at?: string | null
+  closed?: boolean
+}
+
+export interface SubmitterDashboardData {
+  event: SubmitterEventInfo | null
+  tracks: SubmitterTaxonomyItem[]
+  formats: SubmitterTaxonomyItem[]
+  submissions: SubmitterSubmission[]
+}
+
+export interface SubmitterEditInput {
+  title?: string
+  abstract?: string
+  track_id?: string | null
+  format_id?: string | null
+}
+
+/** Ask the backend to email a manage link. Always resolves 200 with a generic
+ * message — it never reveals whether the address has any submissions. */
+export function requestManageLink(
+  slug: string,
+  email: string
+): Promise<{ ok: boolean; message: string }> {
+  return apiPost<{ ok: boolean; message: string }>(
+    `/public/forms/${encodeURIComponent(slug)}/manage-link`,
+    { email }
+  )
+}
+
+/** GET this submitter's submissions + the event's editable taxonomy. */
+export async function getSubmitterSubmissions(token: string): Promise<SubmitterDashboardData> {
+  const wire = await apiGet<Partial<SubmitterDashboardData>>(
+    `/public/submissions?token=${encodeURIComponent(token)}`
+  )
+  return {
+    event: wire.event ?? null,
+    tracks: Array.isArray(wire.tracks) ? wire.tracks : [],
+    formats: Array.isArray(wire.formats) ? wire.formats : [],
+    submissions: Array.isArray(wire.submissions) ? wire.submissions : [],
+  }
+}
+
+export async function editSubmitterSubmission(
+  id: string,
+  token: string,
+  input: SubmitterEditInput
+): Promise<SubmitterSubmission> {
+  const wire = await apiPatch<{ submission?: SubmitterSubmission } | SubmitterSubmission>(
+    `/public/submissions/${encodeURIComponent(id)}`,
+    { token, ...input }
+  )
+  const submission = (wire as { submission?: SubmitterSubmission })?.submission
+  return submission ?? (wire as SubmitterSubmission)
+}
+
+export async function withdrawSubmitterSubmission(
+  id: string,
+  token: string
+): Promise<SubmitterSubmission> {
+  const wire = await apiPost<{ submission?: SubmitterSubmission } | SubmitterSubmission>(
+    `/public/submissions/${encodeURIComponent(id)}/withdraw`,
+    { token }
+  )
+  const submission = (wire as { submission?: SubmitterSubmission })?.submission
+  return submission ?? (wire as SubmitterSubmission)
 }

@@ -16,6 +16,7 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, EmailStr, Field
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
+from services import submitter_selfservice
 from services.forms import (
     load_form_layout,
     load_question_rules,
@@ -400,3 +401,86 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
             )
 
     return {"id": session["id"], "friendly_id": session.get("friendly_id")}
+
+
+# ── submitter self-service ──────────────────────────────────────────────────
+# After submitting, a speaker can manage their own submissions. There is no
+# Clerk account: a magic-link token (scope 'submitter') is the bearer credential
+# every call below carries, scoping it to one contact and one event's talks.
+
+
+class ManageLinkRequest(BaseModel):
+    email: EmailStr
+
+
+class SubmissionEditRequest(BaseModel):
+    # Token in the body OR the X-Submitter-Token header (either works).
+    token: str | None = Field(default=None, max_length=400)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    abstract: str | None = Field(default=None, max_length=10000)
+    # A track/format id, "" / null to clear. Validated against the event server-side.
+    track_id: str | None = Field(default=None, max_length=64)
+    format_id: str | None = Field(default=None, max_length=64)
+
+
+class WithdrawRequest(BaseModel):
+    token: str | None = Field(default=None, max_length=400)
+
+
+async def _require_submitter(token: str | None) -> tuple[str, str]:
+    """Resolve a submitter token to ``(org_id, contact_id)`` or 401.
+
+    Never trust an id in the path or body without this: the token is the only
+    thing that says which contact — and therefore which event's submissions —
+    the caller may touch."""
+    try:
+        return await submitter_selfservice.validate_token(token or "")
+    except submitter_selfservice.InvalidSubmitterToken as exc:
+        raise HTTPException(
+            status_code=401, detail="This manage link is invalid or has expired."
+        ) from exc
+
+
+@router.post("/forms/{slug}/manage-link")
+@limiter.limit(RATE_PUBLIC_WRITE)
+async def request_manage_link(request: Request, slug: str, payload: ManageLinkRequest):
+    """Email a manage link IF this address owns ≥1 submission for the event.
+
+    ALWAYS returns the same generic 200, whether or not the email exists, so the
+    endpoint can't be used to discover who submitted."""
+    form = await _get_form_by_slug(slug)
+    await submitter_selfservice.issue_manage_link(
+        form["org_id"], form["event_id"], slug, str(payload.email)
+    )
+    return {"ok": True, "message": submitter_selfservice.MANAGE_LINK_MESSAGE}
+
+
+@router.get("/submissions")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def list_my_submissions(request: Request, token: str = ""):
+    """This submitter's submissions + the event's editable taxonomy."""
+    org_id, contact_id = await _require_submitter(token)
+    return await submitter_selfservice.list_submissions(org_id, contact_id)
+
+
+@router.patch("/submissions/{submission_id}")
+@limiter.limit(RATE_PUBLIC_WRITE)
+async def edit_my_submission(
+    request: Request, submission_id: str, payload: SubmissionEditRequest
+):
+    """Edit title/abstract/track/format while the submission is still editable."""
+    token = payload.token or request.headers.get("X-Submitter-Token")
+    org_id, contact_id = await _require_submitter(token)
+    patch = payload.model_dump(exclude_unset=True, exclude={"token"})
+    return await submitter_selfservice.edit_submission(org_id, contact_id, submission_id, patch)
+
+
+@router.post("/submissions/{submission_id}/withdraw")
+@limiter.limit(RATE_PUBLIC_WRITE)
+async def withdraw_my_submission(
+    request: Request, submission_id: str, payload: WithdrawRequest
+):
+    """Withdraw a still-pending, still-open submission."""
+    token = payload.token or request.headers.get("X-Submitter-Token")
+    org_id, contact_id = await _require_submitter(token)
+    return await submitter_selfservice.withdraw_submission(org_id, contact_id, submission_id)

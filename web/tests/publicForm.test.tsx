@@ -65,6 +65,13 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
+// The form now autosaves a draft to localStorage keyed by slug. Every test here
+// reuses the slug 'cfp', so reset storage between tests or one test's in-progress
+// answers hydrate the next.
+beforeEach(() => {
+  window.localStorage.clear()
+})
+
 let submitted: Array<Record<string, unknown>> = []
 
 function renderForm() {

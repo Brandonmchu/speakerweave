@@ -8,17 +8,20 @@
  * below the fetchers is pure and unit-tested; the grid does no date maths of
  * its own.
  *
- * TIME, for now: a placement is written as an explicit-UTC timestamp built from
- * the event's day and the slot's minute offset — `2026-10-12T09:30:00+00:00` —
- * and read back by its UTC clock. So "09:30 on the grid" round-trips to "09:30
- * on the grid" regardless of where the organizer's browser or the database
- * server happens to be. The event's IANA `timezone` is carried through the
- * payload but is NOT yet applied; doing that properly means a real zoned
- * conversion on both sides, and getting it half-right would move existing
- * sessions by an hour twice a year.
+ * TIME: the grid is drawn in the EVENT's timezone, not the browser's and not
+ * UTC — the same zone the public schedule (routes/program_routes.py) renders in,
+ * so the builder and the published page agree to the minute. A slot at local
+ * 09:00 on a conference day is stored as the UTC instant that *is* 09:00 in the
+ * event zone (`2026-10-12T16:00:00+00:00` for America/Los_Angeles in October),
+ * and read back by converting that instant into the event zone. The zoned
+ * conversions live in `zonedMinutes` / `zonedDay` / `buildZonedTimestamp` and are
+ * unit-tested; when the event carries no zone they fall back to plain UTC, which
+ * is the old behaviour byte for byte. Conflict ordering still uses absolute epoch
+ * minutes (timezone-independent) so equal clock times on different days never
+ * alias.
  */
 
-import { apiGet, apiPatch, unwrapList } from '@/lib/api'
+import { apiGet, apiPatch, apiPost, unwrapList } from '@/lib/api'
 
 // --- wire shapes ----------------------------------------------------------
 
@@ -64,13 +67,18 @@ export interface AgendaTrack {
 export interface AgendaEvent {
   id: string
   name?: string | null
+  /** Public event slug, for the /e/{slug}/schedule link. */
+  slug?: string | null
+  /** IANA name the grid labels + groups days in, e.g. "America/Los_Angeles". */
   timezone?: string | null
   starts_at?: string | null
   ends_at?: string | null
-  /** Postgres `time` — "09:00:00". */
+  /** Postgres `time` — "09:00:00". Read as event-local wall clock. */
   day_start?: string | null
   day_end?: string | null
   slot_minutes?: number | null
+  /** When the organizer last pressed "Publish schedule". Never gates visibility. */
+  program_published_at?: string | null
 }
 
 export interface Agenda {
@@ -209,6 +217,158 @@ export function buildTimestamp(day: string, minutes: number): string {
   return `${at.toISOString().slice(0, 19)}+00:00`
 }
 
+// --- event-timezone conversions -------------------------------------------
+//
+// The grid is drawn in the event's zone. These turn an absolute instant into
+// the event-local clock/day the grid positions by, and back again, using the
+// browser's own Intl database — no extra dependency. A null/blank zone means
+// "just use UTC", which is exactly the old behaviour.
+
+/**
+ * The zone's offset (local − UTC), in minutes, at a given instant. Computed by
+ * formatting the instant in the zone and diffing — the standard trick, and the
+ * one place DST is accounted for.
+ */
+export function zoneOffsetMinutes(at: Date, tz: string | null | undefined): number {
+  if (!tz) return 0
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(at)
+    const map: Record<string, number> = {}
+    for (const part of parts) {
+      if (part.type !== 'literal') map[part.type] = Number(part.value)
+    }
+    const asUtc = Date.UTC(
+      map.year,
+      (map.month ?? 1) - 1,
+      map.day ?? 1,
+      (map.hour ?? 0) % 24,
+      map.minute ?? 0,
+      map.second ?? 0
+    )
+    return Math.round((asUtc - at.getTime()) / 60_000)
+  } catch {
+    return 0
+  }
+}
+
+/** Minutes past local midnight in the event zone — where a card sits vertically. */
+export function zonedMinutes(
+  value: string | null | undefined,
+  tz: string | null | undefined
+): number | null {
+  const at = toUtcDate(value)
+  if (!at) return null
+  if (!tz) return at.getUTCHours() * 60 + at.getUTCMinutes()
+  const local = new Date(at.getTime() + zoneOffsetMinutes(at, tz) * 60_000)
+  return local.getUTCHours() * 60 + local.getUTCMinutes()
+}
+
+/** "YYYY-MM-DD" of the instant's *local* date in the event zone — which day tab. */
+export function zonedDay(
+  value: string | null | undefined,
+  tz: string | null | undefined
+): string | null {
+  const at = toUtcDate(value)
+  if (!at) return null
+  if (!tz) return at.toISOString().slice(0, 10)
+  const local = new Date(at.getTime() + zoneOffsetMinutes(at, tz) * 60_000)
+  return local.toISOString().slice(0, 10)
+}
+
+/**
+ * (local day, local minutes, zone) -> the UTC instant to store. The inverse of
+ * `zonedMinutes`/`zonedDay`: the clock the organizer dropped the card at, in the
+ * event's zone, resolved to the one instant that reads back to it. Refined once
+ * so a DST-boundary drop lands on the right side.
+ */
+export function buildZonedTimestamp(
+  day: string,
+  minutes: number,
+  tz: string | null | undefined
+): string {
+  if (!tz) return buildTimestamp(day, minutes)
+  const [year, month, date] = day.split('-').map(Number)
+  const naiveUtc = Date.UTC(year, (month ?? 1) - 1, date ?? 1, 0, minutes)
+  let offset = zoneOffsetMinutes(new Date(naiveUtc), tz)
+  let utcMs = naiveUtc - offset * 60_000
+  offset = zoneOffsetMinutes(new Date(utcMs), tz)
+  utcMs = naiveUtc - offset * 60_000
+  return `${new Date(utcMs).toISOString().slice(0, 19)}+00:00`
+}
+
+/**
+ * Add whole minutes to an explicit-UTC timestamp, preserving the `+00:00` form.
+ *
+ * Used to derive `ends_at` from a single start *instant* rather than converting
+ * the end wall-time separately: a session that spans a DST transition must keep
+ * its real duration, and adding minutes to the start instant does exactly that —
+ * a 60-minute talk stays 60 real minutes even across the LA fall-back.
+ */
+export function addMinutesToIso(value: string, minutes: number): string {
+  const at = toUtcDate(value)
+  if (!at) return value
+  const shifted = new Date(at.getTime() + minutes * 60_000)
+  return `${shifted.toISOString().slice(0, 19)}+00:00`
+}
+
+/**
+ * Epoch minutes shifted into the event's local wall clock.
+ *
+ * Conflict detection compares differences, so a constant shift never changes
+ * which sessions collide (any pair that actually overlaps shares one instant and
+ * thus one offset). Shifting means the `detail` string — built from the shared
+ * overlap minute via `format_minutes` — prints in the event zone too, so the
+ * conflict banner reads the same clock as the grid. Without a zone this is plain
+ * epoch minutes (UTC), the old behaviour.
+ */
+export function localEpochMinutes(
+  value: string | null | undefined,
+  tz: string | null | undefined
+): number | null {
+  const at = toUtcDate(value)
+  if (!at) return null
+  const epoch = Math.floor(at.getTime() / 60_000)
+  return tz ? epoch + zoneOffsetMinutes(at, tz) : epoch
+}
+
+/** A short zone abbreviation at a reference instant — "PDT", "GMT+9", "". */
+export function zoneAbbrev(
+  tz: string | null | undefined,
+  referenceIso?: string | null
+): string {
+  if (!tz) return ''
+  const ref = referenceIso ? new Date(referenceIso) : new Date()
+  const at = Number.isNaN(ref.getTime()) ? new Date() : ref
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'short',
+    }).formatToParts(at)
+    return parts.find((part) => part.type === 'timeZoneName')?.value ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** "America/Los_Angeles (PDT)" — the small tz hint next to the grid's times. */
+export function zoneHint(
+  tz: string | null | undefined,
+  referenceIso?: string | null
+): string {
+  if (!tz) return ''
+  const abbrev = zoneAbbrev(tz, referenceIso)
+  return abbrev ? `${tz} (${abbrev})` : tz
+}
+
 /**
  * The day new placements are written into: the event's own start, else the
  * earliest day something is already scheduled on, else today. A single-day
@@ -225,6 +385,55 @@ export function agendaDay(agenda: Agenda | null | undefined): string {
   if (days.length) return days[0]
 
   return new Date().toISOString().slice(0, 10)
+}
+
+/**
+ * Every conference day the builder can show, as sorted "YYYY-MM-DD" keys in the
+ * event zone. The union of the event's own start→end span and any day something
+ * is already scheduled on, so a brand-new second day is a tab you can drag onto
+ * even before it holds anything. A single-day event yields exactly one key (and
+ * the UI shows no switcher).
+ */
+export function agendaDays(
+  agenda: Agenda | null | undefined,
+  tz: string | null | undefined
+): string[] {
+  const days = new Set<string>()
+
+  const start = zonedDay(agenda?.event?.starts_at, tz)
+  // The event's end is exclusive: an event ending exactly at local midnight
+  // belongs to the previous day, so read the calendar day of the instant just
+  // before the end rather than of the end itself (which would add a stray tab).
+  const endInstant = toUtcDate(agenda?.event?.ends_at)
+  const end = endInstant
+    ? zonedDay(new Date(endInstant.getTime() - 60_000).toISOString(), tz)
+    : null
+  if (start) {
+    days.add(start)
+    if (end && end > start) {
+      // Walk calendar days start→end inclusive. Dates are tz-independent once
+      // we hold the local day strings, so step through UTC midnights.
+      const [ys, ms, ds] = start.split('-').map(Number)
+      const [ye, me, de] = end.split('-').map(Number)
+      let cursor = Date.UTC(ys, (ms ?? 1) - 1, ds ?? 1)
+      const last = Date.UTC(ye, (me ?? 1) - 1, de ?? 1)
+      // Guard against a pathological span so the loop is always bounded.
+      let guard = 0
+      while (cursor < last && guard < 366) {
+        cursor += 24 * 60 * 60 * 1000
+        days.add(new Date(cursor).toISOString().slice(0, 10))
+        guard += 1
+      }
+    }
+  }
+
+  for (const session of agenda?.sessions ?? []) {
+    const day = zonedDay(session.starts_at, tz)
+    if (day) days.add(day)
+  }
+
+  if (days.size === 0) days.add(agendaDay(agenda))
+  return [...days].sort()
 }
 
 // --- calls ----------------------------------------------------------------
@@ -274,4 +483,25 @@ export async function scheduleSession(
   )
   const session = (wire as { session?: AgendaSession })?.session
   return session ?? (wire as AgendaSession)
+}
+
+/** The result of pressing "Publish schedule": the stamp + the public link. */
+export interface PublishResult {
+  event: { id: string; slug: string | null; program_published_at: string | null }
+  /** "/e/{slug}/schedule", or null when the event somehow has no slug. */
+  public_url: string | null
+}
+
+/**
+ * POST /api/events/{id}/schedule/publish — record that the programme is
+ * published and get the public schedule URL back.
+ *
+ * This does NOT gate public visibility: the published schedule already serves
+ * accepted+scheduled sessions. Publishing is an explicit affirmation + a
+ * timestamp + the link to share.
+ */
+export async function publishSchedule(eventId: string): Promise<PublishResult> {
+  return apiPost<PublishResult>(
+    `/api/events/${encodeURIComponent(eventId)}/schedule/publish`
+  )
 }

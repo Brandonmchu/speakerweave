@@ -11,11 +11,12 @@ from datetime import datetime, time, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from auth import get_current_user_and_org, verify_org_access
 from services import mailer
 from services.comms import DEFAULT_TEMPLATES, render_template
+from services.evaluations import session_review_aggregate, session_review_scores
 from services.forms import load_form_layout
 from services.invites import (
     InviteTargetNotFound,
@@ -57,6 +58,25 @@ DEFAULT_FORMATS = (
 
 class SessionPatchRequest(BaseModel):
     status: str
+
+
+class ManualSubmissionRequest(BaseModel):
+    """An organizer typing in a submission that never came through a CFP form."""
+
+    title: str = Field(..., min_length=1, max_length=300)
+    submitter_name: str = Field(default="", max_length=200)
+    submitter_email: str = Field(..., min_length=3, max_length=320)
+    abstract: str | None = Field(default=None, max_length=50_000)
+    track_id: str | None = Field(default=None, max_length=64)
+    format_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("submitter_email")
+    @classmethod
+    def looks_like_email(cls, value: str) -> str:
+        value = value.strip()
+        if "@" not in value or value.startswith("@") or value.endswith("@"):
+            raise ValueError("Enter a valid email address")
+        return value
 
 
 class SessionDecisionRequest(BaseModel):
@@ -287,10 +307,206 @@ async def list_submissions(
         )
         contacts_by_id = {row["id"]: row for row in rows(c_res)}
 
+    # Average review score per submission, so the inbox can show a score column
+    # and sort/compare by it — the organizer's read of the reviewers' verdicts.
+    scores_by_session = await session_review_scores(
+        org_id, [str(s["id"]) for s in sessions if s.get("id")]
+    )
+
     for session in sessions:
         session["submitter"] = contacts_by_id.get(session.get("submitter_contact_id"))
+        score = scores_by_session.get(str(session.get("id"))) or {}
+        session["review_score"] = score.get("review_score")
+        session["review_count"] = score.get("review_count", 0)
 
     return {"event": event, "submissions": sessions, "count": len(sessions)}
+
+
+async def _upsert_submission_contact(
+    org_id: str, event_id: str, email: str, first_name: str, last_name: str
+) -> dict:
+    """Find-or-create the submitter contact for a manual add.
+
+    contacts is unique on (event_id, email); an organizer adding a second talk
+    for the same person must reuse the existing contact, not collide. Names fill
+    only when the stored contact has none — a manual add never clobbers a richer
+    record.
+    """
+    normalized = email.strip().lower()
+    existing = first(
+        await db(
+            lambda: supabase.table("contacts")
+            .select("*")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("email", normalized)
+            .limit(1)
+            .execute(),
+            "manual_submission_contact_lookup",
+        )
+    )
+    if existing:
+        patch: dict = {}
+        if first_name and not (existing.get("first_name") or "").strip():
+            patch["first_name"] = first_name
+        if last_name and not (existing.get("last_name") or "").strip():
+            patch["last_name"] = last_name
+        if patch:
+            updated = first(
+                await db(
+                    lambda: supabase.table("contacts")
+                    .update(patch)
+                    .eq("id", existing["id"])
+                    .eq("org_id", org_id)
+                    .execute(),
+                    "manual_submission_contact_fill",
+                )
+            )
+            return updated or existing
+        return existing
+
+    created = first(
+        await db(
+            lambda: supabase.table("contacts")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "event_id": event_id,
+                    "email": normalized,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                }
+            )
+            .execute(),
+            "manual_submission_contact_create",
+        )
+    )
+    if not created:
+        raise HTTPException(status_code=500, detail="Could not create the submitter contact")
+    return created
+
+
+async def _verify_taxonomy(kind: str, item_id: str, event_id: str, org_id: str, label: str) -> None:
+    """A track/format named on a manual add must belong to this event and org."""
+    found = first(
+        await db(
+            lambda: supabase.table(kind)
+            .select("id")
+            .eq("id", item_id)
+            .eq("event_id", event_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            f"manual_submission_{kind}_lookup",
+        )
+    )
+    if not found:
+        raise HTTPException(status_code=400, detail=f"{label} not found")
+
+
+@router.post("/events/{event_id}/sessions", status_code=201)
+async def create_manual_submission(
+    event_id: str,
+    payload: ManualSubmissionRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Create a submission by hand — the same shape a CFP form would produce
+    (contact + pending session + submitter participant), minus the form."""
+    _user_id, org_id = auth
+    await fetch_scoped("events", event_id, org_id, "Event")
+
+    if payload.track_id:
+        await _verify_taxonomy("tracks", payload.track_id, event_id, org_id, "Track")
+    if payload.format_id:
+        await _verify_taxonomy("formats", payload.format_id, event_id, org_id, "Format")
+
+    parts = payload.submitter_name.strip().split()
+    first_name = parts[0] if parts else ""
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+    contact = await _upsert_submission_contact(
+        org_id, event_id, payload.submitter_email, first_name, last_name
+    )
+
+    counter = await db(
+        lambda: supabase.rpc("next_friendly_id", {"p_event_id": event_id}).execute(),
+        "manual_submission_friendly_id",
+    )
+    friendly_id_raw = getattr(counter, "data", None)
+    if isinstance(friendly_id_raw, list) and friendly_id_raw:
+        friendly_id_raw = friendly_id_raw[0]
+    if friendly_id_raw is None:
+        raise HTTPException(status_code=500, detail="Could not allocate submission id")
+
+    session_payload = {
+        "org_id": org_id,
+        "event_id": event_id,
+        "friendly_id_raw": int(friendly_id_raw),
+        "title": payload.title.strip(),
+        "description": (payload.abstract or "").strip(),
+        "status": "pending",
+        "is_abstract": True,
+        "form_answers": {},
+        "submitter_contact_id": contact["id"],
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if payload.track_id:
+        session_payload["track_id"] = payload.track_id
+    if payload.format_id:
+        session_payload["format_id"] = payload.format_id
+
+    session = first(
+        await db(
+            lambda: supabase.table("sessions").insert(session_payload).execute(),
+            "manual_submission_session_create",
+        )
+    )
+    if not session:
+        raise HTTPException(status_code=500, detail="Could not create submission")
+
+    await db(
+        lambda: supabase.table("session_participants")
+        .insert(
+            {
+                "org_id": org_id,
+                "session_id": session["id"],
+                "contact_id": contact["id"],
+                "role": "submitter",
+                "is_primary": True,
+            }
+        )
+        .execute(),
+        "manual_submission_participant_create",
+    )
+
+    if payload.track_id:
+        # Mirror the CFP path: the primary track also lives in session_tracks.
+        # Best-effort — the submission and its primary track_id already exist.
+        try:
+            await db(
+                lambda: supabase.table("session_tracks")
+                .upsert(
+                    {"org_id": org_id, "session_id": session["id"], "track_id": payload.track_id},
+                    on_conflict="session_id,track_id",
+                )
+                .execute(),
+                "manual_submission_session_track_create",
+            )
+        except Exception:
+            logger.warning(
+                "manual submission: could not persist session track session_id=%s",
+                session["id"],
+                exc_info=True,
+            )
+
+    session["submitter"] = {
+        "id": contact["id"],
+        "first_name": contact.get("first_name"),
+        "last_name": contact.get("last_name"),
+        "email": contact.get("email"),
+    }
+    session["review_score"] = None
+    session["review_count"] = 0
+    return {"session": session}
 
 
 async def _resolve_answers(session: dict, org_id: str) -> list[dict]:
@@ -396,13 +612,18 @@ async def _load_participants(session_id: str, org_id: str) -> list[dict]:
 
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, auth: tuple = Depends(get_current_user_and_org)):
-    """One submission, everything the review drawer shows."""
+    """One submission, everything the review drawer shows.
+
+    `reviews` is the organizer-facing read of what evaluators scored and wrote:
+    the aggregate that closes the reviewer-writes -> organizer-reads roundtrip.
+    """
     _user_id, org_id = auth
     session = await fetch_scoped("sessions", session_id, org_id, "Session")
     return {
         "session": session,
         "answers": await _resolve_answers(session, org_id),
         "participants": await _load_participants(session_id, org_id),
+        "reviews": await session_review_aggregate(org_id, session_id),
     }
 
 

@@ -31,12 +31,14 @@ PATCH_TARGET_MODULES = (
     "routes.taxonomy_routes",
     "routes.v1_routes",
     "services.api_keys",
+    "services.evaluations",
     "services.forms",
     "services.magic_links",
     "services.onboarding",
     "services.org_scope",
     "services.portal",
     "services.slugs",
+    "services.submitter_selfservice",
 )
 
 

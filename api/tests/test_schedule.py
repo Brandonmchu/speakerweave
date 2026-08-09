@@ -750,3 +750,88 @@ def test_an_unrelated_db_error_is_not_disguised_as_a_conflict(
             headers=auth_headers,
             json={"room_id": "room-a"},
         )
+
+
+# -- POST /events/{id}/schedule/publish ------------------------------------
+
+
+def test_publish_stamps_the_event_and_returns_the_public_url(
+    agenda_client, auth_headers, agenda_db
+):
+    response = agenda_client.post(
+        f"/api/events/{TEST_EVENT_ID}/schedule/publish", headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # The event now carries a publish timestamp...
+    stamped = agenda_db.rows("events")
+    event_row = next(row for row in stamped if row["id"] == TEST_EVENT_ID)
+    assert event_row["program_published_at"] is not None
+    assert body["event"]["program_published_at"] == event_row["program_published_at"]
+    # ...and the response hands back the shareable public schedule link.
+    assert body["public_url"] == "/e/ai-builders-summit/schedule"
+    assert body["event"]["slug"] == "ai-builders-summit"
+
+
+def test_publish_requires_auth(agenda_client):
+    assert (
+        agenda_client.post(f"/api/events/{TEST_EVENT_ID}/schedule/publish").status_code
+        == 401
+    )
+
+
+def test_publish_on_a_foreign_event_404s_and_stamps_nothing(
+    agenda_client, auth_headers, agenda_db
+):
+    response = agenda_client.post(
+        f"/api/events/{OTHER_EVENT_ID}/schedule/publish", headers=auth_headers
+    )
+
+    assert response.status_code == 404
+    # The other org's event is untouched — no cross-org publish.
+    other = next(row for row in agenda_db.rows("events") if row["id"] == OTHER_EVENT_ID)
+    assert other.get("program_published_at") is None
+
+
+def test_publish_does_not_change_what_the_public_schedule_returns(
+    agenda_client, auth_headers, agenda_db
+):
+    """The safety invariant: publish is an affirmation, not a visibility gate.
+
+    The public schedule serves accepted+scheduled sessions by exactly the same
+    criteria before and after publishing — the `program_published_at` stamp is
+    never consulted when deciding what the public sees.
+    """
+    seed_session(
+        agenda_db, "shown", status="accepted", starts_at=ts("09:00"), ends_at=ts("09:45"), room_id="room-a"
+    )
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from routes import program_routes
+    from security.rate_limiting import limiter
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(program_routes, "supabase", agenda_db)
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.include_router(program_routes.router)
+    program_client = TestClient(app)
+
+    def public_ids() -> list[str]:
+        body = program_client.get("/public/program/ai-builders-summit/schedule").json()
+        return [s["id"] for day in body["days"] for s in day["sessions"]]
+
+    before = public_ids()
+    assert before == ["shown"]
+
+    publish = agenda_client.post(
+        f"/api/events/{TEST_EVENT_ID}/schedule/publish", headers=auth_headers
+    )
+    assert publish.status_code == 200
+
+    # Same rows, same criteria — publishing changed nothing the public can see.
+    assert public_ids() == before
+    monkeypatch.undo()

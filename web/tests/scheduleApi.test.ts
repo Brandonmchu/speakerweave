@@ -12,16 +12,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_DAY_START_MIN,
   DEFAULT_SLOT_MINUTES,
+  addMinutesToIso,
   agendaDay,
+  agendaDays,
   buildTimestamp,
+  buildZonedTimestamp,
   getAgenda,
   getAgendaConflicts,
   gridGeometry,
+  localEpochMinutes,
   parseClockMinutes,
+  publishSchedule,
   scheduleSession,
   timestampDay,
   timestampEpochMinutes,
   timestampMinutes,
+  zoneHint,
+  zonedDay,
+  zonedMinutes,
   type Agenda,
 } from '@/lib/scheduleApi'
 
@@ -235,5 +243,148 @@ describe('agendaDay', () => {
 
   it('falls back to today when nothing is dated', () => {
     expect(agendaDay(agenda({}))).toBe(new Date().toISOString().slice(0, 10))
+  })
+})
+
+describe('event-timezone conversions', () => {
+  const LA = 'America/Los_Angeles'
+
+  it('reads an instant back in the event zone, not UTC', () => {
+    // 16:00 UTC is 09:00 in Los Angeles (PDT) on this October day.
+    expect(zonedMinutes('2026-10-12T16:00:00+00:00', LA)).toBe(9 * 60)
+    expect(zonedDay('2026-10-12T16:00:00+00:00', LA)).toBe('2026-10-12')
+    // A small-hours UTC instant still belongs to the previous local day.
+    expect(zonedDay('2026-10-13T05:00:00+00:00', LA)).toBe('2026-10-12') // 22:00 PDT
+  })
+
+  it('falls back to plain UTC when the event carries no zone', () => {
+    expect(zonedMinutes('2026-10-12T16:00:00+00:00', null)).toBe(16 * 60)
+    expect(zonedDay('2026-10-12T16:00:00+00:00', null)).toBe('2026-10-12')
+  })
+
+  it('round-trips a placement through the event zone', () => {
+    // Place at local 09:00 on Oct 12 -> stored 16:00 UTC -> reads back 09:00.
+    const wire = buildZonedTimestamp('2026-10-12', 9 * 60, LA)
+    expect(wire).toBe('2026-10-12T16:00:00+00:00')
+    expect(zonedMinutes(wire, LA)).toBe(9 * 60)
+    expect(zonedDay(wire, LA)).toBe('2026-10-12')
+  })
+
+  it('with no zone builds the same explicit-UTC stamp as before', () => {
+    expect(buildZonedTimestamp('2026-10-12', 570, null)).toBe('2026-10-12T09:30:00+00:00')
+  })
+
+  it('derives an end that preserves duration across a DST fall-back', () => {
+    // 2026-11-01 LA falls back 02:00 -> 01:00. A 60-minute talk placed at 01:30
+    // must stay 60 REAL minutes: deriving the end from the start instant does
+    // that, where converting the 02:30 wall-time on its own would double it.
+    const start = buildZonedTimestamp('2026-11-01', 90, LA) // 01:30 local
+    const end = addMinutesToIso(start, 60)
+    const startEpoch = timestampEpochMinutes(start)
+    const endEpoch = timestampEpochMinutes(end)
+    expect(startEpoch).not.toBeNull()
+    expect((endEpoch as number) - (startEpoch as number)).toBe(60)
+  })
+
+  it('addMinutesToIso keeps the explicit-UTC form and no-ops on junk', () => {
+    expect(addMinutesToIso('2026-10-12T16:00:00+00:00', 45)).toBe('2026-10-12T16:45:00+00:00')
+    expect(addMinutesToIso('not a timestamp', 30)).toBe('not a timestamp')
+  })
+
+  it('shifts the shared conflict clock into the event zone without aliasing days', () => {
+    const a = localEpochMinutes('2026-10-12T17:00:00+00:00', LA)
+    const b = localEpochMinutes('2026-10-13T17:00:00+00:00', LA)
+    expect(a).not.toBeNull()
+    expect((a as number) % 1440).toBe(10 * 60) // 17:00 UTC -> 10:00 PDT
+    expect(b).toBe((a as number) + 1440) // one calendar day apart, still
+  })
+
+  it('formats a tz hint like the public schedule', () => {
+    expect(zoneHint(LA, '2026-10-12T16:00:00+00:00')).toBe('America/Los_Angeles (PDT)')
+    expect(zoneHint(null)).toBe('')
+  })
+})
+
+describe('agendaDays', () => {
+  const LA = 'America/Los_Angeles'
+  const agenda = (over: Partial<Agenda>): Agenda => ({
+    event: null,
+    rooms: [],
+    tracks: [],
+    sessions: [],
+    ...over,
+  })
+
+  it('spans the event start->end inclusive, in the event zone', () => {
+    const days = agendaDays(
+      agenda({
+        event: {
+          id: 'e',
+          starts_at: '2026-10-12T15:00:00+00:00', // 08:00 PDT Oct 12
+          ends_at: '2026-10-14T01:00:00+00:00', // 18:00 PDT Oct 13
+        },
+      }),
+      LA
+    )
+    expect(days).toEqual(['2026-10-12', '2026-10-13'])
+  })
+
+  it('unions in any day a session already sits on', () => {
+    const days = agendaDays(
+      agenda({
+        event: { id: 'e', starts_at: '2026-10-12T16:00:00+00:00' },
+        sessions: [
+          {
+            id: 's',
+            title: 't',
+            status: 'accepted',
+            duration_min: 30,
+            speakers: [],
+            starts_at: '2026-10-13T16:00:00+00:00',
+          },
+        ],
+      }),
+      LA
+    )
+    expect(days).toEqual(['2026-10-12', '2026-10-13'])
+  })
+
+  it('is a single day for a single-day event', () => {
+    expect(
+      agendaDays(agenda({ event: { id: 'e', starts_at: '2026-10-12T16:00:00+00:00' } }), LA)
+    ).toEqual(['2026-10-12'])
+  })
+
+  it('does not add a stray day for an event ending exactly at local midnight', () => {
+    const days = agendaDays(
+      agenda({
+        event: {
+          id: 'e',
+          starts_at: '2026-10-12T08:00:00-07:00', // Oct 12 local
+          ends_at: '2026-10-14T00:00:00-07:00', // exclusive midnight -> ends Oct 13
+        },
+      }),
+      LA
+    )
+    expect(days).toEqual(['2026-10-12', '2026-10-13'])
+  })
+})
+
+describe('publishSchedule', () => {
+  it('POSTs to the publish endpoint and returns the public URL', async () => {
+    nextPayload = {
+      event: {
+        id: 'e',
+        slug: 'daisconf',
+        program_published_at: '2026-08-09T12:00:00+00:00',
+      },
+      public_url: '/e/daisconf/schedule',
+    }
+
+    const result = await publishSchedule('event-1')
+
+    expect(last().url).toBe('/api/events/event-1/schedule/publish')
+    expect(last().method).toBe('POST')
+    expect(result.public_url).toBe('/e/daisconf/schedule')
   })
 })

@@ -153,6 +153,7 @@ async def _send_via_resend(
     html: str,
     ics_content: str | None,
     ics_method: str | None,
+    idempotency_key: str | None = None,
 ) -> dict:
     payload: dict = {
         "from": from_address(),
@@ -173,12 +174,19 @@ async def _send_via_resend(
             }
         ]
 
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if idempotency_key:
+        # Resend dedupes retries carrying the same key, so a send that succeeds
+        # upstream but whose caller never records it (timeout/crash) won't
+        # deliver twice when the outbox worker retries the row.
+        headers["Idempotency-Key"] = idempotency_key
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
             response = await client.post(
                 RESEND_ENDPOINT,
                 json=payload,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers=headers,
             )
     except httpx.HTTPError as exc:
         raise MailerError(f"Resend request failed: {exc}") from exc
@@ -196,11 +204,15 @@ async def send_email(
     html: str,
     ics_content: str | None = None,
     ics_method: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
     """Send one message. Returns a delivery receipt; raises MailerError on failure.
 
     Without RESEND_API_KEY nothing leaves the box: the message is written to
     outbox_dev/ and reported as {"dev": True, ...}.
+
+    ``idempotency_key`` (when set) is forwarded to Resend so a retried send with
+    the same key is deduped upstream — the outbox worker passes the row id.
     """
     api_key = _env("RESEND_API_KEY")
     if not api_key:
@@ -209,6 +221,8 @@ async def send_email(
         logger.info("mailer[dev]: wrote %s to=%s subject=%r", path, to, subject)
         return {"dev": True, "provider": "outbox", "path": str(path), "to": to}
 
-    receipt = await _send_via_resend(api_key, to, subject, html, ics_content, ics_method)
+    receipt = await _send_via_resend(
+        api_key, to, subject, html, ics_content, ics_method, idempotency_key
+    )
     logger.info("mailer: sent id=%s to=%s subject=%r", receipt.get("id"), to, subject)
     return receipt

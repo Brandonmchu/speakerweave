@@ -987,6 +987,258 @@ async def get_summary(org_id: str, plan_id: str) -> dict:
     }
 
 
+def _empty_review_aggregate() -> dict:
+    return {
+        "review_count": 0,
+        "completed_count": 0,
+        "abstained_count": 0,
+        "any_abstained": False,
+        "avg_overall": None,
+        "scale": "1_5",
+        "criteria": [],
+        "reviews": [],
+    }
+
+
+async def session_review_aggregate(org_id: str, session_id: str) -> dict:
+    """Everything reviewers wrote about ONE session, aggregated for the organizer.
+
+    This closes the review roundtrip: reviewers score a session on a plan's
+    weighted scorecard, and this is where those scores and comments finally reach
+    the organizer who has to decide. Every query is org-scoped — the service-role
+    client bypasses RLS, so a dropped predicate is a cross-org leak.
+
+    Only completed (submitted, non-draft) reviews are surfaced; a draft is a
+    reviewer's private scratch pad. Reviewer identity is withheld for any review
+    whose plan is `anonymized`, in which case the verdict is labelled
+    "Reviewer N" and carries no name or email.
+
+    The caller is expected to have already verified the session belongs to the
+    org (this returns an empty aggregate for an unknown/foreign session rather
+    than raising).
+    """
+    assignments = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, plan_id, evaluator_id, session_id")
+            .eq("session_id", session_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "session_reviews_assignments",
+        )
+    )
+    if not assignments:
+        return _empty_review_aggregate()
+
+    assignment_by_id = {row["id"]: row for row in assignments}
+    assignment_ids = list(assignment_by_id)
+    plan_ids = sorted({row["plan_id"] for row in assignments if row.get("plan_id")})
+    evaluator_ids = sorted({row["evaluator_id"] for row in assignments if row.get("evaluator_id")})
+
+    plans: list[dict] = []
+    if plan_ids:
+        plans = rows(
+            await db(
+                lambda: supabase.table("evaluation_plans")
+                .select("id, criteria, scale, anonymized")
+                .in_("id", plan_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "session_reviews_plans",
+            )
+        )
+    plan_by_id = {row["id"]: row for row in plans}
+
+    evaluators: list[dict] = []
+    if evaluator_ids:
+        evaluators = rows(
+            await db(
+                lambda: supabase.table("evaluators")
+                .select("id, name, email")
+                .in_("id", evaluator_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "session_reviews_evaluators",
+            )
+        )
+    evaluator_by_id = {row["id"]: row for row in evaluators}
+
+    reviews = rows(
+        await db(
+            lambda: supabase.table("reviews")
+            .select("*")
+            .in_("assignment_id", assignment_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "session_reviews",
+        )
+    )
+    completed = [review for review in reviews if not bool(review.get("is_draft"))]
+    completed.sort(key=lambda review: str(review.get("submitted_at") or review.get("updated_at") or ""))
+
+    # Criteria come from the plan(s) covering the session, unioned by name with
+    # the first weight winning, so a per-criterion column reads the same order the
+    # reviewer scored in.
+    criteria_order: list[dict] = []
+    seen_criteria: set[str] = set()
+    scale = "1_5"
+    for plan_id in plan_ids:
+        plan = plan_by_id.get(plan_id) or {}
+        if plan.get("scale"):
+            scale = str(plan["scale"])
+        for criterion in plan.get("criteria") or []:
+            name = str(criterion.get("name") or "").strip()
+            key = name.casefold()
+            if not name or key in seen_criteria:
+                continue
+            seen_criteria.add(key)
+            criteria_order.append({"name": name, "weight": criterion.get("weight")})
+
+    criterion_scores: dict[str, list[float]] = {item["name"]: [] for item in criteria_order}
+    overalls: list[float] = []
+    abstained_count = 0
+    verdicts: list[dict] = []
+    for index, review in enumerate(completed, start=1):
+        assignment = assignment_by_id.get(review.get("assignment_id")) or {}
+        plan = plan_by_id.get(assignment.get("plan_id")) or {}
+        anonymized = bool(plan.get("anonymized"))
+        abstained = bool(review.get("abstained"))
+        if anonymized:
+            reviewer = f"Reviewer {index}"
+        else:
+            evaluator = evaluator_by_id.get(assignment.get("evaluator_id")) or {}
+            reviewer = (
+                str(evaluator.get("name") or "").strip()
+                or evaluator.get("email")
+                or f"Reviewer {index}"
+            )
+        overall = review.get("overall")
+        if overall is None and not abstained:
+            overall = weighted_overall(review.get("scores") or {}, plan.get("criteria") or [])
+
+        if abstained:
+            abstained_count += 1
+        else:
+            if overall is not None:
+                overalls.append(float(overall))
+            for name, value in (review.get("scores") or {}).items():
+                if name in criterion_scores and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    criterion_scores[name].append(float(value))
+
+        verdicts.append(
+            {
+                "reviewer": reviewer,
+                "anonymized": anonymized,
+                "overall": round(float(overall), 2) if overall is not None else None,
+                "comment": review.get("comment"),
+                "scores": {} if abstained else (review.get("scores") or {}),
+                "abstained": abstained,
+                "abstain_reason": review.get("abstain_reason") if abstained else None,
+            }
+        )
+
+    criteria_out = [
+        {
+            "name": item["name"],
+            "weight": item["weight"],
+            "average": (
+                round(sum(criterion_scores[item["name"]]) / len(criterion_scores[item["name"]]), 2)
+                if criterion_scores[item["name"]]
+                else None
+            ),
+        }
+        for item in criteria_order
+    ]
+
+    return {
+        "review_count": len(completed),
+        "completed_count": len(completed),
+        "abstained_count": abstained_count,
+        "any_abstained": abstained_count > 0,
+        "avg_overall": round(sum(overalls) / len(overalls), 2) if overalls else None,
+        "scale": scale,
+        "criteria": criteria_out,
+        "reviews": verdicts,
+    }
+
+
+async def get_session_reviews(org_id: str, session_id: str) -> dict:
+    """The org-scoped review aggregate for a session, 404 if it isn't ours.
+
+    Unlike `session_review_aggregate`, this verifies the session belongs to the
+    org first, so a dedicated endpoint can't be used to probe another org's ids.
+    """
+    session = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, org_id")
+            .eq("id", session_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "session_reviews_session_lookup",
+        )
+    )
+    verify_org_access(session, org_id, "Session")
+    return await session_review_aggregate(org_id, session_id)
+
+
+async def session_review_scores(org_id: str, session_ids: list[str]) -> dict[str, dict]:
+    """{session_id: {"review_score": avg|None, "review_count": int}} for a batch.
+
+    Powers the inbox's average-score column: three queries for any number of
+    submissions (assignments, then reviews), so listing a hundred submissions
+    never fans out per row. Only completed, non-abstained reviews contribute a
+    score; the count is completed reviews (abstentions included).
+    """
+    if not session_ids:
+        return {}
+    assignments = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, session_id")
+            .in_("session_id", session_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "session_scores_assignments",
+        )
+    )
+    if not assignments:
+        return {}
+    session_by_assignment = {row["id"]: row["session_id"] for row in assignments}
+    assignment_ids = list(session_by_assignment)
+    reviews = rows(
+        await db(
+            lambda: supabase.table("reviews")
+            .select("assignment_id, overall, is_draft, abstained")
+            .in_("assignment_id", assignment_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "session_scores_reviews",
+        )
+    )
+    score_lists: dict[str, list[float]] = {}
+    completed_counts: dict[str, int] = {}
+    for review in reviews:
+        if bool(review.get("is_draft")):
+            continue
+        session_id = session_by_assignment.get(review.get("assignment_id"))
+        if not session_id:
+            continue
+        completed_counts[session_id] = completed_counts.get(session_id, 0) + 1
+        overall = review.get("overall")
+        if not bool(review.get("abstained")) and overall is not None:
+            score_lists.setdefault(session_id, []).append(float(overall))
+    result: dict[str, dict] = {}
+    for session_id in {row["session_id"] for row in assignments}:
+        scores = score_lists.get(session_id, [])
+        result[session_id] = {
+            "review_score": round(sum(scores) / len(scores), 2) if scores else None,
+            "review_count": completed_counts.get(session_id, 0),
+        }
+    return result
+
+
 async def _speaker_map(session_ids: list[str], org_id: str) -> dict[str, list[dict]]:
     if not session_ids:
         return {}

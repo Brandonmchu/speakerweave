@@ -21,29 +21,36 @@ import {
   CalendarPlus,
   CalendarRange,
   CheckCircle2,
+  Clock,
   Columns3,
+  ExternalLink,
   Inbox,
   List,
   RotateCcw,
+  Send,
   X,
   type LucideIcon,
 } from 'lucide-react'
 
 import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import {
-  agendaDay,
-  buildTimestamp,
+  addMinutesToIso,
+  agendaDays,
+  buildZonedTimestamp,
   getAgenda,
   getAgendaConflicts,
   gridGeometry,
+  localEpochMinutes,
+  publishSchedule,
   scheduleSession,
-  timestampDay,
-  timestampEpochMinutes,
-  timestampMinutes,
+  zoneHint,
+  zonedDay,
+  zonedMinutes,
   type Agenda as AgendaPayload,
   type AgendaRoom,
   type AgendaSession,
   type GridGeometry,
+  type PublishResult,
   type SchedulePatch,
   type ServerConflict,
 } from '@/lib/scheduleApi'
@@ -59,6 +66,7 @@ import {
   isScheduled,
   overlapStart,
   type Conflict,
+  type ScheduledSession,
   type ScheduleLabels,
   type SpikeSession,
 } from '@/lib/schedule'
@@ -206,9 +214,25 @@ function speakerRegistry(sessions: AgendaSession[]): SpeakerRegistry {
   return registry
 }
 
-/** One API session -> the card the grid drags. Minutes, not timestamps. */
-function toCard(session: AgendaSession): SpikeSession {
-  const startMin = timestampMinutes(session.starts_at)
+/** A grid card plus the event-local day it sits on (null while unscheduled). */
+interface GridSession extends SpikeSession {
+  day: string | null
+}
+
+/** A placed grid card — keeps `day` through the narrowing that `isScheduled`
+ *  (typed on the base `SpikeSession`) would otherwise drop. */
+type ScheduledGridSession = GridSession & ScheduledSession
+
+const isScheduledGrid = (session: GridSession): session is ScheduledGridSession =>
+  isScheduled(session)
+
+/**
+ * One API session -> the card the grid drags. Minutes, not timestamps, and the
+ * minutes are the event-LOCAL clock (via `zone`), so a card sits where the
+ * public schedule says it does, not where the browser's own offset would put it.
+ */
+function toCard(session: AgendaSession, zone: string | null): GridSession {
+  const startMin = zonedMinutes(session.starts_at, zone)
   return {
     id: session.id,
     title: session.title || 'Untitled session',
@@ -219,18 +243,21 @@ function toCard(session: AgendaSession): SpikeSession {
     // to draw it, so it stays in the tray until it is given a time.
     roomId: startMin === null ? null : (session.room_id ?? null),
     startMin,
+    day: zonedDay(session.starts_at, zone),
   }
 }
 
 /**
  * The same card in the conflict detector's time domain.
  *
- * Layout needs minutes past midnight; overlap arithmetic needs the whole
- * instant so equal clock times on different conference days do not alias.
+ * Layout needs minutes past local midnight; overlap arithmetic needs the whole
+ * instant so equal clock times on different conference days do not alias. The
+ * instant is shifted into the event's local clock (a constant, overlap-invariant
+ * shift) so the conflict `detail` prints the same time the grid shows.
  */
-function toConflictCard(session: AgendaSession): SpikeSession {
-  const card = toCard(session)
-  const startMin = timestampEpochMinutes(session.starts_at)
+function toConflictCard(session: AgendaSession, zone: string | null): SpikeSession {
+  const card = toCard(session, zone)
+  const startMin = localEpochMinutes(session.starts_at, zone)
   return {
     ...card,
     roomId: startMin === null ? null : (session.room_id ?? null),
@@ -827,22 +854,107 @@ function ViewNote({ children }: { children: React.ReactNode }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Day switcher + timezone note                                                */
+/* -------------------------------------------------------------------------- */
+
+/** "Mon, Oct 12" from a YYYY-MM-DD key, parsed as a plain calendar date so it
+ *  never shifts a day under a timezone conversion. */
+function formatDayTab(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  if (!y || !m || !d) return dateKey
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(y, m - 1, d))
+}
+
+/**
+ * The day switcher for a multi-day event. One tab per conference day; the grid,
+ * drag-and-drop and click-to-place all operate on the selected one. A single-day
+ * event never renders this (the caller guards on `days.length > 1`).
+ */
+function DaySwitcher({
+  days,
+  value,
+  onChange,
+}: {
+  days: string[]
+  value: string
+  onChange: (day: string) => void
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Conference day"
+      data-testid="day-switcher"
+      className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1 shadow-soft"
+    >
+      {days.map((d, index) => {
+        const active = value === d
+        return (
+          <button
+            key={d}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            data-testid={`agenda-day-tab-${d}`}
+            onClick={() => onChange(d)}
+            className={cn(
+              'flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              active
+                ? 'bg-primary text-primary-foreground shadow-soft'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            <span className="text-2xs font-semibold uppercase tracking-wide opacity-75">
+              Day {index + 1}
+            </span>
+            {formatDayTab(d)}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** "Times shown in America/Los_Angeles (PDT)" — mirrors the public schedule so a
+ *  reader knows the grid is in the EVENT's zone, not their own browser's. */
+function TzNote({ hint }: { hint: string }) {
+  if (!hint) return null
+  return (
+    <p
+      data-testid="agenda-tz-note"
+      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+    >
+      <Clock className="h-3.5 w-3.5 shrink-0" />
+      Times shown in {hint}
+    </p>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 /* List view                                                                   */
 /* -------------------------------------------------------------------------- */
 
-/** Every scheduled session, in start-time order — the plainest possible read. */
+/** Every scheduled session, in day-then-start order — the plainest possible read. */
 function ListView({
   sessions,
   conflictedIds,
   rooms,
 }: {
-  sessions: SpikeSession[]
+  sessions: GridSession[]
   conflictedIds: Set<string>
   rooms: Map<string, string>
 }) {
   const speakerNames = useContext(SpeakersContext)
   const scheduled = useMemo(
-    () => sessions.filter(isScheduled).sort((a, b) => a.startMin - b.startMin),
+    () =>
+      sessions
+        .filter(isScheduledGrid)
+        // Day first so a multi-day programme reads day 1 then day 2, not every
+        // 09:00 lumped together; start time within a day.
+        .sort((a, b) => (a.day ?? '').localeCompare(b.day ?? '') || a.startMin - b.startMin),
     [sessions]
   )
 
@@ -1016,6 +1128,13 @@ export function Agenda() {
   // Rooms (the drag grid) is the default read; the other tabs are lighter views
   // over the same data.
   const [view, setView] = useState<AgendaView>('rooms')
+  // Which conference day the grid is showing. A multi-day event switches between
+  // days; a single-day event has exactly one and shows no switcher. Empty until
+  // the board loads and the first real day is known.
+  const [selectedDay, setSelectedDay] = useState('')
+  // The confirmation shown after "Publish schedule" — the timestamp + the public
+  // URL to share. Cleared only by publishing again.
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
 
   /**
    * Which slot *within* the dragged card the pointer grabbed. Without it, a
@@ -1059,14 +1178,33 @@ export function Agenda() {
   })
 
   const agenda = agendaQuery.data
+  // The zone every time on this grid is labelled and grouped in: the event's
+  // own, exactly like the public schedule. Never the browser's.
+  const zone = agenda?.event?.timezone ?? null
   const grid = useMemo(() => gridGeometry(agenda?.event), [agenda?.event])
-  const day = useMemo(() => agendaDay(agenda), [agenda])
 
-  const sessions = useMemo(() => (agenda?.sessions ?? []).map(toCard), [agenda?.sessions])
+  // Every day the builder can show, and the one currently in view. Keep the
+  // selection valid as data loads or the span changes.
+  const days = useMemo(() => agendaDays(agenda, zone), [agenda, zone])
+  useEffect(() => {
+    if (days.length && !days.includes(selectedDay)) setSelectedDay(days[0])
+  }, [days, selectedDay])
+  // The day actually in view: the selection when it is still valid, else the
+  // first real day. Guards the frame between the board loading and the effect
+  // re-homing a now-stale selection, so the grid never filters on a dead day.
+  const day =
+    selectedDay && days.includes(selectedDay)
+      ? selectedDay
+      : (days[0] ?? new Date().toISOString().slice(0, 10))
+
+  const sessions = useMemo(
+    () => (agenda?.sessions ?? []).map((s) => toCard(s, zone)),
+    [agenda?.sessions, zone]
+  )
   const byId = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions])
   const conflictSessions = useMemo(
-    () => (agenda?.sessions ?? []).map(toConflictCard),
-    [agenda?.sessions]
+    () => (agenda?.sessions ?? []).map((s) => toConflictCard(s, zone)),
+    [agenda?.sessions, zone]
   )
   const conflictById = useMemo(
     () => new Map(conflictSessions.map((session) => [session.id, session])),
@@ -1098,9 +1236,28 @@ export function Agenda() {
   const titles = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions])
   const unscheduled = useMemo(() => sessions.filter((s) => !isScheduled(s)), [sessions])
   const scheduledCount = sessions.length - unscheduled.length
+  // What the grid draws: the selected day's placed cards, plus the day-less
+  // tray. Cards on other days are hidden here, but still counted in the header
+  // and still swept for conflicts (which compare absolute instants, not days).
+  const gridSessions = useMemo(
+    () => sessions.filter((s) => !isScheduled(s) || s.day === day),
+    [sessions, day]
+  )
+  // A real instant so the tz hint resolves the right abbreviation (PST vs PDT).
+  const zoneReferenceIso =
+    agenda?.event?.starts_at ??
+    (agenda?.sessions ?? []).find((s) => s.starts_at)?.starts_at ??
+    null
 
   const activeSession = activeId ? (byId.get(activeId) ?? null) : null
   const selectedSession = selectedId ? (byId.get(selectedId) ?? null) : null
+
+  // The public schedule link surfaced after publishing. The server hands it back;
+  // the event slug is a fallback so the confirmation always has somewhere to go.
+  const eventSlug = agenda?.event?.slug ?? eventsQuery.data?.[0]?.slug ?? null
+  const publishUrl = publishResult
+    ? (publishResult.public_url ?? (eventSlug ? `/e/${eventSlug}/schedule` : null))
+    : null
 
   /**
    * The drop, persisted.
@@ -1164,6 +1321,31 @@ export function Agenda() {
     },
   })
 
+  /**
+   * Publish the programme. This does NOT flip public visibility — the published
+   * schedule already serves accepted+scheduled sessions. It records the moment,
+   * then shows the organizer the public URL to share.
+   */
+  const publish = useMutation({
+    mutationFn: () => publishSchedule(eventId!),
+    onSuccess: (result) => {
+      setPublishResult(result)
+      toast({
+        title: 'Schedule published',
+        description: result.public_url
+          ? `Live at ${result.public_url}`
+          : 'Your public schedule is live.',
+      })
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't publish the schedule",
+        description: error.message,
+      })
+    },
+  })
+
   function resolveTarget(
     session: SpikeSession,
     data: DropData | undefined
@@ -1174,23 +1356,38 @@ export function Agenda() {
   }
 
   /** Persist a placement (or the lack of one), skipping no-op drops. */
-  function commit(session: SpikeSession, target: { roomId: string; startSlot: number } | null) {
+  function commit(session: GridSession, target: { roomId: string; startSlot: number } | null) {
     const roomId = target?.roomId ?? null
     const startMin = target ? slotToMin(grid, target.startSlot) : null
-    if ((session.roomId ?? null) === roomId && (session.startMin ?? null) === startMin) return
+    // A placement always lands on the day currently IN VIEW — the grid only
+    // shows, and only accepts drops for, the selected day, so the target date is
+    // never the card's own stored day (which may be a day the user just switched
+    // away from). Comparing the day too means a move to another day at the same
+    // clock + room is never mistaken for a no-op.
+    const targetDay = target ? day : null
+    if (
+      (session.roomId ?? null) === roomId &&
+      (session.startMin ?? null) === startMin &&
+      (session.day ?? null) === targetDay
+    ) {
+      return
+    }
 
-    const wire = agenda?.sessions.find((s) => s.id === session.id)
-    // A session already placed on another day keeps that day when it moves.
-    const onDay = timestampDay(wire?.starts_at) ?? day
-
-    const patch: SchedulePatch =
-      target && startMin !== null
-        ? {
-            room_id: roomId,
-            starts_at: buildTimestamp(onDay, startMin),
-            ends_at: buildTimestamp(onDay, startMin + session.durationMin),
-          }
-        : { room_id: null, starts_at: null, ends_at: null }
+    let patch: SchedulePatch
+    if (target && startMin !== null) {
+      // Resolve the START to a single instant, then derive the end from the
+      // original duration — so a session spanning a DST change keeps its real
+      // length instead of stretching (or shrinking) when each wall-time is
+      // converted to an instant independently.
+      const startsAt = buildZonedTimestamp(day, startMin, zone)
+      patch = {
+        room_id: roomId,
+        starts_at: startsAt,
+        ends_at: addMinutesToIso(startsAt, session.durationMin),
+      }
+    } else {
+      patch = { room_id: null, starts_at: null, ends_at: null }
+    }
 
     move.mutate({ id: session.id, patch })
   }
@@ -1287,10 +1484,10 @@ export function Agenda() {
     lastTargetKey.current = key
 
     // Delta only: the dragged session against everything else. Never a full sweep.
-    const wire = agenda?.sessions.find((row) => row.id === session.id)
-    const onDay = timestampDay(wire?.starts_at) ?? day
-    const startMin = timestampEpochMinutes(
-      buildTimestamp(onDay, slotToMin(grid, target.startSlot))
+    // The preview lands on the day in view — the same day `commit` will store to.
+    const startMin = localEpochMinutes(
+      buildZonedTimestamp(day, slotToMin(grid, target.startSlot), zone),
+      zone
     )
     const candidate: SpikeSession = {
       ...session,
@@ -1393,7 +1590,14 @@ export function Agenda() {
       />
     )
   } else if (view === 'list') {
-    body = <ListView sessions={sessions} conflictedIds={conflictedIds} rooms={roomNames} />
+    body = (
+      <>
+        <div className="mt-4">
+          <TzNote hint={zoneHint(zone, zoneReferenceIso)} />
+        </div>
+        <ListView sessions={sessions} conflictedIds={conflictedIds} rooms={roomNames} />
+      </>
+    )
   } else if (view === 'conflicts') {
     body = (
       <ConflictsView
@@ -1406,6 +1610,15 @@ export function Agenda() {
   } else {
     body = (
       <>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          {days.length > 1 ? (
+            <DaySwitcher days={days} value={day} onChange={setSelectedDay} />
+          ) : (
+            <span />
+          )}
+          <TzNote hint={zoneHint(zone, zoneReferenceIso)} />
+        </div>
+
         {view === 'day' && (
           <ViewNote>
             Day view spans every room for the event day — drag to reschedule, exactly like Rooms.
@@ -1504,7 +1717,7 @@ export function Agenda() {
                     <RoomColumn
                       key={room.id}
                       room={room}
-                      sessions={sessions}
+                      sessions={gridSessions}
                       conflictedIds={conflictedIds}
                       preview={preview}
                       grid={grid}
@@ -1568,10 +1781,62 @@ export function Agenda() {
                 <RotateCcw className="h-4 w-4" />
                 Refresh
               </Button>
+              <Button
+                size="sm"
+                data-testid="publish-schedule"
+                disabled={!eventId || sessions.length === 0 || publish.isPending}
+                onClick={() => publish.mutate()}
+              >
+                <Send className="h-4 w-4" />
+                {publish.isPending ? 'Publishing…' : 'Publish schedule'}
+              </Button>
             </div>
           </header>
 
           <ViewTabs value={view} onChange={setView} conflictCount={conflicts.length} />
+
+          {publishResult && (
+            <div
+              data-testid="publish-success"
+              className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success/10 px-3 py-2.5 text-sm"
+            >
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-success-strong" />
+              <span className="text-foreground">
+                Schedule published.{' '}
+                {publishUrl ? (
+                  <>
+                    It&apos;s live at{' '}
+                    <span className="font-medium tabular-nums">{publishUrl}</span>
+                  </>
+                ) : (
+                  'Your public schedule is live.'
+                )}
+              </span>
+              {publishUrl && (
+                <a
+                  href={publishUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="view-public-page"
+                  className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-primary bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View public page
+                </a>
+              )}
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setPublishResult(null)}
+                className={cn(
+                  'inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground',
+                  publishUrl ? '' : 'ml-auto'
+                )}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
 
           {body}
         </div>
