@@ -124,14 +124,15 @@ const DECISION_STATUS: Record<SubmissionDecision, SubmissionStatus> = {
 }
 
 /** Client-side sort orders for the fetched rows. */
-type SortKey = 'newest' | 'oldest' | 'title' | 'status' | 'review'
+type SortKey = 'newest' | 'oldest' | 'title' | 'status' | 'score_desc' | 'score_asc'
 
 const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'title', label: 'Title A–Z' },
   { value: 'status', label: 'Status' },
-  { value: 'review', label: 'Review score' },
+  { value: 'score_desc', label: 'Highest score' },
+  { value: 'score_asc', label: 'Lowest score' },
 ]
 
 /** Tab order doubles as the sort order when sorting by status. */
@@ -244,10 +245,26 @@ function csvCell(value: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-/** Export the currently filtered rows — the one Options action that's live. */
-function downloadCsv(rows: Submission[]): void {
-  if (typeof document === 'undefined') return
-  const header = ['ID', 'Title', 'Source', 'Submitter', 'Email', 'Status', 'Submitted']
+/** Resolves a submission's track id to its human name (blank when unknown). */
+export type TrackNameFn = (id?: string | null) => string
+
+/**
+ * Build the scores CSV for the given (already-filtered) rows — one line per
+ * submission carrying its review score and count, so an organizer can rank and
+ * archive decisions offline. Every cell is quoted, so commas in a title never
+ * shift a column.
+ */
+export function buildSubmissionsCsv(rows: Submission[], trackName?: TrackNameFn): string {
+  const header = [
+    'ID',
+    'Title',
+    'Submitter',
+    'Track',
+    'Status',
+    'Review score',
+    'Review count',
+    'Submitted',
+  ]
   const lines = [header.map(csvCell).join(',')]
   for (const s of rows) {
     const submitter = submitterName(s)
@@ -255,17 +272,26 @@ function downloadCsv(rows: Submission[]): void {
       [
         s.friendly_id ?? '',
         s.title ?? '',
-        sourceLabel(s),
         submitter === '—' ? '' : submitter,
-        s.submitter?.email ?? '',
+        trackName ? trackName(s.track_id) : (s.track_id ?? ''),
         statusLabel(s.status),
+        s.review_score ?? '',
+        s.review_count ?? '',
         s.submitted_at ?? s.created_at ?? '',
       ]
         .map((v) => csvCell(String(v)))
         .join(',')
     )
   }
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  return lines.join('\n')
+}
+
+/** Export the currently filtered rows — the one Options action that's live. */
+function downloadCsv(rows: Submission[], trackName?: TrackNameFn): void {
+  if (typeof document === 'undefined') return
+  const blob = new Blob([buildSubmissionsCsv(rows, trackName)], {
+    type: 'text/csv;charset=utf-8;',
+  })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -321,6 +347,13 @@ export function Inbox() {
   const tracks = useMemo(() => tracksQuery.data ?? [], [tracksQuery.data])
   const formats = useMemo(() => formatsQuery.data ?? [], [formatsQuery.data])
 
+  // Resolves a submission's track id to its name for the CSV export; the row
+  // only carries `track_id`, and a blank reads cleaner than a raw uuid.
+  const trackNameById = useMemo<TrackNameFn>(() => {
+    const byId = new Map(tracks.map((t) => [t.id, t.name]))
+    return (id) => (id ? (byId.get(id) ?? '') : '')
+  }, [tracks])
+
   const submissions = useMemo(() => submissionsQuery.data ?? [], [submissionsQuery.data])
 
   const counts = useMemo(() => {
@@ -367,14 +400,16 @@ export function Inbox() {
           return (a.title || '').localeCompare(b.title || '')
         case 'status':
           return (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99)
-        case 'review': {
-          // Highest score first; submissions without a score sort to the bottom.
+        case 'score_desc':
+        case 'score_asc': {
+          // Rank by review score; submissions without a score always sort to the
+          // bottom, whichever direction the reader picked.
           const av = a.review_score ?? null
           const bv = b.review_score ?? null
           if (av === null && bv === null) return submittedTime(b) - submittedTime(a)
           if (av === null) return 1
           if (bv === null) return -1
-          return bv - av
+          return sortKey === 'score_desc' ? bv - av : av - bv
         }
         case 'newest':
         default:
@@ -717,7 +752,7 @@ export function Inbox() {
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => {
-                    downloadCsv(filteredRows)
+                    downloadCsv(filteredRows, trackNameById)
                     toast({ title: 'Exported CSV', description: `${filteredRows.length} rows.` })
                   }}
                 >
@@ -1577,6 +1612,12 @@ function ReviewsSection({ reviews }: { reviews: SessionReviewAggregate }) {
                 {verdict.comment && (
                   <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
                     {verdict.comment}
+                  </p>
+                )}
+                {verdict.internal_comment && (
+                  <p className="mt-1.5 whitespace-pre-line rounded-md border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground">
+                    <span className="font-medium text-foreground">Internal note:</span>{' '}
+                    {verdict.internal_comment}
                   </p>
                 )}
                 {verdict.abstained && verdict.abstain_reason && (

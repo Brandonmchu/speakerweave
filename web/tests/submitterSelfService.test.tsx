@@ -85,6 +85,27 @@ describe('PublicForm — deadline and closed state', () => {
     expect(screen.getByLabelText(/First name/)).toBeInTheDocument()
   })
 
+  it('shows the concrete deadline date, not a vague "closes soon"', async () => {
+    const closeAt = '2027-10-01T18:30:00.000Z'
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(formPayload({ close_at: closeAt }))))
+    renderPublicForm()
+
+    // The banner renders the actual formatted close date (weekday + time), so
+    // the assertion mirrors the component's own toLocaleDateString options —
+    // matching regardless of the test machine's locale/timezone.
+    const expected = new Date(closeAt).toLocaleDateString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    })
+    expect(await screen.findByText(expected)).toBeInTheDocument()
+    expect(screen.queryByText(/close soon/i)).not.toBeInTheDocument()
+  })
+
   it('renders a closed panel instead of the form once the deadline passes', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(formPayload({ close_at: PAST }))))
     renderPublicForm()
@@ -133,6 +154,52 @@ describe('PublicForm — draft save and restore', () => {
 })
 
 describe('PublicForm — confirmation and manage prompt', () => {
+  it('surfaces an in-app manage link (clickable + copyable) with no email needed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const call = recordCall(input, init)
+        if (call.url.includes('/submissions')) {
+          // The submit response now carries the submitter's OWN manage token.
+          return jsonResponse(
+            {
+              id: 'sub-1',
+              friendly_id: 'SESS-7',
+              manage_token: 'tok-abc',
+              manage_url: 'https://app.example/submit/cfp/manage?token=tok-abc',
+            },
+            201
+          )
+        }
+        return jsonResponse(formPayload({ close_at: FUTURE }))
+      })
+    )
+    renderPublicForm()
+    await screen.findByLabelText(/First name/)
+
+    fireEvent.change(screen.getByLabelText(/First name/), { target: { value: 'Ada' } })
+    fireEvent.change(screen.getByLabelText(/Last name/), { target: { value: 'Lovelace' } })
+    fireEvent.change(screen.getByLabelText(/Email/), { target: { value: 'ada@example.com' } })
+    fireEvent.change(screen.getByLabelText(/Session title/), { target: { value: 'Analytical Engines' } })
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+
+    expect(await screen.findByText(/Submission received/i)).toBeInTheDocument()
+
+    // A real, clickable link straight into the manage dashboard — no email step.
+    const link = screen.getByRole('link', { name: /Manage or edit your submissions/i })
+    expect(link).toHaveAttribute('href', '/submit/cfp/manage?token=tok-abc')
+
+    // The same link is copyable from a read-only field.
+    const copyable = screen.getByLabelText(/Your private manage link/i) as HTMLInputElement
+    expect(copyable.value).toContain('/submit/cfp/manage?token=tok-abc')
+
+    // The email path is still offered, as a secondary option.
+    expect(screen.getByText(/Prefer a link by email/i)).toBeInTheDocument()
+
+    // Reaching the dashboard required no manage-link email at all.
+    expect(calls.some((c) => c.url.includes('/manage-link'))).toBe(false)
+  })
+
   it('confirms the submission and clears the draft, then emails a manage link', async () => {
     vi.stubGlobal(
       'fetch',

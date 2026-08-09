@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  buildScheduleIcs,
   buildSessionIcs,
   formatTimeZoneNote,
   getProgramSchedule,
   getProgramSession,
   getProgramSpeakers,
+  readStarredIds,
+  toggleStarredId,
+  writeStarredIds,
 } from '@/lib/programApi'
 
 interface Call {
@@ -140,5 +144,66 @@ describe('buildSessionIcs', () => {
 
   it('returns an empty string for a session with no start', () => {
     expect(buildSessionIcs({ id: 's', title: 'x', starts_at: null, ends_at: null })).toBe('')
+  })
+})
+
+describe('buildScheduleIcs (my schedule export)', () => {
+  it('wraps every session in one VCALENDAR with a VEVENT each', () => {
+    const ics = buildScheduleIcs(
+      [
+        { id: 's1', friendly_id: 'SESS-1', title: 'Keynote', starts_at: '2026-10-12T16:00:00+00:00', ends_at: '2026-10-12T16:45:00+00:00' },
+        { id: 's2', friendly_id: 'SESS-2', title: 'Vector DBs', starts_at: '2026-10-12T17:00:00+00:00', ends_at: '2026-10-12T17:30:00+00:00' },
+      ],
+      new Date('2026-01-01T00:00:00Z')
+    )
+    // One calendar envelope…
+    expect(ics.match(/BEGIN:VCALENDAR/g)).toHaveLength(1)
+    expect(ics.match(/END:VCALENDAR/g)).toHaveLength(1)
+    // …two events inside it.
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2)
+    expect(ics).toContain('SUMMARY:Keynote')
+    expect(ics).toContain('SUMMARY:Vector DBs')
+    expect(ics).toContain('UID:SESS-1@dais')
+    expect(ics).toContain('UID:SESS-2@dais')
+    expect(ics.endsWith('END:VCALENDAR')).toBe(true)
+  })
+
+  it('skips sessions with no start and returns "" when none remain', () => {
+    const ics = buildScheduleIcs([
+      { id: 'a', title: 'Placed', starts_at: '2026-10-12T16:00:00+00:00', ends_at: null },
+      { id: 'b', title: 'Unplaced', starts_at: null, ends_at: null },
+    ])
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1)
+    expect(buildScheduleIcs([{ id: 'b', title: 'Unplaced', starts_at: null, ends_at: null }])).toBe('')
+    expect(buildScheduleIcs([])).toBe('')
+  })
+})
+
+describe('personal schedule (localStorage stars)', () => {
+  const SLUG = 'ai-builders-summit'
+
+  it('starts empty and round-trips a written selection', () => {
+    expect(readStarredIds(SLUG)).toEqual([])
+    writeStarredIds(SLUG, ['sess-1', 'sess-2', 'sess-1'])
+    // De-duplicated on write.
+    expect(readStarredIds(SLUG)).toEqual(['sess-1', 'sess-2'])
+  })
+
+  it('toggles an id on and off, returning the new list', () => {
+    expect(toggleStarredId(SLUG, 'sess-1')).toEqual(['sess-1'])
+    expect(readStarredIds(SLUG)).toEqual(['sess-1'])
+    expect(toggleStarredId(SLUG, 'sess-1')).toEqual([])
+    expect(readStarredIds(SLUG)).toEqual([])
+  })
+
+  it('keeps each event slug isolated', () => {
+    toggleStarredId('event-a', 'x')
+    expect(readStarredIds('event-a')).toEqual(['x'])
+    expect(readStarredIds('event-b')).toEqual([])
+  })
+
+  it('tolerates corrupt stored JSON', () => {
+    window.localStorage.setItem('dais.mySchedule.broken', '{not json')
+    expect(readStarredIds('broken')).toEqual([])
   })
 })

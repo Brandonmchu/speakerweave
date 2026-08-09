@@ -55,11 +55,11 @@ const DETAIL = {
     speaker: { contact_id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', photo_url: null },
   },
   versions: [
-    { file_id: 'f2', version: 2, filename: 'slides-v2.pdf', url: 'u2', created_at: null, is_current: true },
-    { file_id: 'f1', version: 1, filename: 'slides-v1.pdf', url: 'u1', created_at: null, is_current: false },
+    { file_id: 'f2', version: 2, filename: 'slides-v2.pdf', url: 'u2', created_at: '2026-08-05T10:00:00Z', is_current: true },
+    { file_id: 'f1', version: 1, filename: 'slides-v1.pdf', url: 'u1', created_at: '2026-08-01T10:00:00Z', is_current: false },
   ],
   comments: [
-    { id: 'k1', author_role: 'organizer', author_label: 'Organizer', body: 'Please send a sharper deck.', created_at: null },
+    { id: 'k1', author_role: 'organizer', author_label: 'Organizer', body: 'Please send a sharper deck.', created_at: '2026-08-05T12:00:00Z' },
   ],
 }
 
@@ -126,9 +126,36 @@ describe('ContentLibrary', () => {
     expect(within(table).getByText('Upload slides')).toBeInTheDocument()
     expect(within(table).getByText('Received')).toBeInTheDocument()
     expect(within(table).getByText('Missing')).toBeInTheDocument()
-    expect(within(table).getByText('v2')).toBeInTheDocument()
+    // the Version column is populated for received items and dashed when missing
+    const versionCells = screen.getAllByTestId('content-version-cell')
+    expect(versionCells[0]).toHaveTextContent('v2')
+    expect(versionCells[1]).toHaveTextContent('—')
     // outstanding summary drives the remind button label
     expect(screen.getByRole('button', { name: /Remind outstanding \(1\)/ })).toBeInTheDocument()
+  })
+
+  it('detail is legible: labelled version list + comment thread with author and time', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const dialog = await screen.findByRole('dialog')
+
+    // version list: prior + current versions, each labelled, current called out
+    const versionList = await within(dialog).findByTestId('content-version-list')
+    expect(within(versionList).getByText('slides-v2.pdf')).toBeInTheDocument()
+    expect(within(versionList).getByText('slides-v1.pdf')).toBeInTheDocument()
+    expect(within(versionList).getByText(/Current: v2/)).toBeInTheDocument()
+    expect(within(versionList).getAllByText(/ago/).length).toBeGreaterThan(0)
+
+    // comment thread: the organizer comment with its author label + relative time
+    const thread = within(dialog).getByTestId('content-comment-thread')
+    expect(within(thread).getByText('Please send a sharper deck.')).toBeInTheDocument()
+    expect(within(thread).getByText('Organizer')).toBeInTheDocument()
+    expect(within(thread).getByText(/ago/)).toBeInTheDocument()
+
+    // the add-comment control is discoverable by testid
+    expect(within(dialog).getByTestId('content-add-comment')).toBeInTheDocument()
   })
 
   it('re-queries when a filter changes', async () => {

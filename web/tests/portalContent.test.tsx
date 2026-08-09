@@ -123,4 +123,26 @@ describe('Portal content pipeline', () => {
       expect((post!.body as { body: string }).body).toBe('Fixed it, re-uploaded.')
     })
   })
+
+  it('tells the speaker which file types and size the upload accepts', async () => {
+    renderPortal()
+
+    // the task deliverable upload: visible hint + a matching accept allowlist
+    const hint = await screen.findByTestId('upload-hint')
+    expect(hint).toHaveTextContent(/up to 30 MB/)
+    expect(hint).toHaveTextContent(/PDF/)
+    expect(hint).toHaveTextContent(/PPTX/)
+
+    const input = screen.getByTestId('upload-input')
+    expect(input).toHaveAttribute('type', 'file')
+    const accept = input.getAttribute('accept') ?? ''
+    expect(accept).toContain('.pdf')
+    expect(accept).toContain('.pptx')
+    expect(accept).toContain('.png')
+
+    // the headshot upload carries its own (image-only) constraints
+    const headshotHint = screen.getByTestId('headshot-hint')
+    expect(headshotHint).toHaveTextContent(/up to 8 MB/)
+    expect(screen.getByTestId('headshot-input').getAttribute('accept') ?? '').toContain('image/png')
+  })
 })

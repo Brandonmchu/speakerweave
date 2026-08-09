@@ -307,6 +307,16 @@ export interface SubmissionReceipt {
   friendly_id?: string | null
   title?: string | null
   status?: SubmissionStatus
+  /**
+   * The submitter's OWN magic-link token, minted server-side at submit time
+   * (they proved ownership by submitting from that email). Present so the
+   * confirmation screen can offer an in-app manage link — clickable + copyable —
+   * with no email round-trip. Absent only if the server couldn't mint it, in
+   * which case the confirmation falls back to the "email me the link" prompt.
+   */
+  manage_token?: string | null
+  /** A ready absolute manage URL for that same token (server-built convenience). */
+  manage_url?: string | null
 }
 
 /**
@@ -437,6 +447,8 @@ export interface SessionReviewVerdict {
   anonymized: boolean
   overall: number | null
   comment?: string | null
+  /** A reviewer's organizer-only note, shown alongside the public comment. */
+  internal_comment?: string | null
   scores?: Record<string, number>
   abstained: boolean
   abstain_reason?: string | null

@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Linkedin, Search, Twitter, UsersRound } from 'lucide-react'
+import { ChevronRight, Linkedin, Search, Twitter, UsersRound } from 'lucide-react'
 
 import {
   formatSessionMoment,
@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/ui/dialog'
 import { Avatar, ProgramShell, useEmbedHeight } from '@/pages/publicProgramShared'
+import { SessionDetailDialog, useMySchedule } from '@/pages/PublicSchedule'
 
 export function PublicSpeakers() {
   const { slug = '' } = useParams()
@@ -34,7 +35,12 @@ export function PublicSpeakers() {
   const speakers = useMemo(() => query.data?.speakers ?? [], [query.data])
   const zone = query.data?.event.timezone ?? null
   const [selected, setSelected] = useState<ProgramSpeaker | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+
+  // The personal schedule is shared with the schedule page (same localStorage),
+  // so a session starred from a speaker's dialog also lights up on the agenda.
+  const { starred, toggle } = useMySchedule(slug)
 
   // Client-side keyword filter over name, company and title (EMB-05/12).
   const filtered = useMemo(() => {
@@ -46,6 +52,13 @@ export function PublicSpeakers() {
   }, [speakers, search])
 
   useEmbedHeight(embed)
+
+  // Clicking a speaker's session hands off to the shared detail modal: close the
+  // speaker dialog first so the two Radix dialogs never stack.
+  const openSession = (sessionId: string) => {
+    setSelected(null)
+    setSelectedSessionId(sessionId)
+  }
 
   let body: ReactNode
   if (query.isPending) {
@@ -102,7 +115,20 @@ export function PublicSpeakers() {
   const content = (
     <>
       {body}
-      <SpeakerDialog speaker={selected} zone={zone} onClose={() => setSelected(null)} />
+      <SpeakerDialog
+        speaker={selected}
+        zone={zone}
+        onOpenSession={openSession}
+        onClose={() => setSelected(null)}
+      />
+      <SessionDetailDialog
+        slug={slug}
+        sessionId={selectedSessionId}
+        zone={zone}
+        starred={starred}
+        onToggleStar={toggle}
+        onClose={() => setSelectedSessionId(null)}
+      />
     </>
   )
 
@@ -143,10 +169,12 @@ function SpeakerCard({ speaker, onClick }: { speaker: ProgramSpeaker; onClick: (
 function SpeakerDialog({
   speaker,
   zone,
+  onOpenSession,
   onClose,
 }: {
   speaker: ProgramSpeaker | null
   zone: string | null
+  onOpenSession: (sessionId: string) => void
   onClose: () => void
 }) {
   return (
@@ -190,18 +218,40 @@ function SpeakerDialog({
                   Sessions
                 </h4>
                 <ul className="mt-2 space-y-2">
-                  {speaker.sessions.map((session, i) => (
-                    <li
-                      key={`${session.title}-${i}`}
-                      className="rounded-lg border border-border bg-muted/40 px-3 py-2"
-                    >
-                      <div className="text-sm font-medium text-foreground">{session.title}</div>
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {formatSessionMoment(session.starts_at, zone)}
-                        {session.room ? ` · ${session.room}` : ''}
-                      </div>
-                    </li>
-                  ))}
+                  {speaker.sessions.map((session, i) => {
+                    const meta = (
+                      <>
+                        <div className="text-sm font-medium text-foreground">{session.title}</div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {formatSessionMoment(session.starts_at, zone)}
+                          {session.room ? ` · ${session.room}` : ''}
+                          {session.format ? ` · ${session.format}` : ''}
+                        </div>
+                      </>
+                    )
+                    // Only accepted+scheduled sessions carry an id → an openable
+                    // detail modal. Unscheduled ones stay static.
+                    return session.id ? (
+                      <li key={session.id}>
+                        <button
+                          type="button"
+                          data-testid="speaker-session"
+                          onClick={() => onOpenSession(session.id as string)}
+                          className="flex w-full items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted"
+                        >
+                          <span className="min-w-0 flex-1">{meta}</span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      </li>
+                    ) : (
+                      <li
+                        key={`${session.title}-${i}`}
+                        className="rounded-lg border border-border bg-muted/40 px-3 py-2"
+                      >
+                        {meta}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             )}

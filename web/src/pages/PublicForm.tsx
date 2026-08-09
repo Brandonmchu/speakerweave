@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertCircle, ArrowRight, CalendarClock, CheckCircle2, Lock, Mail } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowRight,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Copy,
+  Lock,
+  Mail,
+} from 'lucide-react'
 
 import {
   getPublicForm,
@@ -90,11 +99,13 @@ function draftHasContent(draft: FormDraft | null): boolean {
 
 function formatDeadline(date: Date): string {
   return date.toLocaleDateString(undefined, {
+    weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   })
 }
 
@@ -138,6 +149,9 @@ export function PublicForm() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null)
   const [draftRestored, setDraftRestored] = useState(() => draftHasContent(initialDraft))
+  // Whether the current in-progress form is persisted — drives the visible
+  // "Draft saved" affordance so a speaker can trust they can finish later.
+  const [draftSaved, setDraftSaved] = useState(() => draftHasContent(initialDraft))
 
   // Autosave: mirror the in-progress form to localStorage on every change, and
   // drop the key once the form is empty. Stops the moment a submit succeeds.
@@ -145,8 +159,13 @@ export function PublicForm() {
     if (receipt) return
     const draft: FormDraft = { firstName, lastName, email, title, answers }
     try {
-      if (draftHasContent(draft)) window.localStorage.setItem(draftKey, JSON.stringify(draft))
-      else window.localStorage.removeItem(draftKey)
+      if (draftHasContent(draft)) {
+        window.localStorage.setItem(draftKey, JSON.stringify(draft))
+        setDraftSaved(true)
+      } else {
+        window.localStorage.removeItem(draftKey)
+        setDraftSaved(false)
+      }
     } catch {
       // Private-mode Safari and friends — autosave is a nicety, not load-bearing.
     }
@@ -165,6 +184,7 @@ export function PublicForm() {
     setAnswers({})
     setErrors({})
     setDraftRestored(false)
+    setDraftSaved(false)
   }
 
   // Conditional logic, re-resolved on every keystroke that changes an answer.
@@ -316,7 +336,11 @@ export function PublicForm() {
             />
           )}
           <div className="mt-8 w-full max-w-sm border-t border-border pt-6">
-            <ManageLinkPrompt slug={slug} />
+            {receipt.manage_token ? (
+              <ManageLinkReady slug={slug} token={receipt.manage_token} />
+            ) : (
+              <ManageLinkPrompt slug={slug} />
+            )}
           </div>
         </div>
       </PublicShell>
@@ -480,9 +504,17 @@ export function PublicForm() {
         )}
 
         <div className="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
-            Fields marked <span className="form-required-asterisk">*</span> are required.
-          </p>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">
+              Fields marked <span className="form-required-asterisk">*</span> are required.
+            </p>
+            {draftSaved && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Check className="h-3.5 w-3.5 text-success-strong" />
+                Draft saved automatically — you can finish later on this device.
+              </p>
+            )}
+          </div>
           <Button type="submit" size="lg" className="rounded-full px-7" disabled={submit.isPending}>
             {submit.isPending ? 'Submitting…' : 'Submit proposal'}
             {!submit.isPending && <ArrowRight className="h-4 w-4" />}
@@ -644,6 +676,73 @@ function Notice({ title, description }: { tone: 'error'; title: string; descript
         <p className="text-sm font-medium text-foreground">{title}</p>
         {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
       </div>
+    </div>
+  )
+}
+
+/**
+ * In-app manage link shown on the confirmation screen.
+ *
+ * The submit response carried this submitter's OWN token (minted server-side
+ * because they just proved ownership by submitting from that email), so we can
+ * offer a real, clickable AND copyable manage link with NO dependence on email
+ * delivery. A blind submitter reaches view / edit / withdraw in the same
+ * session, even when the sending domain is unverified. The "email me the link"
+ * path stays available below as a secondary option.
+ */
+function ManageLinkReady({ slug, token }: { slug: string; token: string }) {
+  const managePath = `/submit/${slug}/manage?token=${encodeURIComponent(token)}`
+  // A same-origin absolute URL so it is copyable and always opens THIS
+  // deployment — it never depends on a server-configured frontend URL.
+  const manageUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}${managePath}` : managePath
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(manageUrl)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard blocked or unavailable — the field is selectable as a fallback.
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-left">
+      <div>
+        <p className="text-sm font-semibold text-foreground">Manage your submissions</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          View, edit, or withdraw what you submitted — no email needed. Save this private link.
+        </p>
+      </div>
+      <Button asChild size="lg" className="w-full rounded-full">
+        <Link to={managePath}>
+          Manage or edit your submissions
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </Button>
+      <div className="flex gap-2">
+        <Input
+          readOnly
+          value={manageUrl}
+          aria-label="Your private manage link"
+          onFocus={(e) => e.currentTarget.select()}
+          className="font-mono text-xs"
+        />
+        <Button type="button" variant="secondary" onClick={copy} className="shrink-0">
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <details className="pt-1">
+        <summary className="cursor-pointer list-none text-xs font-medium text-primary hover:underline">
+          Prefer a link by email instead?
+        </summary>
+        <div className="mt-3">
+          <ManageLinkPrompt slug={slug} />
+        </div>
+      </details>
     </div>
   )
 }

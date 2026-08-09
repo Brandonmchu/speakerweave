@@ -130,7 +130,7 @@ async def _accepted_sessions(org_id: str, event_id: str) -> list[dict]:
             lambda: supabase.table("sessions")
             .select(
                 "id, friendly_id, title, description, starts_at, ends_at, "
-                "room_id, track_id"
+                "room_id, track_id, format_id"
             )
             .eq("org_id", org_id)
             .eq("event_id", event_id)
@@ -141,8 +141,10 @@ async def _accepted_sessions(org_id: str, event_id: str) -> list[dict]:
     )
 
 
-async def _name_maps(org_id: str, event_id: str) -> tuple[dict[str, str], dict[str, dict]]:
-    """({room_id: name}, {track_id: {name, color}}) for the event."""
+async def _name_maps(
+    org_id: str, event_id: str
+) -> tuple[dict[str, str], dict[str, dict], dict[str, str]]:
+    """({room_id: name}, {track_id: {name, color}}, {format_id: name}) for the event."""
     rooms = rows(
         await db(
             lambda: supabase.table("rooms")
@@ -163,13 +165,24 @@ async def _name_maps(org_id: str, event_id: str) -> tuple[dict[str, str], dict[s
             "program_tracks",
         )
     )
+    formats = rows(
+        await db(
+            lambda: supabase.table("formats")
+            .select("id, name")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .execute(),
+            "program_formats",
+        )
+    )
     room_names = {str(r["id"]): r.get("name") or "" for r in rooms if r.get("id")}
     track_meta = {
         str(t["id"]): {"name": t.get("name") or "", "color": t.get("color") or None}
         for t in tracks
         if t.get("id")
     }
-    return room_names, track_meta
+    format_names = {str(f["id"]): f.get("name") or "" for f in formats if f.get("id")}
+    return room_names, track_meta, format_names
 
 
 async def _speakers_by_session(
@@ -268,7 +281,7 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
 
     zone, zone_key = _resolve_timezone(tz, event.get("timezone"))
     sessions = await _accepted_sessions(org_id, event_id)
-    room_names, track_meta = await _name_maps(org_id, event_id)
+    room_names, track_meta, format_names = await _name_maps(org_id, event_id)
 
     scheduled = [s for s in sessions if s.get("starts_at")]
     speakers_by_session, _contacts = await _speakers_by_session(
@@ -298,6 +311,7 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
                 "ends_at": session.get("ends_at"),
                 "room": room_names.get(str(session.get("room_id"))) or None,
                 "track": track,
+                "format": format_names.get(str(session.get("format_id"))) or None,
                 "speakers": [
                     {
                         "name": _speaker_name(contact),
@@ -331,7 +345,7 @@ async def get_speakers(request: Request, event_slug: str):
     org_id, event_id = event["org_id"], event["id"]
 
     sessions = await _accepted_sessions(org_id, event_id)
-    room_names, _track_meta = await _name_maps(org_id, event_id)
+    room_names, _track_meta, format_names = await _name_maps(org_id, event_id)
     sessions_by_id = {str(s["id"]): s for s in sessions}
     speakers_by_session, contacts_by_id = await _speakers_by_session(
         [str(s["id"]) for s in sessions], org_id
@@ -379,9 +393,11 @@ async def get_speakers(request: Request, event_slug: str):
                 "twitter_url": contact.get("twitter_url") or None,
                 "sessions": [
                     {
+                        "id": str(s["id"]),
                         "title": s.get("title") or "",
                         "starts_at": s.get("starts_at"),
                         "room": room_names.get(str(s.get("room_id"))) or None,
+                        "format": format_names.get(str(s.get("format_id"))) or None,
                     }
                     for s in sess_list
                 ],
@@ -412,7 +428,7 @@ async def get_session_detail(request: Request, event_slug: str, session_id: str)
             lambda: supabase.table("sessions")
             .select(
                 "id, friendly_id, title, description, starts_at, ends_at, "
-                "room_id, track_id"
+                "room_id, track_id, format_id"
             )
             .eq("org_id", org_id)
             .eq("event_id", event_id)
@@ -427,7 +443,7 @@ async def get_session_detail(request: Request, event_slug: str, session_id: str)
         raise HTTPException(status_code=404, detail="Session not found")
 
     _zone, zone_key = _resolve_timezone(None, event.get("timezone"))
-    room_names, track_meta = await _name_maps(org_id, event_id)
+    room_names, track_meta, format_names = await _name_maps(org_id, event_id)
     speakers_by_session, _contacts = await _speakers_by_session([str(session["id"])], org_id)
 
     speakers = [
@@ -458,6 +474,7 @@ async def get_session_detail(request: Request, event_slug: str, session_id: str)
             "ends_at": session.get("ends_at"),
             "room": room_names.get(str(session.get("room_id"))) or None,
             "track": track_meta.get(str(session.get("track_id"))),
+            "format": format_names.get(str(session.get("format_id"))) or None,
             "speakers": speakers,
         },
     }

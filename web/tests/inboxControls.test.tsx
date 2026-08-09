@@ -11,7 +11,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Inbox } from '@/pages/Inbox'
+import { buildSubmissionsCsv, Inbox } from '@/pages/Inbox'
+import type { Submission } from '@/lib/api'
 
 const EVENT = { id: 'event-1', name: 'DaisConf', slug: 'daisconf' }
 
@@ -79,6 +80,7 @@ const ALPHA_REVIEWS = {
       anonymized: false,
       overall: 5.0,
       comment: 'Excellent and clear.',
+      internal_comment: 'Needs a bigger room.',
       scores: { Relevance: 5, Clarity: 4 },
       abstained: false,
     },
@@ -197,19 +199,37 @@ describe('Inbox toolbar and reviews', () => {
     expect(reviews.getByText('Excellent and clear.')).toBeInTheDocument()
     expect(reviews.getByText('Grace Hopper')).toBeInTheDocument()
     expect(reviews.getByText('Solid contribution.')).toBeInTheDocument()
+    // The reviewer's organizer-only note renders under their public comment.
+    expect(reviews.getByText('Internal note:')).toBeInTheDocument()
+    expect(reviews.getByText('Needs a bigger room.')).toBeInTheDocument()
   })
 
-  it('sorts rows by review score', async () => {
+  it('sorts rows by highest review score', async () => {
     renderInbox()
     await screen.findByText('Alpha Talk')
 
     // Default is newest-first: Beta (1d) before Alpha (3d) before Gamma (5d).
     expect(renderedOrder()).toEqual(['Beta Talk', 'Alpha Talk', 'Gamma Talk'])
 
-    fireEvent.change(screen.getByLabelText('Sort submissions'), { target: { value: 'review' } })
+    fireEvent.change(screen.getByLabelText('Sort submissions'), {
+      target: { value: 'score_desc' },
+    })
 
-    // Highest score first; the unscored submission drops to the bottom.
+    // Highest score first (Alpha 4.5, Beta 2.0); the unscored Gamma drops last.
     expect(renderedOrder()).toEqual(['Alpha Talk', 'Beta Talk', 'Gamma Talk'])
+  })
+
+  it('sorts rows by lowest review score, keeping unscored rows last', async () => {
+    renderInbox()
+    await screen.findByText('Alpha Talk')
+
+    fireEvent.change(screen.getByLabelText('Sort submissions'), {
+      target: { value: 'score_asc' },
+    })
+
+    // Lowest score first (Beta 2.0, Alpha 4.5); Gamma has no score, so it stays
+    // at the bottom rather than sorting to the top.
+    expect(renderedOrder()).toEqual(['Beta Talk', 'Alpha Talk', 'Gamma Talk'])
   })
 
   it('filters rows by track', async () => {
@@ -262,5 +282,57 @@ describe('Inbox toolbar and reviews', () => {
       submitter_email: 'manual@example.com',
       track_id: 'track-ai',
     })
+  })
+})
+
+describe('buildSubmissionsCsv', () => {
+  const rows: Submission[] = [
+    {
+      id: 'sess-alpha',
+      friendly_id: 'DAIS-001',
+      title: 'Alpha, "quoted" Talk',
+      status: 'pending',
+      track_id: 'track-ai',
+      submitted_at: '2026-08-01T00:00:00.000Z',
+      submitter: { first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' },
+      review_score: 4.5,
+      review_count: 2,
+    },
+    {
+      id: 'sess-gamma',
+      friendly_id: 'DAIS-003',
+      title: 'Gamma Talk',
+      status: 'accepted',
+      track_id: null,
+      submitted_at: '2026-08-02T00:00:00.000Z',
+      submitter: null,
+      review_score: null,
+      review_count: 0,
+    },
+  ]
+
+  it('emits the score columns and resolves the track name', () => {
+    const csv = buildSubmissionsCsv(rows, (id) => (id === 'track-ai' ? 'AI' : ''))
+    const [header, alpha, gamma] = csv.split('\n')
+
+    expect(header).toBe(
+      '"ID","Title","Submitter","Track","Status","Review score","Review count","Submitted"'
+    )
+    // The scored row carries its resolved track, score, and count.
+    expect(alpha).toContain('"Ada Lovelace"')
+    expect(alpha).toContain('"AI"')
+    expect(alpha).toContain('"4.5"')
+    expect(alpha).toContain('"2"')
+    // A row with no score/track leaves those cells blank — never "null".
+    expect(gamma).toContain('"Gamma Talk"')
+    expect(gamma).toContain('"Accepted"')
+    expect(gamma).not.toContain('null')
+  })
+
+  it('quotes cells and doubles embedded quotes so a comma never shifts a column', () => {
+    const csv = buildSubmissionsCsv(rows)
+    const alpha = csv.split('\n')[1]
+    // The comma stays inside the quoted cell; the inner quotes are doubled.
+    expect(alpha).toContain('"Alpha, ""quoted"" Talk"')
   })
 })

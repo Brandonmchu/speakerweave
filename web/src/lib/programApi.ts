@@ -29,6 +29,7 @@ export interface ProgramSession {
   ends_at: string | null
   room: string | null
   track: ProgramTrack | null
+  format: string | null
   speakers: ProgramSpeakerRef[]
 }
 
@@ -85,6 +86,7 @@ export interface ProgramSessionDetail {
   ends_at: string | null
   room: string | null
   track: ProgramTrack | null
+  format: string | null
   speakers: ProgramSessionSpeaker[]
 }
 
@@ -103,9 +105,11 @@ export function getProgramSession(slug: string, sessionId: string): Promise<Prog
 // ── speakers ─────────────────────────────────────────────────────────────────
 
 export interface SpeakerSessionRef {
+  id: string | null
   title: string
   starts_at: string | null
   room: string | null
+  format: string | null
 }
 
 export interface ProgramSpeaker {
@@ -272,25 +276,19 @@ export interface IcsSessionInput {
   location?: string | null
 }
 
-/**
- * A single-VEVENT iCalendar document for one session. Returns '' when the
- * session has no start (nothing to put on a calendar). Description is passed as
- * plain text — strip any HTML before calling.
- */
-export function buildSessionIcs(session: IcsSessionInput, now: Date = new Date()): string {
-  if (!session.starts_at) return ''
+const ICS_HEADER = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//dais//EN', 'CALSCALE:GREGORIAN']
+
+/** The VEVENT lines for one session, or null when it has no valid start. */
+function veventLines(session: IcsSessionInput, now: Date): string[] | null {
+  if (!session.starts_at) return null
   const start = icsUtc(session.starts_at)
-  if (!start) return ''
+  if (!start) return null
   // Fall back to a 1-hour block when no end is set, so DTEND is always valid.
   const end = session.ends_at
     ? icsUtc(session.ends_at)
     : icsUtc(new Date(new Date(session.starts_at).getTime() + 60 * 60 * 1000).toISOString())
   const uid = `${session.friendly_id || session.id}@dais`
   const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//dais//EN',
-    'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT',
     `UID:${uid}`,
     `DTSTAMP:${icsUtc(now.toISOString())}`,
@@ -300,8 +298,77 @@ export function buildSessionIcs(session: IcsSessionInput, now: Date = new Date()
   ]
   if (session.description) lines.push(`DESCRIPTION:${icsEscape(session.description)}`)
   if (session.location) lines.push(`LOCATION:${icsEscape(session.location)}`)
-  lines.push('END:VEVENT', 'END:VCALENDAR')
-  return lines.join('\r\n')
+  lines.push('END:VEVENT')
+  return lines
+}
+
+/**
+ * A single-VEVENT iCalendar document for one session. Returns '' when the
+ * session has no start (nothing to put on a calendar). Description is passed as
+ * plain text — strip any HTML before calling.
+ */
+export function buildSessionIcs(session: IcsSessionInput, now: Date = new Date()): string {
+  const vevent = veventLines(session, now)
+  if (!vevent) return ''
+  return [...ICS_HEADER, ...vevent, 'END:VCALENDAR'].join('\r\n')
+}
+
+/**
+ * A multi-VEVENT iCalendar document for a personal ("my schedule") selection.
+ * Sessions without a valid start are skipped; returns '' when none remain, so a
+ * caller can avoid a download when nothing is starred.
+ */
+export function buildScheduleIcs(sessions: IcsSessionInput[], now: Date = new Date()): string {
+  const vevents = sessions
+    .map((session) => veventLines(session, now))
+    .filter((lines): lines is string[] => lines !== null)
+  if (vevents.length === 0) return ''
+  return [...ICS_HEADER, ...vevents.flat(), 'END:VCALENDAR'].join('\r\n')
+}
+
+// ── personal schedule (starred sessions, localStorage) ───────────────────────
+// A reader's "my schedule" is anonymous and device-local: no login, no server
+// round-trip. Stars are keyed per event slug so two events on the same browser
+// never share a selection. Every access is guarded — private mode, disabled
+// storage, or SSR must degrade to "nothing starred", never throw.
+
+const MY_SCHEDULE_PREFIX = 'dais.mySchedule.'
+
+function myScheduleKey(slug: string): string {
+  return `${MY_SCHEDULE_PREFIX}${slug}`
+}
+
+/** The starred session ids for `slug`, or [] when storage is empty/unavailable. */
+export function readStarredIds(slug: string): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(myScheduleKey(slug))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** Persist `ids` (de-duplicated) as the starred set for `slug`. No-op if it throws. */
+export function writeStarredIds(slug: string, ids: string[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(myScheduleKey(slug), JSON.stringify([...new Set(ids)]))
+  } catch {
+    // Quota exceeded or storage disabled — a personal schedule is best-effort.
+  }
+}
+
+/** Add or remove `id` from `slug`'s starred set, returning the new id list. */
+export function toggleStarredId(slug: string, id: string): string[] {
+  const current = new Set(readStarredIds(slug))
+  if (current.has(id)) current.delete(id)
+  else current.add(id)
+  const next = [...current]
+  writeStarredIds(slug, next)
+  return next
 }
 
 /** Trigger a browser download of `ics` as `<name>.ics`. No-op without a DOM. */

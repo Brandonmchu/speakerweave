@@ -400,7 +400,28 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
                 "public: could not persist session tracks session_id=%s", session["id"]
             )
 
-    return {"id": session["id"], "friendly_id": session.get("friendly_id")}
+    # Hand the submitter an IN-APP manage link on the confirmation screen: they
+    # just proved ownership of this email by submitting from it, so mint their
+    # own submitter token now — scoped to this contact — and return it. The
+    # confirmation screen renders a clickable + copyable manage link with no
+    # dependence on email delivery (the emailed link stays as a fallback path).
+    # Best-effort: a mint failure must never fail an already-created submission.
+    manage_token: str | None = None
+    manage_url: str | None = None
+    try:
+        minted = await submitter_selfservice.mint_manage_link(org_id, slug, contact["id"])
+        manage_token, manage_url = minted["token"], minted["url"]
+    except Exception:  # never 500 a good submission over a courtesy link
+        logger.warning(
+            "public: could not mint manage token session_id=%s", session["id"], exc_info=True
+        )
+
+    return {
+        "id": session["id"],
+        "friendly_id": session.get("friendly_id"),
+        "manage_token": manage_token,
+        "manage_url": manage_url,
+    }
 
 
 # ── submitter self-service ──────────────────────────────────────────────────

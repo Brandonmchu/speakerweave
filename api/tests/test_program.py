@@ -25,6 +25,7 @@ ROOM_A = "aaaaaaaa-0000-0000-0000-0000000000a1"
 ROOM_B = "aaaaaaaa-0000-0000-0000-0000000000b2"
 TRACK_ENG = "cccccccc-0000-0000-0000-0000000000e1"
 TRACK_RES = "cccccccc-0000-0000-0000-0000000000r2"
+FORMAT_KEYNOTE = "ffffffff-0000-0000-0000-0000000000f1"
 
 # contacts — last names chosen so the alphabetical gallery order is unambiguous.
 C_ALPHA = "dddddddd-0000-0000-0000-00000000a001"
@@ -71,7 +72,7 @@ def _contact(cid: str, first: str, last: str, **extra) -> dict:
     }
 
 
-def _session(sid: str, *, status: str, starts_at, ends_at, room, track, title) -> dict:
+def _session(sid: str, *, status: str, starts_at, ends_at, room, track, title, fmt=None) -> dict:
     return {
         "id": sid,
         "org_id": TEST_ORG_ID,
@@ -84,6 +85,7 @@ def _session(sid: str, *, status: str, starts_at, ends_at, room, track, title) -
         "ends_at": ends_at,
         "room_id": room,
         "track_id": track,
+        "format_id": fmt,
     }
 
 
@@ -111,6 +113,10 @@ def program_db(seeded_db):
         "tracks",
         {"id": TRACK_RES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Research", "color": "#654321"},
     )
+    db.seed(
+        "formats",
+        {"id": FORMAT_KEYNOTE, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "name": "Keynote"},
+    )
 
     db.seed("contacts", _contact(C_ALPHA, "Alice", "Alpha"))
     db.seed("contacts", _contact(C_BETA, "Bob", "Beta"))
@@ -121,7 +127,7 @@ def program_db(seeded_db):
     # Day 1 (2026-10-12 UTC): S1 @16:00, then S3 & S2 both @17:00 (Room A before B).
     db.seed("sessions", _session(S1, status="accepted", starts_at="2026-10-12T16:00:00+00:00",
                                  ends_at="2026-10-12T16:45:00+00:00", room=ROOM_B, track=TRACK_ENG,
-                                 title="Opening Keynote"))
+                                 title="Opening Keynote", fmt=FORMAT_KEYNOTE))
     db.seed("sessions", _session(S2, status="accepted", starts_at="2026-10-12T17:00:00+00:00",
                                  ends_at="2026-10-12T17:30:00+00:00", room=ROOM_B, track=TRACK_RES,
                                  title="RAG in Production"))
@@ -190,6 +196,15 @@ def test_schedule_carries_track_and_resolved_speakers_with_submitter_fallback(pr
 
     # S3 has no speaker participant — the submitter stands in.
     assert by_title["Vector Databases"]["speakers"][0]["name"] == "Bob Beta"
+
+
+def test_schedule_carries_session_format(program_client, program_db):
+    """Cards show a Format tag (EMB-01): the schedule resolves format_id to its
+    name, and a session without a format reports null rather than 500ing."""
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    by_title = {s["title"]: s for day in body["days"] for s in day["sessions"]}
+    assert by_title["Opening Keynote"]["format"] == "Keynote"
+    assert by_title["Vector Databases"]["format"] is None
 
 
 def test_schedule_leaks_no_pii(program_client, program_db):
@@ -287,6 +302,17 @@ def test_speakers_include_bio_socials_and_their_sessions(program_client, program
     assert yolanda["sessions"][0]["starts_at"] is None
 
 
+def test_speaker_sessions_carry_id_and_format(program_client, program_db):
+    """A speaker's session refs carry the id (so the dialog can open the shared
+    detail modal) and the format name."""
+    body = program_client.get(f"/public/program/{SLUG}/speakers").json()
+    by_name = {s["name"]: s for s in body["speakers"]}
+    ref = by_name["Zed Zeta"]["sessions"][0]
+    assert ref["id"] == S1
+    assert ref["title"] == "Opening Keynote"
+    assert ref["format"] == "Keynote"
+
+
 def test_speakers_leak_no_pii(program_client, program_db):
     raw = program_client.get(f"/public/program/{SLUG}/speakers").text
     payload = json.loads(raw)
@@ -317,6 +343,11 @@ def test_session_detail_returns_full_description_and_speaker_bio(program_client,
     assert speaker["bio"] == "Zed is a speaker."
     assert speaker["linkedin_url"] == "https://linkedin.com/in/zed"
     assert speaker["twitter_url"] == "https://twitter.com/zed"
+
+
+def test_session_detail_carries_format(program_client, program_db):
+    detail = program_client.get(f"/public/program/{SLUG}/session/{S1}").json()
+    assert detail["session"]["format"] == "Keynote"
 
 
 def test_session_detail_resolves_submitter_fallback_speaker(program_client, program_db):

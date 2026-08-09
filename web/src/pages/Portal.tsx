@@ -48,6 +48,15 @@ import { toast } from '@/ui/use-toast'
 
 const DEFAULT_ACCENT = '#4962E2'
 
+// Upload constraints, mirrored from the backend allowlist + size caps
+// (api/security/upload_validation.py). The `accept` attribute filters the OS
+// picker; the hint text tells the speaker before they even open it.
+const DOC_ACCEPT =
+  '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.key,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.md'
+const DOC_HINT = 'PDF, PPTX, DOC, XLS or images · up to 30 MB'
+const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
+const IMAGE_HINT = 'PNG, JPG, GIF or WebP · up to 8 MB'
+
 const PROFILE_FIELDS = [
   'first_name',
   'last_name',
@@ -374,10 +383,14 @@ function Headshot({
         <ImagePlus />
         {photoUrl ? 'Change photo' : 'Add photo'}
       </Button>
+      <p className="text-center text-[11px] text-muted-foreground" data-testid="headshot-hint">
+        {IMAGE_HINT}
+      </p>
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
+        accept={IMAGE_ACCEPT}
+        data-testid="headshot-input"
         className="hidden"
         onChange={onChange}
       />
@@ -646,7 +659,10 @@ function TaskRow({
                       : `View ${priorVersions.length} previous version${priorVersions.length === 1 ? '' : 's'}`}
                   </button>
                   {showHistory && (
-                    <ul className="mt-1.5 space-y-1 border-l border-border pl-3">
+                    <ul
+                      className="mt-1.5 space-y-1 border-l border-border pl-3"
+                      data-testid="version-history"
+                    >
                       {priorVersions.map((version) => (
                         <li key={version.file_id} className="flex items-center gap-2 text-xs">
                           <span className="rounded bg-foreground/5 px-1.5 py-0.5 font-medium text-muted-foreground">
@@ -707,14 +723,27 @@ function TaskRow({
                   )}
                   {task.file ? 'Replace file' : 'Upload file'}
                 </Button>
-                <input ref={inputRef} type="file" className="hidden" onChange={onChange} />
+                <span className="text-xs text-muted-foreground" data-testid="upload-hint">
+                  {DOC_HINT}
+                </span>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept={DOC_ACCEPT}
+                  data-testid="upload-input"
+                  className="hidden"
+                  onChange={onChange}
+                />
               </>
             )}
           </div>
 
           {/* organizer feedback + speaker replies */}
           {(comments.length > 0 || task.task.kind === 'file_request') && (
-            <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3">
+            <div
+              className="mt-4 rounded-lg border border-border bg-muted/20 p-3"
+              data-testid="feedback-thread"
+            >
               <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                 <MessageSquare className="h-3.5 w-3.5" />
                 Feedback
@@ -754,6 +783,7 @@ function TaskRow({
                 <Textarea
                   value={reply}
                   autoResize
+                  data-testid="reply-input"
                   placeholder="Reply to the organizer…"
                   className="min-h-9 flex-1"
                   onChange={(e) => setReply(e.target.value)}

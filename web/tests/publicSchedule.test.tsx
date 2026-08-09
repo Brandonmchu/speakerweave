@@ -3,7 +3,7 @@
  * client-side, and — when embedded — drops its chrome and posts its height to
  * the parent iframe.
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,6 +31,7 @@ const SCHEDULE = {
           ends_at: '2026-10-12T16:45:00+00:00',
           room: 'Main Hall',
           track: { name: 'Engineering', color: '#123456' },
+          format: 'Keynote',
           speakers: [{ name: 'Zed Zeta', title: 'Staff Engineer', company: 'Zeta Corp', photo_url: null }],
         },
         {
@@ -42,6 +43,7 @@ const SCHEDULE = {
           ends_at: '2026-10-12T17:30:00+00:00',
           room: 'Room A',
           track: { name: 'Research', color: '#654321' },
+          format: 'Talk',
           speakers: [{ name: 'Alice Alpha', title: null, company: null, photo_url: null }],
         },
       ],
@@ -58,6 +60,7 @@ const SCHEDULE = {
           ends_at: '2026-10-13T16:30:00+00:00',
           room: 'Main Hall',
           track: { name: 'Engineering', color: '#123456' },
+          format: 'Talk',
           speakers: [{ name: 'Bob Beta', title: null, company: null, photo_url: null }],
         },
       ],
@@ -76,6 +79,7 @@ const KEYNOTE_DETAIL = {
     ends_at: '2026-10-12T16:45:00+00:00',
     room: 'Main Hall',
     track: { name: 'Engineering', color: '#123456' },
+    format: 'Keynote',
     speakers: [
       {
         name: 'Zed Zeta',
@@ -128,7 +132,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  window.localStorage.clear()
 })
+
+/** The `<article data-testid="session-card">` that contains the given title. */
+function cardFor(title: string): HTMLElement {
+  const card = screen
+    .getAllByTestId('session-card')
+    .find((c) => within(c).queryByText(title))
+  if (!card) throw new Error(`no session card for "${title}"`)
+  return card
+}
 
 describe('PublicSchedule', () => {
   it('renders sessions with their speakers and the site chrome', async () => {
@@ -183,6 +198,79 @@ describe('PublicSchedule', () => {
     // Speaker bio, which the card list omits.
     expect(screen.getByText('Zed builds very large models.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /add to calendar/i })).toBeInTheDocument()
+  })
+
+  it('renders a Format tag on each session card (EMB-01)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+    // The keynote card carries its format beside the track chip.
+    expect(within(cardFor('Opening Keynote')).getByText('Keynote')).toBeInTheDocument()
+    expect(within(cardFor('Vector Databases')).getByText('Talk')).toBeInTheDocument()
+  })
+
+  it('shows the format in the session detail modal', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    fireEvent.click(await screen.findByText('Opening Keynote'))
+    const dialog = await screen.findByTestId('session-detail-dialog')
+    expect(await within(dialog).findByText('Keynote')).toBeInTheDocument()
+  })
+
+  it('stars a session, persists it to localStorage, and filters to "My schedule" (EMB-10/11)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    // Star the keynote via its card toggle.
+    fireEvent.click(within(cardFor('Opening Keynote')).getByTestId('star-toggle'))
+
+    // Persisted under a per-slug key so a different event never inherits it.
+    await waitFor(() => {
+      const raw = window.localStorage.getItem('dais.mySchedule.ai-builders-summit')
+      expect(raw && JSON.parse(raw)).toContain('sess-1')
+    })
+
+    // "My schedule" now shows only the starred session, hiding the rest.
+    fireEvent.click(screen.getByTestId('my-schedule-toggle'))
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
+    expect(screen.queryByText('Vector Databases')).not.toBeInTheDocument()
+    expect(screen.queryByText('Closing Notes')).not.toBeInTheDocument()
+  })
+
+  it('loads a previously saved schedule from localStorage across days', async () => {
+    // A star saved on an earlier visit — for a day-2 session — is restored.
+    window.localStorage.setItem('dais.mySchedule.ai-builders-summit', JSON.stringify(['sess-3']))
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    fireEvent.click(screen.getByTestId('my-schedule-toggle'))
+    // The day-2 session surfaces even though day 1 is the active tab.
+    expect(await screen.findByText('Closing Notes')).toBeInTheDocument()
+    expect(screen.queryByText('Opening Keynote')).not.toBeInTheDocument()
+  })
+
+  it('exports the starred sessions as a valid multi-event .ics', async () => {
+    // Capture the .ics text the download would write. jsdom's Blob has no
+    // .text(), so intercept the Blob parts at construction instead.
+    let capturedIcs = ''
+    class FakeBlob {
+      constructor(parts: unknown[]) {
+        capturedIcs = String(parts?.[0] ?? '')
+      }
+    }
+    vi.stubGlobal('Blob', FakeBlob)
+    ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(() => 'blob:mock')
+    ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    fireEvent.click(within(cardFor('Opening Keynote')).getByTestId('star-toggle'))
+    fireEvent.click(await screen.findByTestId('export-my-schedule'))
+
+    await waitFor(() => expect(capturedIcs).toContain('BEGIN:VCALENDAR'))
+    expect(capturedIcs).toContain('BEGIN:VEVENT')
+    expect(capturedIcs).toContain('SUMMARY:Opening Keynote')
+    expect(capturedIcs.trim().endsWith('END:VCALENDAR')).toBe(true)
   })
 
   it('in embed mode drops the chrome and posts its height to the parent', async () => {

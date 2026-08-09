@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { CalendarPlus, CalendarX2, Clock, Linkedin, MapPin, Search, Twitter } from 'lucide-react'
+import {
+  CalendarPlus,
+  CalendarX2,
+  Clock,
+  Download,
+  Linkedin,
+  MapPin,
+  Search,
+  Star,
+  Twitter,
+} from 'lucide-react'
 
 import {
+  buildScheduleIcs,
   buildSessionIcs,
   downloadIcs,
   formatDayLabel,
@@ -11,6 +22,8 @@ import {
   formatTimeZoneNote,
   getProgramSchedule,
   getProgramSession,
+  readStarredIds,
+  toggleStarredId,
   type ProgramSession,
   type ProgramSessionDetail,
 } from '@/lib/programApi'
@@ -38,6 +51,30 @@ function htmlToText(html: string): string {
     .trim()
 }
 
+/**
+ * A reader's anonymous, device-local "my schedule": starred session ids kept in
+ * localStorage (keyed per event slug), no login. Exported so the speakers page
+ * shares the exact same selection through the reused detail modal.
+ */
+export function useMySchedule(slug: string) {
+  const [starred, setStarred] = useState<Set<string>>(() => new Set(readStarredIds(slug)))
+
+  // A different event's page must show its own selection, not the last one's.
+  useEffect(() => {
+    setStarred(new Set(readStarredIds(slug)))
+  }, [slug])
+
+  const toggle = useCallback(
+    (id: string) => {
+      // localStorage is the source of truth; the Set just mirrors it for render.
+      setStarred(new Set(toggleStarredId(slug, id)))
+    },
+    [slug]
+  )
+
+  return { starred, toggle }
+}
+
 export function PublicSchedule() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
@@ -56,11 +93,15 @@ export function PublicSchedule() {
   const days = useMemo(() => query.data?.days ?? [], [query.data])
   // The zone every time/day on this page is formatted in: the event's own.
   const zone = query.data?.event.timezone ?? null
+  const eventLocation = query.data?.event.location ?? null
 
   const [activeDate, setActiveDate] = useState('')
   const [track, setTrack] = useState<string>(ALL_TRACKS)
   const [search, setSearch] = useState('')
+  const [mine, setMine] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const { starred, toggle } = useMySchedule(slug)
 
   useEffect(() => {
     if (days.length && !days.some((d) => d.date === activeDate)) setActiveDate(days[0].date)
@@ -86,6 +127,9 @@ export function PublicSchedule() {
 
   const q = search.trim().toLowerCase()
   const searching = q.length > 0
+  // Search and "my schedule" both span every day, so a match or a star on an
+  // inactive tab still surfaces. The default view is the active day's tab.
+  const crossDay = searching || mine
 
   // The active day's sessions (track-filtered) — the default, non-search view.
   const dayResults = useMemo(
@@ -96,31 +140,57 @@ export function PublicSchedule() {
     [activeDay, track]
   )
 
-  // A keyword search spans EVERY day, not just the active tab, so a match on
-  // another day still surfaces (EMB-02). Results are flat and carry their date.
-  const searchResults = useMemo(() => {
-    if (!searching) return []
+  // A flat, cross-day result set for the search and/or my-schedule views. Each
+  // row carries its date so the card can label the day it belongs to (EMB-02).
+  const flatResults = useMemo(() => {
+    if (!crossDay) return []
     const out: { session: ProgramSession; date: string }[] = []
     for (const day of days) {
       for (const session of day.sessions) {
         if (track !== ALL_TRACKS && session.track?.name !== track) continue
-        const haystack = [
-          session.title,
-          htmlToText(session.description),
-          session.room ?? '',
-          ...session.speakers.map((s) => s.name),
-        ]
-          .join(' ')
-          .toLowerCase()
-        if (haystack.includes(q)) out.push({ session, date: day.date })
+        if (mine && !(session.id && starred.has(session.id))) continue
+        if (searching) {
+          const haystack = [
+            session.title,
+            htmlToText(session.description),
+            session.room ?? '',
+            session.format ?? '',
+            ...session.speakers.map((s) => s.name),
+          ]
+            .join(' ')
+            .toLowerCase()
+          if (!haystack.includes(q)) continue
+        }
+        out.push({ session, date: day.date })
       }
     }
     return out
-  }, [days, track, q, searching])
+  }, [days, track, q, mine, searching, starred, crossDay])
+
+  const starredCount = starred.size
+
+  const exportMine = () => {
+    const inputs = days
+      .flatMap((d) => d.sessions)
+      .filter((s) => s.id && starred.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        friendly_id: s.friendly_id,
+        title: s.title,
+        description: htmlToText(s.description || ''),
+        starts_at: s.starts_at,
+        ends_at: s.ends_at,
+        location: [s.room, eventLocation].filter(Boolean).join(', ') || null,
+      }))
+    const ics = buildScheduleIcs(inputs)
+    downloadIcs(ics, `${slug || 'my'}-schedule`)
+  }
 
   const referenceIso =
     query.data?.event.starts_at ?? days[0]?.sessions[0]?.starts_at ?? null
   const zoneNote = formatTimeZoneNote(zone, referenceIso)
+
+  const emptyWhenMine = mine && flatResults.length === 0
 
   let body: ReactNode
   if (query.isPending) {
@@ -161,37 +231,74 @@ export function PublicSchedule() {
           </Tabs>
         )}
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {tracks.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              <TrackChip
-                label="All tracks"
-                color={null}
-                active={track === ALL_TRACKS}
-                onClick={() => setTrack(ALL_TRACKS)}
-              />
-              {tracks.map((t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {tracks.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
                 <TrackChip
-                  key={t.name}
-                  label={t.name}
-                  color={t.color}
-                  active={track === t.name}
-                  onClick={() => setTrack(t.name)}
+                  label="All tracks"
+                  color={null}
+                  active={track === ALL_TRACKS}
+                  onClick={() => setTrack(ALL_TRACKS)}
                 />
-              ))}
+                {tracks.map((t) => (
+                  <TrackChip
+                    key={t.name}
+                    label={t.name}
+                    color={t.color}
+                    active={track === t.name}
+                    onClick={() => setTrack(t.name)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <span />
+            )}
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search sessions or speakers"
+                className="pl-9"
+                aria-label="Search sessions"
+              />
             </div>
-          ) : (
-            <span />
-          )}
-          <div className="relative w-full sm:w-64">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search sessions or speakers"
-              className="pl-9"
-              aria-label="Search sessions"
-            />
+          </div>
+
+          {/* Personal schedule: a device-local, no-login selection (EMB-10/11). */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="my-schedule-toggle"
+              aria-pressed={mine}
+              onClick={() => setMine((v) => !v)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                mine
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Star className={cn('h-3.5 w-3.5', mine && 'fill-current')} />
+              My schedule
+              {starredCount > 0 && (
+                <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">
+                  {starredCount}
+                </span>
+              )}
+            </button>
+            {starredCount > 0 && (
+              <button
+                type="button"
+                data-testid="export-my-schedule"
+                onClick={exportMine}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export my schedule (.ics)
+              </button>
+            )}
           </div>
         </div>
 
@@ -202,24 +309,33 @@ export function PublicSchedule() {
           </p>
         )}
 
-        {searching ? (
-          searchResults.length === 0 ? (
+        {crossDay ? (
+          flatResults.length === 0 ? (
             <EmptyState
-              title="No sessions match"
-              description="Try a different track or clear your search."
+              title={emptyWhenMine ? 'Nothing saved yet' : 'No sessions match'}
+              description={
+                emptyWhenMine
+                  ? 'Star sessions to build your personal schedule.'
+                  : 'Try a different track or clear your search.'
+              }
             />
           ) : (
             <div className="space-y-3">
               <p className="text-xs font-medium text-muted-foreground" role="status">
-                {searchResults.length} result{searchResults.length === 1 ? '' : 's'} across all days
+                {flatResults.length} {mine && !searching ? 'saved' : 'result'}
+                {flatResults.length === 1 ? '' : 's'}
+                {' across all days'}
               </p>
               <ol className="space-y-3">
-                {searchResults.map(({ session, date }, i) => (
+                {flatResults.map(({ session, date }, i) => (
                   <li key={session.id || `${session.title}-${i}`}>
                     <SessionCard
                       session={session}
                       zone={zone}
                       date={date}
+                      location={eventLocation}
+                      starred={Boolean(session.id && starred.has(session.id))}
+                      onToggleStar={() => session.id && toggle(session.id)}
                       onOpen={() => session.id && setSelectedId(session.id)}
                     />
                   </li>
@@ -239,6 +355,9 @@ export function PublicSchedule() {
                 <SessionCard
                   session={session}
                   zone={zone}
+                  location={eventLocation}
+                  starred={Boolean(session.id && starred.has(session.id))}
+                  onToggleStar={() => session.id && toggle(session.id)}
                   onOpen={() => session.id && setSelectedId(session.id)}
                 />
               </li>
@@ -250,6 +369,8 @@ export function PublicSchedule() {
           slug={slug}
           sessionId={selectedId}
           zone={zone}
+          starred={starred}
+          onToggleStar={toggle}
           onClose={() => setSelectedId(null)}
         />
       </div>
@@ -279,19 +400,40 @@ function SessionCard({
   session,
   zone,
   date,
+  location,
+  starred,
+  onToggleStar,
   onOpen,
 }: {
   session: ProgramSession
   zone: string | null
   date?: string
+  location: string | null
+  starred: boolean
+  onToggleStar: () => void
   onOpen: () => void
 }) {
   const time = formatTimeRange(session.starts_at, session.ends_at, zone)
   const summary = htmlToText(session.description)
+
+  const addToCalendar = () => {
+    const ics = buildSessionIcs({
+      id: session.id,
+      friendly_id: session.friendly_id,
+      title: session.title,
+      description: htmlToText(session.description || ''),
+      starts_at: session.starts_at,
+      ends_at: session.ends_at,
+      location: [session.room, location].filter(Boolean).join(', ') || null,
+    })
+    downloadIcs(ics, session.friendly_id || session.title || 'session')
+  }
+
   return (
     <article
       role="button"
       tabIndex={0}
+      data-testid="session-card"
       onClick={onOpen}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -321,6 +463,18 @@ function SessionCard({
                 {session.track.name}
               </span>
             )}
+            {session.format && <FormatTag format={session.format} />}
+            <div className="ml-auto flex items-center gap-1">
+              {session.starts_at && (
+                <CardIconButton
+                  label={`Add ${session.title} to calendar`}
+                  onClick={addToCalendar}
+                >
+                  <CalendarPlus className="h-4 w-4" />
+                </CardIconButton>
+              )}
+              <StarButton starred={starred} onToggle={onToggleStar} />
+            </div>
           </div>
           <h3 className="mt-1.5 text-base font-semibold tracking-tight text-foreground">
             {session.title}
@@ -329,6 +483,9 @@ function SessionCard({
             <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
               {summary}
             </p>
+          )}
+          {summary && (
+            <span className="mt-1 inline-block text-xs font-medium text-primary">Show more</span>
           )}
           {session.speakers.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -356,17 +513,90 @@ function SessionCard({
   )
 }
 
-/** The session-detail modal (EMB-08): full description, speakers with bio,
- * and an add-to-calendar download. Fetches on open so the card list stays lean. */
-function SessionDetailDialog({
+/** A small tag naming the session's format (Talk, Workshop, …), beside the track chip. */
+function FormatTag({ format }: { format: string }) {
+  return (
+    <span
+      data-testid="session-format"
+      className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+    >
+      {format}
+    </span>
+  )
+}
+
+/** The star toggle that adds/removes a session from the reader's personal schedule. */
+function StarButton({
+  starred,
+  onToggle,
+  className,
+}: {
+  starred: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="star-toggle"
+      aria-pressed={starred}
+      aria-label={starred ? 'Remove from my schedule' : 'Add to my schedule'}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle()
+      }}
+      className={cn(
+        'flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+        starred && 'border-amber-300 text-amber-500 hover:text-amber-600',
+        className
+      )}
+    >
+      <Star className={cn('h-4 w-4', starred && 'fill-current')} />
+    </button>
+  )
+}
+
+/** An icon-only card action; stops propagation so it never opens the detail modal. */
+function CardIconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** The session-detail modal (EMB-08): full description, speakers with bio, a
+ * star for the personal schedule, and an add-to-calendar download. Fetches on
+ * open so the card list stays lean. Exported so the speakers page reuses it. */
+export function SessionDetailDialog({
   slug,
   sessionId,
   zone,
+  starred,
+  onToggleStar,
   onClose,
 }: {
   slug: string
   sessionId: string | null
   zone: string | null
+  starred: Set<string>
+  onToggleStar: (id: string) => void
   onClose: () => void
 }) {
   const detail = useQuery({
@@ -382,7 +612,7 @@ function SessionDetailDialog({
 
   return (
     <Dialog open={sessionId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl" data-testid="session-detail-dialog">
         {detail.isPending ? (
           <>
             <DialogHeader>
@@ -402,7 +632,13 @@ function SessionDetailDialog({
             </DialogDescription>
           </DialogHeader>
         ) : (
-          <SessionDetailBody session={session} zone={detailZone} location={eventLocation} />
+          <SessionDetailBody
+            session={session}
+            zone={detailZone}
+            location={eventLocation}
+            starred={Boolean(sessionId && starred.has(sessionId))}
+            onToggleStar={() => sessionId && onToggleStar(sessionId)}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -413,10 +649,14 @@ function SessionDetailBody({
   session,
   zone,
   location,
+  starred,
+  onToggleStar,
 }: {
   session: ProgramSessionDetail
   zone: string | null
   location: string | null
+  starred: boolean
+  onToggleStar: () => void
 }) {
   const time = formatTimeRange(session.starts_at, session.ends_at, zone)
   const descriptionHtml = stripUnsafeHtml(session.description || '')
@@ -437,7 +677,7 @@ function SessionDetailBody({
   return (
     <>
       <DialogHeader>
-        {(session.track || session.room) && (
+        {(session.track || session.format || session.room) && (
           <div className="flex flex-wrap items-center gap-2">
             {session.track && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
@@ -449,6 +689,7 @@ function SessionDetailBody({
                 {session.track.name}
               </span>
             )}
+            {session.format && <FormatTag format={session.format} />}
             {session.room && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <MapPin className="h-3.5 w-3.5" />
@@ -461,8 +702,8 @@ function SessionDetailBody({
         {time && <DialogDescription className="mt-1">{time}</DialogDescription>}
       </DialogHeader>
 
-      {session.starts_at && (
-        <div>
+      <div className="flex flex-wrap gap-2">
+        {session.starts_at && (
           <button
             type="button"
             onClick={addToCalendar}
@@ -471,8 +712,23 @@ function SessionDetailBody({
             <CalendarPlus className="h-4 w-4" />
             Add to calendar
           </button>
-        </div>
-      )}
+        )}
+        <button
+          type="button"
+          data-testid="star-toggle-modal"
+          aria-pressed={starred}
+          onClick={onToggleStar}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+            starred
+              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              : 'border-border bg-card text-foreground hover:bg-muted'
+          )}
+        >
+          <Star className={cn('h-4 w-4', starred && 'fill-current')} />
+          {starred ? 'In my schedule' : 'Add to my schedule'}
+        </button>
+      </div>
 
       {descriptionHtml && (
         <div

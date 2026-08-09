@@ -255,7 +255,10 @@ export function ContentLibrary() {
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell className="text-center tabular-nums text-sm text-muted-foreground">
+                    <TableCell
+                      className="text-center tabular-nums text-sm text-muted-foreground"
+                      data-testid="content-version-cell"
+                    >
                       {item.current_version > 0 ? `v${item.current_version}` : '—'}
                     </TableCell>
                     <TableCell className="text-right">
@@ -342,9 +345,14 @@ function ItemDialog({
         ) : (
           <div className="space-y-5">
             {/* versions */}
-            <section>
+            <section data-testid="content-version-list">
               <h3 className="mb-2 text-sm font-semibold text-foreground">
                 Versions ({detail.versions.length})
+                {detail.item.current_version > 0 && (
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    Current: v{detail.item.current_version}
+                  </span>
+                )}
               </h3>
               {detail.versions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nothing uploaded yet.</p>
@@ -354,6 +362,7 @@ function ItemDialog({
                     <li
                       key={version.file_id}
                       className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                      data-testid="content-version-row"
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -362,6 +371,11 @@ function ItemDialog({
                           v{version.version}
                           {version.is_current ? ' · current' : ''}
                         </Badge>
+                        {version.created_at && (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {relative(version.created_at)}
+                          </span>
+                        )}
                       </div>
                       {version.url && (
                         <a
@@ -386,7 +400,7 @@ function ItemDialog({
               {detail.comments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No comments yet.</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-2" data-testid="content-comment-thread">
                   {detail.comments.map((c) => (
                     <li key={c.id} className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -410,6 +424,7 @@ function ItemDialog({
                 <Textarea
                   value={draft}
                   autoResize
+                  data-testid="content-add-comment"
                   placeholder="Leave feedback for the speaker (e.g. “Headshot is too low-res — please re-upload”)."
                   onChange={(e) => setDraft(e.target.value)}
                 />

@@ -556,3 +556,67 @@ def test_a_withdrawn_submission_does_not_count_against_the_limit(client, public_
     )
     assert again.status_code == 201
     assert len(public_db.rows("sessions")) == 2
+
+
+# ── in-app manage link is minted + returned at submit time ─────────────────
+# The submitter proved ownership by submitting from their email, so the submit
+# response hands them their OWN 'submitter' token — the confirmation screen can
+# offer a manage link with no email round-trip (email delivery may be blocked).
+
+
+def test_submission_returns_a_manage_token_scoped_to_the_contact(client, public_db):
+    resp = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+
+    assert body["manage_token"]
+    assert f"/submit/{SLUG}/manage?token=" in body["manage_url"]
+    assert body["manage_token"] in body["manage_url"]
+
+    # A real 'submitter' magic link bound to THIS submission's contact — never
+    # another submitter's, and never a portal/review purpose.
+    session = public_db.rows("sessions")[0]
+    tokens = public_db.rows("magic_link_tokens")
+    assert len(tokens) == 1
+    assert tokens[0]["purpose"] == "submitter"
+    assert tokens[0]["org_id"] == TEST_ORG_ID
+    assert tokens[0]["contact_id"] == session["submitter_contact_id"]
+
+
+def test_returned_manage_token_reaches_the_manage_endpoints(client, public_db):
+    token = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(title="Ada's talk", answers={F_ABSTRACT: "A tour."}),
+    ).json()["manage_token"]
+
+    listed = client.get(f"/public/submissions?token={token}")
+    assert listed.status_code == 200
+    subs = listed.json()["submissions"]
+    assert [s["title"] for s in subs] == ["Ada's talk"]
+    assert subs[0]["editable"] is True
+
+
+def test_a_second_email_token_cannot_read_the_first_submitters_talks(client, public_db):
+    ada = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(email="ada@example.com", title="Ada's talk",
+                        answers={F_ABSTRACT: "A tour."}),
+    ).json()["manage_token"]
+    grace = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(email="grace@example.com", first_name="Grace",
+                        title="Grace's talk", answers={F_ABSTRACT: "Another tour."}),
+    ).json()["manage_token"]
+
+    # Two emails, two contacts: each token sees ONLY its own submitter's talk.
+    ada_titles = [
+        s["title"] for s in client.get(f"/public/submissions?token={ada}").json()["submissions"]
+    ]
+    grace_titles = [
+        s["title"] for s in client.get(f"/public/submissions?token={grace}").json()["submissions"]
+    ]
+    assert ada_titles == ["Ada's talk"]
+    assert grace_titles == ["Grace's talk"]

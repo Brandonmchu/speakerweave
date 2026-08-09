@@ -132,6 +132,28 @@ async def validate_token(raw: str) -> tuple[str, str]:
     return org_id, contact_id
 
 
+# ── in-app manage link (issued at submit time, no email round-trip) ─────────
+
+
+async def mint_manage_link(org_id: str, slug: str, contact_id: str) -> dict[str, str]:
+    """Mint a submitter token for a contact who JUST created a submission.
+
+    Returns ``{"token": raw, "url": manage_url}`` for the confirmation screen.
+
+    This is the in-app counterpart to :func:`issue_manage_link`. The submitter
+    proved ownership of the email by submitting from it, so we hand them a manage
+    link on the confirmation screen immediately — with no email round-trip and no
+    dependence on a verified sending domain. The token is scoped EXACTLY as the
+    emailed one: purpose ``'submitter'`` bound to this ``contact_id``, so it can
+    read / edit / withdraw only this contact's submissions — and, because a
+    contact belongs to exactly one event, only that one event's talks — nothing
+    else. It never carries or exposes another submitter's contact.
+    """
+    raw = await _mint_token(org_id, contact_id)
+    url = f"{settings.frontend_url.rstrip('/')}/submit/{slug}/manage?token={raw}"
+    return {"token": raw, "url": url}
+
+
 # ── manage-link request (never leaks whether the email exists) ──────────────
 
 
