@@ -205,7 +205,7 @@ def test_send_renders_dev_email_and_records_sent_outbox(comms_client, monkeypatc
     )
 
     assert response.status_code == 200
-    assert response.json() == {"sent": 1, "failed": 0, "total": 1}
+    assert response.json() == {"sent": 1, "failed": 0, "skipped": 0, "total": 1}
     outbox = fake.rows("email_outbox")
     assert len(outbox) == 1
     assert outbox[0]["org_id"] == TEST_ORG_ID
@@ -237,7 +237,7 @@ def test_send_failure_is_recorded_and_batch_continues(comms_client, monkeypatch)
         },
     )
 
-    assert response.json() == {"sent": 0, "failed": 1, "total": 1}
+    assert response.json() == {"sent": 0, "failed": 1, "skipped": 0, "total": 1}
     assert fake.rows("email_outbox")[0]["status"] == "failed"
     assert fake.rows("email_outbox")[0]["last_error"] == "mailbox unavailable"
     assert fake.rows("email_outbox")[0]["sent_at"] is None

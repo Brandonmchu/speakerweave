@@ -119,6 +119,17 @@ async def _mark_sent(row_id: str) -> None:
     )
 
 
+async def _mark_cancelled(row_id: str, note: str) -> None:
+    """Deliberate non-delivery (demo/reserved recipient) — not a failure."""
+    await db(
+        lambda: supabase.table("email_outbox")
+        .update({"status": "cancelled", "last_error": note})
+        .eq("id", row_id)
+        .execute(),
+        "outbox_mark_cancelled",
+    )
+
+
 async def _mark_failure(row_id: str, attempts_after: int, error: str) -> str:
     """Give up after MAX_ATTEMPTS; otherwise requeue with a backoff. Returns the
     resulting status so the caller can tally the batch."""
@@ -159,6 +170,11 @@ async def _deliver(row: dict) -> str:
             logger.warning("outbox: no recipient for row=%s (failed)", row_id)
             return "failed"
 
+        if mailer.demo_suppressed(recipient):
+            await _mark_cancelled(row_id, "demo address — delivery suppressed")
+            logger.info("outbox: skipped demo recipient row=%s", row_id)
+            return "skipped"
+
         # Row id as the idempotency key: a retry after an upstream success we
         # never got to record won't deliver the same email twice.
         await mailer.send_email(
@@ -183,7 +199,7 @@ async def _deliver(row: dict) -> str:
 async def drain_once(limit: int = BATCH) -> dict[str, int]:
     """Claim and deliver up to `limit` due rows. Safe to call from anywhere."""
     due = await _poll_due(limit)
-    sent = failed = requeued = lost = 0
+    sent = failed = requeued = skipped = lost = 0
     for row in due:
         if not await _claim(row):
             lost += 1  # another worker got there first
@@ -193,9 +209,18 @@ async def drain_once(limit: int = BATCH) -> dict[str, int]:
             sent += 1
         elif outcome == "failed":
             failed += 1
+        elif outcome == "skipped":
+            skipped += 1
         else:
             requeued += 1
-    return {"due": len(due), "sent": sent, "failed": failed, "requeued": requeued, "lost": lost}
+    return {
+        "due": len(due),
+        "sent": sent,
+        "failed": failed,
+        "requeued": requeued,
+        "skipped": skipped,
+        "lost": lost,
+    }
 
 
 async def run_forever(idle_sleep: float = IDLE_SLEEP) -> None:

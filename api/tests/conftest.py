@@ -24,6 +24,11 @@ os.environ["SUPABASE_URL"] = "http://localhost:54321"
 os.environ["SUPABASE_SERVICE_API_KEY"] = "test-service-role-key"
 os.environ["SUPABASE_JWT_SECRET"] = TEST_JWT_SECRET
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# load_dotenv() (settings/supabase_client) pulls the developer's real .env into
+# the process — including a real RESEND_API_KEY. Tests must always run the
+# dev-mode mailer (.eml outbox, no suppression). Set EMPTY (not pop): dotenv
+# never overrides an existing var, but it would re-add a popped one.
+os.environ["RESEND_API_KEY"] = ""
 
 
 def make_token(

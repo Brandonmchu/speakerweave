@@ -119,7 +119,56 @@ async def test_drain_once_tallies_and_skips_lost_claims(monkeypatch):
 
     result = await outbox_worker.drain_once()
 
-    assert result == {"due": 3, "sent": 1, "failed": 1, "requeued": 0, "lost": 1}
+    assert result == {
+        "due": 3,
+        "sent": 1,
+        "failed": 1,
+        "requeued": 0,
+        "skipped": 0,
+        "lost": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_deliver_skips_demo_recipient_in_real_mode(monkeypatch, stub_finalizers):
+    """With a provider key set, a reserved demo address is cancelled, not sent."""
+    cancelled: list[tuple[str, str]] = []
+
+    async def _resolve(row):
+        return "hannah.cole@example.com"
+
+    async def _mark_cancelled(row_id, note):
+        cancelled.append((row_id, note))
+
+    async def _never_send(**kwargs):
+        raise AssertionError("send_email must not be called for a demo recipient")
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_dummy")
+    monkeypatch.setattr(outbox_worker, "_resolve_recipient", _resolve)
+    monkeypatch.setattr(outbox_worker, "_mark_cancelled", _mark_cancelled)
+    monkeypatch.setattr(outbox_worker.mailer, "send_email", _never_send)
+
+    outcome = await outbox_worker._deliver({"id": "r9", "attempts": 0, "payload": {}})
+
+    assert outcome == "skipped"
+    assert cancelled == [("r9", "demo address — delivery suppressed")]
+    assert stub_finalizers["sent"] == [] and stub_finalizers["failure"] == []
+
+
+def test_demo_recipient_detection(monkeypatch):
+    from services import mailer
+
+    assert mailer.is_demo_recipient("a@example.com") is True
+    assert mailer.is_demo_recipient("a@sub.example.org") is True
+    assert mailer.is_demo_recipient("a@thing.test") is True
+    assert mailer.is_demo_recipient("a@agentmail.to") is False
+    assert mailer.is_demo_recipient("a@speakerweave.com") is False
+    # suppression is gated on real-delivery mode
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    assert mailer.demo_suppressed("a@example.com") is False
+    monkeypatch.setenv("RESEND_API_KEY", "re_dummy")
+    assert mailer.demo_suppressed("a@example.com") is True
+    assert mailer.demo_suppressed("a@agentmail.to") is False
 
 
 def test_is_enabled_reads_env(monkeypatch):

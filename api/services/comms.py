@@ -365,6 +365,7 @@ async def send_communication(
 
     sent = 0
     failed = 0
+    skipped = 0
     for recipient in recipients:
         context = merge_context(recipient, event)
         rendered_subject = render_template(subject_source, context)
@@ -372,23 +373,31 @@ async def send_communication(
         now = datetime.now(timezone.utc).isoformat()
         delivery: dict[str, Any] | None = None
         error: str | None = None
-        status = "sent"
-        try:
-            delivery = await mailer.send_email(
-                to=str(recipient.get("email") or ""),
-                subject=rendered_subject,
-                html=rendered_body,
-            )
-            sent += 1
-        except Exception as exc:  # one bad recipient must not stop the batch
-            logger.exception(
-                "comms: send failed event=%s contact=%s",
-                event_id,
-                recipient.get("id"),
-            )
-            status = "failed"
-            error = str(exc)
-            failed += 1
+        recipient_email = str(recipient.get("email") or "")
+        if mailer.demo_suppressed(recipient_email):
+            # Reserved demo address (seeded contact): delivery is deliberately
+            # suppressed, logged as 'cancelled' — not a failure.
+            status = "cancelled"
+            error = "demo address — delivery suppressed"
+            skipped += 1
+        else:
+            status = "sent"
+            try:
+                delivery = await mailer.send_email(
+                    to=recipient_email,
+                    subject=rendered_subject,
+                    html=rendered_body,
+                )
+                sent += 1
+            except Exception as exc:  # one bad recipient must not stop the batch
+                logger.exception(
+                    "comms: send failed event=%s contact=%s",
+                    event_id,
+                    recipient.get("id"),
+                )
+                status = "failed"
+                error = str(exc)
+                failed += 1
 
         payload: dict[str, Any] = {
             "to": recipient.get("email"),
@@ -420,7 +429,7 @@ async def send_communication(
             "comms_outbox_insert",
         )
 
-    return {"sent": sent, "failed": failed, "total": len(recipients)}
+    return {"sent": sent, "failed": failed, "skipped": skipped, "total": len(recipients)}
 
 
 async def communication_log(event_id: str, org_id: str, *, limit: int) -> list[dict]:

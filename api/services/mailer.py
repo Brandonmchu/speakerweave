@@ -54,6 +54,35 @@ class MailerError(RuntimeError):
     """Delivery failed. Callers record it per-recipient and keep going."""
 
 
+# RFC 2606/6761 reserved names. The demo workspace seeds its contacts with
+# these on purpose so a demo can never email a real stranger — and Resend
+# rejects them outright (422). Send paths treat them as "delivery deliberately
+# suppressed" (outbox status 'cancelled'), not as failures.
+_DEMO_DOMAINS = {"example.com", "example.org", "example.net"}
+_DEMO_TLDS = (".test", ".invalid", ".example", ".localhost")
+
+
+def is_demo_recipient(email: str) -> bool:
+    """True when ``email`` uses a reserved demo/test domain that must never
+    receive real mail (and that Resend would reject anyway)."""
+    domain = (email or "").rsplit("@", 1)[-1].strip().lower()
+    if not domain:
+        return False
+    if domain in _DEMO_DOMAINS or domain.endswith(tuple(f".{d}" for d in _DEMO_DOMAINS)):
+        return True
+    return domain.endswith(_DEMO_TLDS)
+
+
+def demo_suppressed(email: str) -> bool:
+    """True when a send to ``email`` should be suppressed instead of attempted.
+
+    Only in real-delivery mode (a provider key is configured): the provider
+    would reject the reserved domain and the row would read as a failure. In
+    dev mode there is no key, nothing leaves the box, and the .eml outbox is
+    exactly what tests want — so nothing is suppressed."""
+    return bool(_env("RESEND_API_KEY")) and is_demo_recipient(email)
+
+
 def _env(name: str, default: str = "") -> str:
     # Read at call time, not import time: tests monkeypatch these.
     return (os.getenv(name) or default).strip()
