@@ -411,6 +411,143 @@ def test_logistics_notes_are_event_and_org_scoped(client, auth_headers, crm_db):
     ) is None
 
 
+# ── speaker workflow status (SPK-04) ─────────────────────────────────────────
+# Invited / Confirmed / Declined is the organizer's own record of where the
+# conversation stands. It must be settable, round-trip through the aggregate,
+# stay distinct from the DERIVED portal-invite flag, and refuse anything the
+# migration-010 CHECK would refuse.
+
+
+def test_speaker_status_round_trips_through_patch_and_aggregate(client, auth_headers, crm_db):
+    saved = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{BEN}",
+        headers=auth_headers,
+        json={"speaker_status": "confirmed"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["speaker"]["speaker_status"] == "confirmed"
+    assert next(c for c in crm_db.rows("contacts") if c["id"] == BEN)["speaker_status"] == "confirmed"
+
+    profile = client.get(f"/api/events/{TEST_EVENT_ID}/speakers/{BEN}", headers=auth_headers)
+    assert profile.json()["speaker"]["speaker_status"] == "confirmed"
+
+
+def test_speaker_status_accepts_every_state(client, auth_headers, crm_db):
+    for status in ("invited", "confirmed", "declined"):
+        resp = client.patch(
+            f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+            headers=auth_headers,
+            json={"speaker_status": status},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["speaker"]["speaker_status"] == status
+
+
+def test_speaker_status_normalizes_case_and_padding(client, auth_headers, crm_db):
+    resp = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": "  Declined "},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["speaker"]["speaker_status"] == "declined"
+
+
+def test_speaker_status_rejects_an_unknown_value(client, auth_headers, crm_db):
+    """The route mirrors the CHECK, so a bad value is a readable 400 not a 500."""
+    resp = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": "maybe"},
+    )
+    assert resp.status_code == 400
+    assert next(c for c in crm_db.rows("contacts") if c["id"] == ADA).get("speaker_status") is None
+
+
+def test_speaker_status_can_be_cleared_back_to_unset(client, auth_headers, crm_db):
+    client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": "invited"},
+    )
+    cleared = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["speaker"]["speaker_status"] is None
+
+
+def test_speaker_status_is_null_until_set(client, auth_headers, crm_db):
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/speakers/{BEN}", headers=auth_headers)
+    assert body.status_code == 200
+    assert body.json()["speaker"]["speaker_status"] is None
+
+
+def test_speaker_status_is_independent_of_the_derived_invite_flag(client, auth_headers, crm_db):
+    """Ada has a portal magic link (derived `invited`), but the organizer has
+    recorded that she DECLINED. Both must be readable, and neither may
+    overwrite the other."""
+    client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": "declined"},
+    )
+    speaker = client.get(f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}", headers=auth_headers).json()[
+        "speaker"
+    ]
+    assert speaker["invited"] is True
+    assert speaker["speaker_status"] == "declined"
+
+
+def test_speaker_status_is_org_and_event_scoped(client, auth_headers, crm_db):
+    assert (
+        client.patch(
+            f"/api/events/{TEST_EVENT_ID}/speakers/{FOREIGN}",
+            headers=auth_headers,
+            json={"speaker_status": "confirmed"},
+        ).status_code
+        == 404
+    )
+    assert next(c for c in crm_db.rows("contacts") if c["id"] == FOREIGN).get("speaker_status") is None
+
+
+# ── GET /api/events/{id}/speaker-statuses (the roster's status column) ───────
+
+
+def test_speaker_statuses_lists_only_what_is_set(client, auth_headers, crm_db):
+    client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"speaker_status": "confirmed"},
+    )
+    resp = client.get(f"/api/events/{TEST_EVENT_ID}/speaker-statuses", headers=auth_headers)
+    assert resp.status_code == 200
+    statuses = resp.json()["statuses"]
+    # Ben has no status set, so he is simply absent — the roster reads "not set".
+    assert statuses == [{"contact_id": ADA, "speaker_status": "confirmed"}]
+
+
+def test_speaker_statuses_never_leak_another_events_contacts(client, auth_headers, crm_db):
+    crm_db.rows("contacts")[2]["speaker_status"] = "confirmed"  # the FOREIGN contact
+    resp = client.get(f"/api/events/{TEST_EVENT_ID}/speaker-statuses", headers=auth_headers)
+    assert [s["contact_id"] for s in resp.json()["statuses"]] == []
+
+
+def test_speaker_statuses_foreign_event_404s(client, auth_headers, crm_db):
+    assert (
+        client.get(
+            f"/api/events/{OTHER_EVENT_ID}/speaker-statuses", headers=auth_headers
+        ).status_code
+        == 404
+    )
+
+
+def test_speaker_statuses_requires_auth(client, crm_db):
+    assert client.get(f"/api/events/{TEST_EVENT_ID}/speaker-statuses").status_code == 401
+
+
 def test_update_speaker_foreign_404s(client, auth_headers, crm_db):
     resp = client.patch(
         f"/api/events/{TEST_EVENT_ID}/speakers/{FOREIGN}",

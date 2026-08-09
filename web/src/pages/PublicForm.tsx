@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
   ArrowRight,
@@ -10,6 +11,7 @@ import {
   Copy,
   Lock,
   Mail,
+  RotateCcw,
   UserPlus,
   X,
 } from 'lucide-react'
@@ -91,6 +93,8 @@ interface FormDraft {
   title: string
   answers: Answers
   coSpeakers: CoSpeaker[]
+  /** When the autosave last wrote — what the resume banner dates the draft by. */
+  savedAt?: string | null
 }
 
 /** Co-speaker rows out of localStorage — anything else on disk is ignored. */
@@ -124,7 +128,18 @@ function readStoredDraft(key: string): FormDraft | null {
       title: typeof parsed.title === 'string' ? parsed.title : '',
       answers: parsed.answers && typeof parsed.answers === 'object' ? (parsed.answers as Answers) : {},
       coSpeakers: readStoredCoSpeakers(parsed.coSpeakers),
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : null,
     }
+  } catch {
+    return null
+  }
+}
+
+/** "2 hours ago" for the resume banner; null for a draft saved by an older build. */
+function draftAge(savedAt: string | null | undefined): string | null {
+  if (!savedAt) return null
+  try {
+    return formatDistanceToNow(parseISO(savedAt), { addSuffix: true })
   } catch {
     return null
   }
@@ -193,19 +208,31 @@ export function PublicForm() {
   const [coSpeakers, setCoSpeakers] = useState<CoSpeaker[]>(initialDraft?.coSpeakers ?? [])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null)
-  const [draftRestored, setDraftRestored] = useState(() => draftHasContent(initialDraft))
+  // A draft found on load is applied to the fields immediately, but it is also
+  // ANNOUNCED: a speaker coming back days later gets an explicit "resume or
+  // clear" choice rather than a page that quietly looks half-filled (CFP-07).
+  const [draftPrompt, setDraftPrompt] = useState(() => draftHasContent(initialDraft))
+  const [draftResumed, setDraftResumed] = useState(false)
   // Whether the current in-progress form is persisted — drives the visible
   // "Draft saved" affordance so a speaker can trust they can finish later.
   const [draftSaved, setDraftSaved] = useState(() => draftHasContent(initialDraft))
+  // How old the draft we found was, frozen at mount so it doesn't tick while
+  // the speaker reads the banner.
+  const [foundDraftAge] = useState(() => draftAge(initialDraft?.savedAt))
+  const formRef = useRef<HTMLFormElement>(null)
 
-  // Autosave: mirror the in-progress form to localStorage on every change, and
-  // drop the key once the form is empty. Stops the moment a submit succeeds.
+  // Autosave: mirror the in-progress form to localStorage on every change (with
+  // the time it was written, so a later visit can say how old it is), and drop
+  // the key once the form is empty. Stops the moment a submit succeeds.
   useEffect(() => {
     if (receipt) return
     const draft: FormDraft = { firstName, lastName, email, title, answers, coSpeakers }
     try {
       if (draftHasContent(draft)) {
-        window.localStorage.setItem(draftKey, JSON.stringify(draft))
+        window.localStorage.setItem(
+          draftKey,
+          JSON.stringify({ ...draft, savedAt: new Date().toISOString() })
+        )
         setDraftSaved(true)
       } else {
         window.localStorage.removeItem(draftKey)
@@ -215,6 +242,14 @@ export function PublicForm() {
       // Private-mode Safari and friends — autosave is a nicety, not load-bearing.
     }
   }, [firstName, lastName, email, title, answers, coSpeakers, draftKey, receipt])
+
+  /** Take the banner's offer: the values are already in the fields, so this
+   * dismisses the prompt and puts the speaker back at the form. */
+  function resumeDraft() {
+    setDraftPrompt(false)
+    setDraftResumed(true)
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }
 
   function clearDraft() {
     try {
@@ -229,7 +264,8 @@ export function PublicForm() {
     setAnswers({})
     setCoSpeakers([])
     setErrors({})
-    setDraftRestored(false)
+    setDraftPrompt(false)
+    setDraftResumed(false)
     setDraftSaved(false)
   }
 
@@ -283,7 +319,8 @@ export function PublicForm() {
       } catch {
         // ignore
       }
-      setDraftRestored(false)
+      setDraftPrompt(false)
+      setDraftResumed(false)
       setReceipt(data ?? { id: '' })
     },
   })
@@ -489,14 +526,61 @@ export function PublicForm() {
           </span>
         </div>
       )}
-      {draftRestored && (
-        <div className="mb-6 flex flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-foreground">
-            <span className="font-medium">Draft restored.</span>{' '}
-            <span className="text-muted-foreground">We saved what you started earlier.</span>
+      {/* The unfinished-draft handoff (CFP-07): loud, dated, and two-way — the
+          fields are already refilled, so "Resume" just returns you to them and
+          "Clear draft" throws the whole thing away. */}
+      {draftPrompt && (
+        <div
+          role="status"
+          data-testid="resume-draft-banner"
+          className="mb-6 flex flex-col gap-4 rounded-xl border border-primary/30 bg-primary-subtle/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary">
+              <RotateCcw className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-[15px] font-semibold text-foreground">
+                {foundDraftAge
+                  ? `Draft restored — you have an unfinished draft from ${foundDraftAge}`
+                  : 'Draft restored — you have an unfinished draft'}
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Everything you typed on this device is back in the form below. Pick up where you
+                left off, or clear it and start fresh.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" data-testid="resume-draft" onClick={resumeDraft}>
+              Resume draft
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              data-testid="discard-draft"
+              title="Discard this draft and start fresh"
+              onClick={clearDraft}
+            >
+              Clear draft
+            </Button>
+          </div>
+        </div>
+      )}
+      {draftResumed && (
+        <div
+          role="status"
+          data-testid="draft-resumed-note"
+          className="mb-6 flex flex-col gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="flex items-center gap-2 text-sm text-foreground">
+            <Check className="h-4 w-4 shrink-0 text-success-strong" />
+            Draft restored — you&rsquo;re picking up where you left off.
           </p>
           <button
             type="button"
+            data-testid="discard-draft"
             onClick={clearDraft}
             className="self-start text-sm font-medium text-primary hover:underline sm:self-auto"
           >
@@ -512,7 +596,7 @@ export function PublicForm() {
         />
       )}
 
-      <form onSubmit={handleSubmit} noValidate className="mt-8 space-y-8">
+      <form ref={formRef} onSubmit={handleSubmit} noValidate className="mt-8 space-y-8">
         <section className="space-y-5">
           <SectionHeading title="About you" />
           <div className="grid gap-5 sm:grid-cols-2">

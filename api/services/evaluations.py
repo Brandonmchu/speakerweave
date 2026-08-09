@@ -288,8 +288,96 @@ async def tracks_for_sessions(org_id: str, sessions: list[dict]) -> dict[str, li
     return resolved
 
 
+# ── criterion kinds (ABS-03) ───────────────────────────────────────────────
+# A criterion used to be one thing: a number on the plan's scale. It can now
+# also collect a CHOICE from a fixed list ("Which track does this belong in?")
+# or free TEXT ("What would you tell the speaker?") — the two questions a
+# scorecard needs that a 1–5 rating cannot express.
+#
+# The stored shapes are unchanged: a criterion is still an entry in the plan's
+# `criteria` jsonb and a review is still `{criterion_name: value}`. A criterion
+# with NO `kind` key IS a scale criterion, and `normalize_criteria` never
+# writes the key for one, so every plan and review written before this change
+# validates, scores, and aggregates byte-identically.
+#
+# Weight belongs to scale criteria only. Choice and text criteria collect an
+# answer rather than a score, so they carry weight 0, sit outside the 100%
+# total, and never move the weighted overall. A plan made entirely of them is
+# legal and simply has no overall (None) — every reader handles that already.
+
+CRITERION_KINDS = ("scale", "select", "text")
+# The kinds a reviewer must answer before submitting. Text is deliberately
+# absent: prose can't be demanded the way a rating can, and an empty box is
+# indistinguishable from an unanswered one.
+REQUIRED_KINDS = ("scale", "select")
+MAX_TEXT_ANSWER = 2000
+MAX_SELECT_OPTIONS = 50
+MAX_OPTION_LENGTH = 200
+
+
+def criterion_kind(criterion: dict) -> str:
+    """'scale' | 'select' | 'text'. An absent (or unrecognized) kind is scale."""
+    kind = str(criterion.get("kind") or "scale").strip().lower()
+    return kind if kind in CRITERION_KINDS else "scale"
+
+
+def criterion_options(criterion: dict) -> list[str]:
+    """The choices a select criterion offers ([] for any other kind)."""
+    raw = criterion.get("options")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(option) for option in raw]
+
+
+def is_scale_criterion(criterion: dict) -> bool:
+    """True for the numeric criterion that has always existed."""
+    return criterion_kind(criterion) == "scale"
+
+
+def _normalize_options(name: str, raw: Any) -> list[str]:
+    """A select criterion's choices: non-empty, de-duplicated, capped."""
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    if raw is None or not isinstance(raw, (list, tuple)):
+        raise HTTPException(
+            status_code=400, detail=f"Criterion '{name}' needs a list of choices"
+        )
+    options: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        option = str(item).strip()
+        if not option:
+            continue
+        if len(option) > MAX_OPTION_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A choice for '{name}' is longer than {MAX_OPTION_LENGTH} characters",
+            )
+        key = option.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append(option)
+    if not options:
+        raise HTTPException(
+            status_code=400, detail=f"Criterion '{name}' needs at least one choice"
+        )
+    if len(options) > MAX_SELECT_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Criterion '{name}' can offer at most {MAX_SELECT_OPTIONS} choices",
+        )
+    return options
+
+
 def normalize_criteria(criteria: list[dict] | None) -> list[dict]:
-    """Return validated criteria with stable names and numeric weights."""
+    """Return validated criteria with stable names and numeric weights.
+
+    A scale criterion normalizes to exactly `{name, weight}` — the pre-ABS-03
+    shape, with no `kind` key — so re-saving an existing plan rewrites it
+    unchanged. Only scale weights count toward the 100% total, and a plan with
+    no scale criteria has nothing to weight, so the rule is skipped.
+    """
     source = DEFAULT_CRITERIA if criteria is None else criteria
     if not source:
         raise HTTPException(status_code=400, detail="At least one criterion is required")
@@ -298,26 +386,47 @@ def normalize_criteria(criteria: list[dict] | None) -> list[dict]:
     seen: set[str] = set()
     for item in source:
         name = str(item.get("name") or "").strip()
-        try:
-            weight = float(item.get("weight"))
-        except (TypeError, ValueError) as exc:
+        kind = str(item.get("kind") or "scale").strip().lower()
+        if kind not in CRITERION_KINDS:
             raise HTTPException(
-                status_code=400, detail=f"Criterion '{name or 'Unnamed'}' needs a numeric weight"
-            ) from exc
+                status_code=400,
+                detail=f"Criterion '{name or 'Unnamed'}' has an unknown type: {kind}",
+            )
+        weight = 0.0
+        if kind == "scale":
+            try:
+                weight = float(item.get("weight"))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Criterion '{name or 'Unnamed'}' needs a numeric weight",
+                ) from exc
         if not name:
             raise HTTPException(status_code=400, detail="Criterion names cannot be empty")
         key = name.casefold()
         if key in seen:
             raise HTTPException(status_code=400, detail=f"Criterion names must be unique: {name}")
-        if not math.isfinite(weight) or weight <= 0:
+        if kind == "scale" and (not math.isfinite(weight) or weight <= 0):
             raise HTTPException(status_code=400, detail=f"Criterion '{name}' needs a positive weight")
         seen.add(key)
-        normalized.append(
-            {"name": name, "weight": int(weight) if weight.is_integer() else weight}
-        )
+        if kind == "scale":
+            normalized.append(
+                {"name": name, "weight": int(weight) if weight.is_integer() else weight}
+            )
+        elif kind == "select":
+            normalized.append(
+                {
+                    "name": name,
+                    "weight": 0,
+                    "kind": "select",
+                    "options": _normalize_options(name, item.get("options")),
+                }
+            )
+        else:
+            normalized.append({"name": name, "weight": 0, "kind": "text"})
 
-    total = sum(float(item["weight"]) for item in normalized)
-    if abs(total - 100) > 0.001:
+    scale_weights = [float(item["weight"]) for item in normalized if is_scale_criterion(item)]
+    if scale_weights and abs(sum(scale_weights) - 100) > 0.001:
         raise HTTPException(status_code=400, detail="Criterion weights must add up to 100")
     return normalized
 
@@ -325,14 +434,19 @@ def normalize_criteria(criteria: list[dict] | None) -> list[dict]:
 def weighted_overall(scores: dict[str, Any], criteria: list[dict]) -> float | None:
     """Calculate a weighted mean on the plan's native score scale.
 
-    Missing or non-numeric values make the result incomplete rather than
-    silently treating an unanswered criterion as zero.
+    Only SCALE criteria take part — a choice or a paragraph has no place in a
+    mean, and skipping them leaves the number identical to what the same plan
+    would produce without them. Missing or non-numeric values make the result
+    incomplete rather than silently treating an unanswered criterion as zero,
+    and a plan with no scale criteria has no overall at all (None).
     """
     if not criteria:
         return None
     weighted_sum = 0.0
     weight_sum = 0.0
     for criterion in criteria:
+        if not is_scale_criterion(criterion):
+            continue
         name = str(criterion.get("name") or "")
         value = scores.get(name)
         if isinstance(value, bool):
@@ -1644,9 +1758,27 @@ async def session_review_aggregate(org_id: str, session_id: str) -> dict:
             if not name or key in seen_criteria:
                 continue
             seen_criteria.add(key)
-            criteria_order.append({"name": name, "weight": criterion.get("weight")})
+            criteria_order.append(
+                {
+                    "name": name,
+                    "weight": criterion.get("weight"),
+                    "kind": criterion_kind(criterion),
+                    "options": criterion_options(criterion),
+                }
+            )
 
-    criterion_scores: dict[str, list[float]] = {item["name"]: [] for item in criteria_order}
+    # Scale criteria average, exactly as before. A choice criterion instead
+    # tallies how often each option was picked, and a text criterion collects
+    # the responses against the (already anonymized) reviewer label.
+    criterion_scores: dict[str, list[float]] = {
+        item["name"]: [] for item in criteria_order if item["kind"] == "scale"
+    }
+    criterion_counts: dict[str, dict[str, int]] = {
+        item["name"]: {} for item in criteria_order if item["kind"] == "select"
+    }
+    criterion_responses: dict[str, list[dict]] = {
+        item["name"]: [] for item in criteria_order if item["kind"] == "text"
+    }
     overalls: list[float] = []
     abstained_count = 0
     verdicts: list[dict] = []
@@ -1674,8 +1806,15 @@ async def session_review_aggregate(org_id: str, session_id: str) -> dict:
             if overall is not None:
                 overalls.append(float(overall))
             for name, value in (review.get("scores") or {}).items():
-                if name in criterion_scores and isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric = isinstance(value, (int, float)) and not isinstance(value, bool)
+                written = isinstance(value, str) and bool(value.strip())
+                if name in criterion_scores and numeric:
                     criterion_scores[name].append(float(value))
+                elif name in criterion_counts and written:
+                    tally = criterion_counts[name]
+                    tally[value] = tally.get(value, 0) + 1
+                elif name in criterion_responses and written:
+                    criterion_responses[name].append({"reviewer": reviewer, "value": value})
 
         verdicts.append(
             {
@@ -1689,18 +1828,25 @@ async def session_review_aggregate(org_id: str, session_id: str) -> dict:
             }
         )
 
-    criteria_out = [
-        {
-            "name": item["name"],
+    # `average` stays the scale criterion's number and is None for the other
+    # kinds, so a reader that only knows about averages skips them untouched;
+    # `counts`/`responses` are the new, additive fields carrying the rest.
+    criteria_out: list[dict] = []
+    for item in criteria_order:
+        name = item["name"]
+        collected = criterion_scores.get(name) or []
+        entry = {
+            "name": name,
             "weight": item["weight"],
-            "average": (
-                round(sum(criterion_scores[item["name"]]) / len(criterion_scores[item["name"]]), 2)
-                if criterion_scores[item["name"]]
-                else None
-            ),
+            "average": round(sum(collected) / len(collected), 2) if collected else None,
+            "kind": item["kind"],
         }
-        for item in criteria_order
-    ]
+        if item["kind"] == "select":
+            entry["options"] = item["options"]
+            entry["counts"] = criterion_counts.get(name, {})
+        elif item["kind"] == "text":
+            entry["responses"] = criterion_responses.get(name, [])
+        criteria_out.append(entry)
 
     return {
         "review_count": len(completed),
@@ -1995,20 +2141,76 @@ async def reviewer_submission(org_id: str, evaluator_id: str, assignment_id: str
     return {"assignment_id": assignment_id, "session": session, "review": review}
 
 
+def _validate_choice(name: str, raw_value: Any, criterion: dict) -> str:
+    """A select answer: exactly one of that criterion's own options."""
+    options = criterion_options(criterion)
+    value = raw_value.strip() if isinstance(raw_value, str) else None
+    if value is None or value not in options:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Answer for '{name}' must be one of: {', '.join(options)}",
+        )
+    return value
+
+
+def _validate_text(name: str, raw_value: Any) -> str:
+    """A free-text answer: any string, capped so one reviewer can't paste a book."""
+    if not isinstance(raw_value, str):
+        raise HTTPException(status_code=400, detail=f"Answer for '{name}' must be text")
+    value = raw_value.strip()
+    if len(value) > MAX_TEXT_ANSWER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Answer for '{name}' must be {MAX_TEXT_ANSWER} characters or fewer",
+        )
+    return value
+
+
 def _validate_scores(
     scores: dict[str, Any], criteria: list[dict], scale: str, *, final: bool, abstained: bool
-) -> dict[str, float]:
-    names = [str(item["name"]) for item in criteria]
-    unknown = sorted(set(scores) - set(names))
+) -> dict[str, Any]:
+    """Check a reviewer's answers against the plan's criteria.
+
+    A scale criterion is validated exactly as it always was — a number on the
+    plan's scale — so an old plan scored by an old client behaves identically.
+    A select answer must be one of that criterion's options; a text answer is
+    any string within `MAX_TEXT_ANSWER`. A blank select/text answer is dropped
+    rather than stored, so "cleared the field" and "never answered" are one
+    state, and text is optional even on a final submit.
+    """
+    by_name = {str(item["name"]): item for item in criteria}
+    unknown = sorted(set(scores) - set(by_name))
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown criterion: {unknown[0]}")
+    # An emptied choice/text field is no answer at all. Scale values are left
+    # exactly as sent — "" there is still the "must be a number" 400 it was.
+    scores = {
+        name: value
+        for name, value in scores.items()
+        if not (
+            not is_scale_criterion(by_name[name])
+            and isinstance(value, str)
+            and not value.strip()
+        )
+    }
     if final and not abstained:
-        missing = [name for name in names if name not in scores]
+        missing = [
+            name
+            for name, criterion in by_name.items()
+            if criterion_kind(criterion) in REQUIRED_KINDS and name not in scores
+        ]
         if missing:
             raise HTTPException(status_code=400, detail=f"Score required for: {missing[0]}")
     maximum = 10 if scale == "1_10" else 5
-    normalized: dict[str, float] = {}
+    normalized: dict[str, Any] = {}
     for name, raw_value in scores.items():
+        kind = criterion_kind(by_name[name])
+        if kind == "select":
+            normalized[name] = _validate_choice(name, raw_value, by_name[name])
+            continue
+        if kind == "text":
+            normalized[name] = _validate_text(name, raw_value)
+            continue
         if isinstance(raw_value, bool):
             raise HTTPException(status_code=400, detail=f"Score for '{name}' must be a number")
         try:

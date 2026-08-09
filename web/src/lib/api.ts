@@ -553,6 +553,32 @@ export async function updateSessionStatus(id: string, status: SubmissionStatus):
   return session ?? (wire as Submission)
 }
 
+/** What an organizer may rewrite on a session from the inbox drawer (CNT-09). */
+export interface SessionEditInput {
+  title?: string
+  /** The abstract. Sent as `description`, the column's real name. */
+  description?: string
+}
+
+/**
+ * PATCH /api/sessions/{id} {title, description} → {session}.
+ *
+ * The same endpoint as the status move, and deliberately so: one session, one
+ * place to change it. Only the keys present are written, so editing a title
+ * never blanks the abstract.
+ */
+export async function updateSession(id: string, input: SessionEditInput): Promise<Submission> {
+  const body: Record<string, string> = {}
+  if (input.title !== undefined) body.title = input.title
+  if (input.description !== undefined) body.description = input.description
+  const wire = await apiPatch<{ session?: Submission } | Submission>(
+    `/api/sessions/${encodeURIComponent(id)}`,
+    body
+  )
+  const session = (wire as { session?: Submission })?.session
+  return session ?? (wire as Submission)
+}
+
 /** POST the minimum review decision and receive any acceptance provisioning count. */
 export function decideSubmission(
   id: string,
@@ -678,6 +704,22 @@ export async function withdrawSubmitterSubmission(
 // the CRM layer on top: the per-speaker profile drawer, bulk CSV import, and
 // profile edit — every call JWT-authed and org/event scoped by the backend.
 
+/**
+ * The organizer's manual speaker workflow status (migration 010). Null/absent
+ * means "not set" — the state most of a roster is in on day one.
+ *
+ * Deliberately separate from the DERIVED signals the roster already shows:
+ * `invited` there means "a portal magic link was minted", and the onboarding
+ * counts mean "their paperwork is in". This one means "have they said yes".
+ */
+export type SpeakerStatus = 'invited' | 'confirmed' | 'declined'
+
+export const SPEAKER_STATUSES: SpeakerStatus[] = ['invited', 'confirmed', 'declined']
+
+export function isSpeakerStatus(value: unknown): value is SpeakerStatus {
+  return SPEAKER_STATUSES.includes(value as SpeakerStatus)
+}
+
 /** The identity block of a speaker profile — everything the drawer header shows. */
 export interface SpeakerProfileContact {
   contact_id: string
@@ -694,6 +736,8 @@ export interface SpeakerProfileContact {
    * predates migration 009, which the drawer renders as "nothing recorded".
    */
   logistics_notes?: string | null
+  /** Organizer-set workflow status; null on a backend that predates 010. */
+  speaker_status?: SpeakerStatus | null
   photo_url: string | null
   pronouns: string | null
   linkedin_url: string | null
@@ -774,6 +818,29 @@ export async function getSpeakerProfile(eventId: string, contactId: string): Pro
   }
 }
 
+/**
+ * GET /api/events/{id}/speaker-statuses — every workflow status set on this
+ * event, as {contact_id: status}.
+ *
+ * One flat call that rides alongside the roster, so the list can badge and
+ * filter by status without a request per row. Contacts with nothing set are
+ * absent from the map and read as "not set".
+ */
+export async function listSpeakerStatuses(
+  eventId: string
+): Promise<Record<string, SpeakerStatus>> {
+  const wire = await apiGet<{ statuses?: Array<{ contact_id?: string; speaker_status?: string }> }>(
+    `/api/events/${encodeURIComponent(eventId)}/speaker-statuses`
+  )
+  const byContact: Record<string, SpeakerStatus> = {}
+  for (const row of wire.statuses ?? []) {
+    if (row?.contact_id && isSpeakerStatus(row.speaker_status)) {
+      byContact[row.contact_id] = row.speaker_status
+    }
+  }
+  return byContact
+}
+
 export interface SpeakerImportRow {
   first_name?: string
   last_name?: string
@@ -826,6 +893,8 @@ export interface SpeakerEditInput {
   title?: string
   about?: string
   logistics_notes?: string
+  /** '' or null clears the status back to "not set". */
+  speaker_status?: SpeakerStatus | '' | null
 }
 
 /** PATCH /api/events/{id}/speakers/{contactId} — edit profile fields. */

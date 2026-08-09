@@ -14,6 +14,13 @@ router = APIRouter(prefix="/public/review", tags=["review"])
 
 
 class ReviewPutRequest(BaseModel):
+    """A reviewer's scorecard.
+
+    `scores` is keyed by criterion name; the value is a number for a scale
+    criterion (as it always was) and a string for a choice or free-text one.
+    The plan's own criteria decide which is which — see `_validate_scores`.
+    """
+
     scores: dict[str, Any] = Field(default_factory=dict)
     comment: str | None = Field(default=None, max_length=20_000)
     abstained: bool = False

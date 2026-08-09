@@ -114,6 +114,27 @@ export function getContentItem(assignmentId: string): Promise<ContentItemDetail>
   )
 }
 
+export interface RestoreResult extends ContentItemDetail {
+  restored: { version: number; file_id: string; changed: boolean }
+}
+
+/**
+ * POST /api/task-assignments/{id}/restore — make a prior version current again.
+ *
+ * The server moves a pointer rather than deleting anything, and answers with
+ * the item's refreshed detail, so the caller re-renders history + thread from
+ * this one response.
+ */
+export function restoreContentVersion(
+  assignmentId: string,
+  version: number
+): Promise<RestoreResult> {
+  return apiPost<RestoreResult>(
+    `/api/task-assignments/${encodeURIComponent(assignmentId)}/restore`,
+    { version }
+  )
+}
+
 /** POST /api/task-assignments/{id}/comments — organizer leaves feedback. */
 export function addContentComment(
   assignmentId: string,
@@ -136,9 +157,16 @@ export function remindOutstanding(eventId: string, input: RemindInput = {}): Pro
   return apiPost<RemindResult>(`/api/events/${encodeURIComponent(eventId)}/content/remind`, input)
 }
 
-/** The authed path to the ZIP bundle export. */
-export function contentExportPath(eventId: string): string {
-  return `/api/events/${encodeURIComponent(eventId)}/content/export`
+/**
+ * The authed path to the ZIP bundle export.
+ *
+ * With no ids it exports the whole event; pass the ids an organizer ticked in
+ * the library and the server bundles only those items' current versions.
+ */
+export function contentExportPath(eventId: string, assignmentIds?: string[]): string {
+  const base = `/api/events/${encodeURIComponent(eventId)}/content/export`
+  const picked = (assignmentIds ?? []).filter(Boolean)
+  return picked.length ? `${base}?assignment_ids=${encodeURIComponent(picked.join(','))}` : base
 }
 
 /**
@@ -146,13 +174,13 @@ export function contentExportPath(eventId: string): string {
  * shared `request` helper because that one parses the body as text/JSON, which
  * would corrupt binary.
  */
-export async function fetchContentBundle(eventId: string): Promise<Blob> {
+export async function fetchContentBundle(eventId: string, assignmentIds?: string[]): Promise<Blob> {
   const token = await getToken()
   const headers = new Headers()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   let response: Response
   try {
-    response = await fetch(`${BASE_URL}${contentExportPath(eventId)}`, { headers })
+    response = await fetch(`${BASE_URL}${contentExportPath(eventId, assignmentIds)}`, { headers })
   } catch {
     throw new ApiError("Can't reach the server. Check your connection and try again.", 0)
   }
@@ -163,8 +191,12 @@ export async function fetchContentBundle(eventId: string): Promise<Blob> {
 }
 
 /** Fetch the bundle and trigger a browser download. */
-export async function downloadContentBundle(eventId: string, filename = 'content.zip'): Promise<void> {
-  const blob = await fetchContentBundle(eventId)
+export async function downloadContentBundle(
+  eventId: string,
+  filename = 'content.zip',
+  assignmentIds?: string[]
+): Promise<void> {
+  const blob = await fetchContentBundle(eventId, assignmentIds)
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url

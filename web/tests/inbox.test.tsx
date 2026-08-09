@@ -182,3 +182,119 @@ describe('Inbox detail panel', () => {
     })
   })
 })
+
+/**
+ * The central session editor (CNT-09).
+ *
+ * The drawer is where an organizer reads a submission, so it is where they fix
+ * its title — and a blind browser agent has to be able to DO that by clicking:
+ * open the editor, type, save, and see the new title in both the drawer and the
+ * queue behind it.
+ */
+describe('Inbox session editor', () => {
+  let patches: Array<{ url: string; body: Record<string, unknown> }>
+  let session: Record<string, unknown>
+  let detailGets: number
+  let listGets: number
+
+  beforeEach(() => {
+    patches = []
+    session = { ...SUBMISSION }
+    detailGets = 0
+    listGets = 0
+    window.localStorage.setItem('dais.token', 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        if (url.endsWith('/api/events')) return jsonResponse({ events: [EVENT] })
+        if (url.includes('/submissions')) {
+          listGets += 1
+          return jsonResponse({ event: EVENT, submissions: [session], count: 1 })
+        }
+        if (url.includes('/api/sessions/') && method === 'PATCH') {
+          const body = JSON.parse(String(init?.body ?? '{}'))
+          patches.push({ url, body })
+          session = { ...session, ...body }
+          return jsonResponse({ session })
+        }
+        if (url.includes('/api/sessions/')) {
+          detailGets += 1
+          return jsonResponse({ ...DETAIL, session })
+        }
+        return jsonResponse({}, 404)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it('edits the title and abstract from the drawer and refreshes both views', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByText('Analytical Engines'))
+    fireEvent.click(await screen.findByTestId('edit-session'))
+
+    const titleInput = await screen.findByTestId('session-title-input')
+    // Seeded from the loaded detail, not from the list row.
+    expect((titleInput as HTMLInputElement).value).toBe('Analytical Engines')
+    expect((screen.getByTestId('session-abstract-input') as HTMLTextAreaElement).value).toBe(
+      'A talk about the first computers.'
+    )
+
+    const detailsBefore = detailGets
+    const listBefore = listGets
+    fireEvent.change(titleInput, { target: { value: '  Analytical Engines, Revisited  ' } })
+    fireEvent.change(screen.getByTestId('session-abstract-input'), {
+      target: { value: 'Now with punch cards.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0].url).toBe('/api/sessions/session-1')
+    expect(patches[0].body).toEqual({
+      title: 'Analytical Engines, Revisited', // trimmed before it leaves the client
+      description: 'Now with punch cards.',
+    })
+
+    // The drawer leaves edit mode and both the drawer and the queue refetch, so
+    // the new title is readable in the list without a reload.
+    await waitFor(() => expect(screen.queryByTestId('session-title-input')).not.toBeInTheDocument())
+    await waitFor(() => expect(detailGets).toBeGreaterThan(detailsBefore))
+    await waitFor(() => expect(listGets).toBeGreaterThan(listBefore))
+    expect(await screen.findAllByText('Analytical Engines, Revisited')).not.toHaveLength(0)
+  })
+
+  it('the row pencil opens the drawer already in edit mode', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByTestId('edit-row-session-1'))
+
+    expect(await screen.findByTestId('session-title-input')).toBeInTheDocument()
+    expect(screen.getByTestId('session-abstract-input')).toBeInTheDocument()
+  })
+
+  it('cancel closes the editor without writing anything', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByTestId('edit-row-session-1'))
+    fireEvent.change(await screen.findByTestId('session-title-input'), {
+      target: { value: 'Discarded' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByTestId('session-title-input')).not.toBeInTheDocument())
+    expect(patches).toHaveLength(0)
+  })
+
+  it('refuses to save an empty title', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByTestId('edit-row-session-1'))
+    fireEvent.change(await screen.findByTestId('session-title-input'), { target: { value: '   ' } })
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByText('A session needs a title.')).toBeInTheDocument()
+    expect(patches).toHaveLength(0)
+  })
+})

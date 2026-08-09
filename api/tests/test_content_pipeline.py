@@ -120,6 +120,91 @@ def test_reupload_keeps_version_history(client, content_db):
     assert slides["versions"][1]["is_current"] is False
 
 
+# ── restore a prior version (the change log's undo) ──────────────────────────
+
+
+def _upload_two_versions(client) -> None:
+    client.post(f"/public/portal/tasks/{A_BEN_SLIDES}/upload", headers=_cookie(BEN), files=_pdf("v1.pdf"))
+    client.post(f"/public/portal/tasks/{A_BEN_SLIDES}/upload", headers=_cookie(BEN), files=_pdf("v2.pdf"))
+
+
+def test_restore_moves_the_current_pointer_without_deleting_history(client, auth_headers, content_db):
+    _upload_two_versions(client)
+    before = client.get(f"/api/task-assignments/{A_BEN_SLIDES}/content", headers=auth_headers).json()
+    assert before["item"]["current_version"] == 2
+
+    resp = client.post(
+        f"/api/task-assignments/{A_BEN_SLIDES}/restore", headers=auth_headers, json={"version": 1}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # v1 is current again, and the response is the refreshed detail.
+    assert body["item"]["current_version"] == 1
+    assert body["restored"] == {"version": 1, "file_id": body["versions"][1]["file_id"], "changed": True}
+    by_version = {v["version"]: v for v in body["versions"]}
+    assert by_version[1]["is_current"] is True
+    assert by_version[2]["is_current"] is False
+
+    # NOTHING was deleted — the whole history survives, v2 included.
+    files = [f for f in content_db.rows("files") if f.get("task_assignment_id") == A_BEN_SLIDES]
+    assert sorted(f["version"] for f in files) == [1, 2]
+
+    # The pointer really moved in the DB, not just in the response.
+    assignment = next(a for a in content_db.rows("task_assignments") if a["id"] == A_BEN_SLIDES)
+    assert assignment["file_id"] == next(f["id"] for f in files if f["version"] == 1)
+
+    # …and an audit line records it in the item's thread.
+    assert any("Restored v1" in c["body"] for c in body["comments"])
+
+    # The speaker's own portal serves the restored version as current too.
+    me = client.get("/public/portal/me", headers=_cookie(BEN)).json()
+    slides = next(t for t in me["tasks"] if t["task"]["name"] == "Upload slides")
+    assert slides["file"]["version"] == 1
+
+
+def test_restore_is_reversible(client, auth_headers, content_db):
+    _upload_two_versions(client)
+    client.post(f"/api/task-assignments/{A_BEN_SLIDES}/restore", headers=auth_headers, json={"version": 1})
+    back = client.post(
+        f"/api/task-assignments/{A_BEN_SLIDES}/restore", headers=auth_headers, json={"version": 2}
+    )
+    assert back.status_code == 200
+    assert back.json()["item"]["current_version"] == 2
+    # two moves → two audit lines, and still exactly two files rows
+    assert sum("Restored v" in c["body"] for c in back.json()["comments"]) == 2
+    assert len([f for f in content_db.rows("files") if f.get("task_assignment_id") == A_BEN_SLIDES]) == 2
+
+
+def test_restoring_the_current_version_is_a_no_op(client, auth_headers, content_db):
+    _upload_two_versions(client)
+    resp = client.post(
+        f"/api/task-assignments/{A_BEN_SLIDES}/restore", headers=auth_headers, json={"version": 2}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["restored"]["changed"] is False
+    assert resp.json()["comments"] == []  # no spurious audit line
+
+
+def test_restore_rejects_a_foreign_item_and_an_unknown_version(client, auth_headers, content_db):
+    # Another org's item: 404, and its pointer is untouched.
+    foreign = client.post(
+        f"/api/task-assignments/{A_FOREIGN}/restore", headers=auth_headers, json={"version": 1}
+    )
+    assert foreign.status_code == 404
+    assert next(a for a in content_db.rows("task_assignments") if a["id"] == A_FOREIGN).get("file_id") is None
+
+    # Our own item, but a version that was never uploaded.
+    _upload_two_versions(client)
+    missing = client.post(
+        f"/api/task-assignments/{A_BEN_SLIDES}/restore", headers=auth_headers, json={"version": 9}
+    )
+    assert missing.status_code == 404
+    # the current version is unchanged by the failed attempt
+    detail = client.get(f"/api/task-assignments/{A_BEN_SLIDES}/content", headers=auth_headers).json()
+    assert detail["item"]["current_version"] == 2
+
+
 # ── comments (scoping both ways) ─────────────────────────────────────────────
 
 
@@ -303,6 +388,59 @@ def test_export_zip_bundles_downloadable_files(client, auth_headers, content_db)
     names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
     # Ben's downloadable deck is in; Ada's byte-less file is skipped, not fatal.
     assert any("Ben_Franklin" in n and "slides" in n.lower() for n in names)
+    assert all(not n.startswith("/") and ".." not in n for n in names)
+
+
+def test_export_selected_ids_narrows_the_bundle(client, auth_headers, content_db):
+    """?assignment_ids=… exports exactly the ticked items — and nothing else."""
+    client.post(f"/public/portal/tasks/{A_BEN_SLIDES}/upload", headers=_cookie(BEN), files=_pdf("ben-deck.pdf"))
+    client.post(f"/public/portal/tasks/{A_BEN_BIO}/upload", headers=_cookie(BEN), files=_pdf("ben-bio.pdf"))
+
+    # Unfiltered, the event has three collected items.
+    everything = client.get(
+        f"/api/events/{TEST_EVENT_ID}/content/export?format=manifest", headers=auth_headers
+    ).json()
+    assert {m["item_id"] for m in everything["files"]} == {A_ADA_SLIDES, A_BEN_SLIDES, A_BEN_BIO}
+
+    # Ticking two of them exports those two only.
+    picked = client.get(
+        f"/api/events/{TEST_EVENT_ID}/content/export"
+        f"?format=manifest&assignment_ids={A_BEN_SLIDES},{A_ADA_SLIDES}",
+        headers=auth_headers,
+    ).json()
+    assert {m["item_id"] for m in picked["files"]} == {A_BEN_SLIDES, A_ADA_SLIDES}
+    assert picked["count"] == 2
+
+
+def test_export_selected_ids_ignores_another_orgs_item(client, auth_headers, content_db):
+    # A foreign id smuggled into the list contributes nothing — the selection is
+    # intersected with this org+event's own items.
+    client.post(f"/public/portal/tasks/{A_BEN_SLIDES}/upload", headers=_cookie(BEN), files=_pdf("ben.pdf"))
+    picked = client.get(
+        f"/api/events/{TEST_EVENT_ID}/content/export"
+        f"?format=manifest&assignment_ids={A_BEN_SLIDES},{A_FOREIGN}",
+        headers=auth_headers,
+    ).json()
+    assert {m["item_id"] for m in picked["files"]} == {A_BEN_SLIDES}
+
+
+def test_export_selected_zip_carries_only_current_versions(client, auth_headers, content_db):
+    # Ben re-uploads his deck (v1 → v2) and also files a bio.
+    _upload_two_versions(client)
+    client.post(f"/public/portal/tasks/{A_BEN_BIO}/upload", headers=_cookie(BEN), files=_pdf("bio.pdf"))
+
+    resp = client.get(
+        f"/api/events/{TEST_EVENT_ID}/content/export?assignment_ids={A_BEN_SLIDES}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert "1-selected" in resp.headers["content-disposition"]
+
+    names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+    assert len(names) == 1  # one item, one file — not the bio, not the whole history
+    assert "-v2-" in names[0] and "-v1-" not in names[0]
+    assert "bio" not in names[0].lower()
     assert all(not n.startswith("/") and ".." not in n for n in names)
 
 

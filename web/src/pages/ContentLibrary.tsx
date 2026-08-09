@@ -1,15 +1,17 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatDistanceToNow, parseISO } from 'date-fns'
+import { format as formatDate, formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
   Bell,
   Download,
   FileArchive,
   FileText,
+  History,
   Image as ImageIcon,
   Loader2,
   MessageSquare,
+  RotateCcw,
   Send,
   User,
 } from 'lucide-react'
@@ -21,6 +23,7 @@ import {
   getContentItem,
   listContent,
   remindOutstanding,
+  restoreContentVersion,
   type ContentItem,
   type ContentStatus,
   type ContentType,
@@ -92,6 +95,32 @@ export function ContentLibrary() {
   const items = useMemo(() => library?.items ?? [], [library])
   const outstanding = library?.outstanding ?? []
 
+  // ── multi-select export ───────────────────────────────────────────────────
+  // Only an item with a file behind it can be bundled; a "missing" row has
+  // nothing to put in the ZIP, so it isn't selectable.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const downloadableIds = useMemo(
+    () => items.filter((i) => i.current_file).map((i) => i.item_id),
+    [items]
+  )
+  // A filter change can hide a ticked row — keep the selection honest by
+  // pruning it to what is actually on screen.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => downloadableIds.includes(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [downloadableIds])
+
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const allSelected = downloadableIds.length > 0 && selectedIds.length === downloadableIds.length
+
+  const toggleItem = (itemId: string, checked: boolean) =>
+    setSelectedIds((prev) =>
+      checked ? (prev.includes(itemId) ? prev : [...prev, itemId]) : prev.filter((id) => id !== itemId)
+    )
+  const toggleAll = (checked: boolean) => setSelectedIds(checked ? downloadableIds : [])
+
   const remind = useMutation({
     mutationFn: () => remindOutstanding(event!.id, { required_only: true }),
     onSuccess: (result) => {
@@ -110,6 +139,24 @@ export function ContentLibrary() {
   const exporting = useMutation({
     mutationFn: () => downloadContentBundle(event!.id, `content-${event!.slug ?? event!.id}.zip`),
     onSuccess: () => toast({ title: 'Export ready', description: 'Your content bundle is downloading.' }),
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't export", description: error.message }),
+  })
+
+  // The same export endpoint, narrowed to the ticked rows — one ZIP of just
+  // those items' current versions.
+  const exportingSelected = useMutation({
+    mutationFn: () =>
+      downloadContentBundle(
+        event!.id,
+        `content-${event!.slug ?? event!.id}-selected.zip`,
+        selectedIds
+      ),
+    onSuccess: () =>
+      toast({
+        title: 'Download started',
+        description: `Bundling ${selectedIds.length} selected item${selectedIds.length === 1 ? '' : 's'}.`,
+      }),
     onError: (error: Error) =>
       toast({ variant: 'destructive', title: "Couldn't export", description: error.message }),
   })
@@ -142,6 +189,16 @@ export function ContentLibrary() {
             Remind outstanding{outstanding.length ? ` (${outstanding.length})` : ''}
           </Button>
           <Button
+            variant="secondary"
+            data-testid="download-selected"
+            onClick={() => exportingSelected.mutate()}
+            disabled={!event || exportingSelected.isPending || selectedIds.length === 0}
+          >
+            {exportingSelected.isPending ? <Loader2 className="animate-spin" /> : <Download />}
+            Download selected{selectedIds.length ? ` (${selectedIds.length})` : ''}
+          </Button>
+          <Button
+            data-testid="export-all"
             onClick={() => exporting.mutate()}
             disabled={!event || exporting.isPending || items.length === 0}
           >
@@ -207,6 +264,15 @@ export function ContentLibrary() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[44px]">
+                  <SelectBox
+                    checked={allSelected}
+                    disabled={downloadableIds.length === 0}
+                    label="Select all downloadable content"
+                    testId="select-all-content"
+                    onChange={toggleAll}
+                  />
+                </TableHead>
                 <TableHead>Speaker</TableHead>
                 <TableHead className="w-[120px]">Type</TableHead>
                 <TableHead>Item</TableHead>
@@ -218,8 +284,22 @@ export function ContentLibrary() {
             <TableBody>
               {items.map((item) => {
                 const Icon = TYPE_ICON[item.type] ?? FileText
+                const selectable = Boolean(item.current_file)
                 return (
-                  <TableRow key={item.item_id}>
+                  <TableRow key={item.item_id} data-state={selectedSet.has(item.item_id) ? 'selected' : undefined}>
+                    <TableCell>
+                      <SelectBox
+                        checked={selectedSet.has(item.item_id)}
+                        disabled={!selectable}
+                        label={
+                          selectable
+                            ? `Select ${item.title} from ${item.speaker.name}`
+                            : `${item.title} has nothing to download yet`
+                        }
+                        testId={`select-item-${item.item_id}`}
+                        onChange={(checked) => toggleItem(item.item_id, checked)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="min-w-0">
                         <div className="truncate font-medium text-foreground">{item.speaker.name}</div>
@@ -274,12 +354,29 @@ export function ContentLibrary() {
         )}
       </div>
 
-      {outstanding.length > 0 && (
-        <p className="mt-3 text-sm text-muted-foreground">
-          {outstanding.length} speaker{outstanding.length === 1 ? '' : 's'} still outstanding on
-          required content.
-        </p>
-      )}
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {outstanding.length > 0 && (
+          <p>
+            {outstanding.length} speaker{outstanding.length === 1 ? '' : 's'} still outstanding on
+            required content.
+          </p>
+        )}
+        {selectedIds.length > 0 && (
+          <p className="ml-auto flex items-center gap-2" data-testid="selection-summary">
+            <span className="font-medium text-foreground">
+              {selectedIds.length} item{selectedIds.length === 1 ? '' : 's'} selected
+            </span>
+            <button
+              type="button"
+              data-testid="clear-selection"
+              onClick={() => setSelectedIds([])}
+              className="font-medium text-primary hover:underline"
+            >
+              Clear selection
+            </button>
+          </p>
+        )}
+      </div>
 
       <ItemDialog
         item={openItem}
@@ -310,6 +407,23 @@ function ItemDialog({
     queryKey: ['content-item', item?.item_id],
     queryFn: () => getContentItem(item!.item_id),
     enabled: Boolean(item),
+  })
+
+  // Restore is a pointer move on the server — nothing is deleted, so this is
+  // safe to offer inline. Refetch the item (history + thread now carry the
+  // change) and the library list (its Version column moves with it).
+  const restore = useMutation({
+    mutationFn: (version: number) => restoreContentVersion(item!.item_id, version),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['content-item', item?.item_id] })
+      onChanged()
+      toast({
+        title: `Restored v${result.restored.version}`,
+        description: 'That version is current again. Every other version is still here.',
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't restore", description: error.message }),
   })
 
   const comment = useMutation({
@@ -344,16 +458,22 @@ function ItemDialog({
           </div>
         ) : (
           <div className="space-y-5">
-            {/* versions */}
+            {/* change history — every upload, newest first, with an undo */}
             <section data-testid="content-version-list">
-              <h3 className="mb-2 text-sm font-semibold text-foreground">
-                Versions ({detail.versions.length})
+              <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                <History className="h-4 w-4 text-muted-foreground" />
+                History ({detail.versions.length} version
+                {detail.versions.length === 1 ? '' : 's'})
                 {detail.item.current_version > 0 && (
-                  <span className="ml-2 font-normal text-muted-foreground">
+                  <span className="ml-1 font-normal text-muted-foreground">
                     Current: v{detail.item.current_version}
                   </span>
                 )}
               </h3>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Every upload is kept. Restoring an earlier version makes it current again — nothing
+                is deleted.
+              </p>
               {detail.versions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nothing uploaded yet.</p>
               ) : (
@@ -361,7 +481,7 @@ function ItemDialog({
                   {detail.versions.map((version) => (
                     <li
                       key={version.file_id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
                       data-testid="content-version-row"
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -372,22 +492,43 @@ function ItemDialog({
                           {version.is_current ? ' · current' : ''}
                         </Badge>
                         {version.created_at && (
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {relative(version.created_at)}
+                          <span
+                            className="shrink-0 text-xs text-muted-foreground"
+                            title={absolute(version.created_at)}
+                          >
+                            Uploaded {relative(version.created_at)}
                           </span>
                         )}
                       </div>
-                      {version.url && (
-                        <a
-                          href={version.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-strong"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Download
-                        </a>
-                      )}
+                      <div className="flex shrink-0 items-center gap-3">
+                        {!version.is_current && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            data-testid={`restore-version-${version.version}`}
+                            onClick={() => restore.mutate(version.version)}
+                            disabled={restore.isPending}
+                          >
+                            {restore.isPending ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            )}
+                            Restore
+                          </Button>
+                        )}
+                        {version.url && (
+                          <a
+                            href={version.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary-strong"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download
+                          </a>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -449,6 +590,40 @@ function ItemDialog({
 
 // ── bits ──────────────────────────────────────────────────────────────────────
 
+/**
+ * A real `<input type="checkbox">`, not the Radix widget.
+ *
+ * The row selection is how an organizer (or a browser agent driving this page)
+ * picks what goes into the ZIP, so it has to be an element a form-filling tool
+ * can actually tick — same reasoning as ui/native-select.
+ */
+function SelectBox({
+  checked,
+  disabled,
+  label,
+  testId,
+  onChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  testId: string
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      onChange={(e) => onChange(e.target.checked)}
+      className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+    />
+  )
+}
+
 function StatusBadge({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
   return <Badge variant={meta.variant}>{meta.label}</Badge>
@@ -457,6 +632,15 @@ function StatusBadge({ status }: { status: string }) {
 function relative(value: string): ReactNode {
   try {
     return formatDistanceToNow(parseISO(value), { addSuffix: true })
+  } catch {
+    return ''
+  }
+}
+
+/** The exact timestamp, for the hover title on a history row. */
+function absolute(value: string): string {
+  try {
+    return formatDate(parseISO(value), "d MMM yyyy 'at' HH:mm")
   } catch {
     return ''
   }

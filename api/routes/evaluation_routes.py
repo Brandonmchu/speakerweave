@@ -14,8 +14,20 @@ router = APIRouter(prefix="/api", tags=["evaluation"])
 
 
 class CriterionInput(BaseModel):
+    """One row of a scorecard.
+
+    `kind` omitted means 'scale' — the weighted 1–N rating that is the only
+    thing a criterion could be before ABS-03 — so every existing client and
+    every stored plan keeps working untouched. 'select' collects one of
+    `options`; 'text' collects a paragraph. Only scale criteria are weighted,
+    which is why `weight` is optional here: a missing weight on a scale
+    criterion is still rejected (400) by `normalize_criteria`.
+    """
+
     name: str = Field(..., min_length=1, max_length=100)
-    weight: float = Field(..., gt=0, le=100)
+    weight: float | None = Field(default=None, ge=0, le=100)
+    kind: Literal["scale", "select", "text"] | None = None
+    options: list[str] | None = Field(default=None, max_length=50)
 
 
 class PlanCreateRequest(BaseModel):

@@ -368,3 +368,143 @@ def test_get_session_without_answers_or_participants(client, auth_headers, seede
 def test_get_another_orgs_session_404s(client, auth_headers, submission_db):
     submission_db.rows("sessions")[0]["org_id"] = OTHER_ORG_ID
     assert client.get(f"/api/sessions/{SESSION_ID}", headers=auth_headers).status_code == 404
+
+
+# ── PATCH /api/sessions/{id} — the central title/abstract editor (CNT-09) ───
+# The inbox drawer is where an organizer reads a submission, so it is where they
+# fix its title. What must hold: the edit is org-scoped, a title can never be
+# emptied, and editing one field never blanks the other.
+
+
+def test_patch_session_edits_title_and_abstract(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"title": "  Scaling LLM inference, in practice  ", "description": " A tour.  "},
+    )
+
+    assert response.status_code == 200
+    session = response.json()["session"]
+    assert session["title"] == "Scaling LLM inference, in practice"  # trimmed
+    assert session["description"] == "A tour."
+    row = submission_db.rows("sessions")[0]
+    assert row["title"] == "Scaling LLM inference, in practice"
+    assert row["updated_at"]  # the edit stamps the row
+
+
+def test_patch_status_to_accepted_provisions_onboarding(
+    client, auth_headers, submission_db, monkeypatch
+):
+    """Acceptance means the same thing on every path: flipping status to
+    'accepted' via the generic PATCH provisions onboarding exactly like the
+    dedicated decision endpoint (idempotent), so the status dropdown can't
+    create un-onboarded accepted speakers."""
+    calls: list[tuple] = []
+
+    async def _provision(org_id, event_id, session_id):
+        calls.append((org_id, event_id, session_id))
+        return 6
+
+    from routes import admin_routes
+
+    monkeypatch.setattr(admin_routes, "provision_speaker_onboarding", _provision)
+
+    accepted = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"status": "accepted"}
+    )
+    assert accepted.status_code == 200
+    assert len(calls) == 1 and calls[0][2] == SESSION_ID
+
+    # Already accepted → no re-provisioning; other statuses never provision.
+    again = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"status": "accepted"}
+    )
+    moved = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"status": "pending"}
+    )
+    assert again.status_code == 200 and moved.status_code == 200
+    assert len(calls) == 1
+
+
+def test_patch_session_accepts_abstract_as_an_alias(client, auth_headers, submission_db):
+    """The CFP form and the manual-add dialog both call the column 'abstract'."""
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"abstract": "Rewritten by the organizer."},
+    )
+    assert response.status_code == 200
+    assert response.json()["session"]["description"] == "Rewritten by the organizer."
+
+
+def test_patch_session_title_only_leaves_the_abstract_alone(client, auth_headers, submission_db):
+    submission_db.rows("sessions")[0]["description"] = "Untouched."
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"title": "New title"}
+    )
+    assert response.status_code == 200
+    assert submission_db.rows("sessions")[0]["description"] == "Untouched."
+
+
+def test_patch_session_can_clear_the_abstract(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"description": ""}
+    )
+    assert response.status_code == 200
+    assert submission_db.rows("sessions")[0]["description"] == ""
+
+
+def test_patch_session_can_edit_and_move_in_one_call(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"title": "Retitled", "status": "accept_queue"},
+    )
+    assert response.status_code == 200
+    session = response.json()["session"]
+    assert session["title"] == "Retitled"
+    assert session["status"] == "accept_queue"
+
+
+def test_patch_session_rejects_an_empty_title(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"title": "   "}
+    )
+    assert response.status_code == 400
+    assert submission_db.rows("sessions")[0]["title"] == "Scaling LLM inference"
+
+
+def test_patch_session_rejects_an_overlong_title(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"title": "x" * 301}
+    )
+    assert response.status_code == 400  # a readable 400, not pydantic's 422
+    assert submission_db.rows("sessions")[0]["title"] == "Scaling LLM inference"
+
+
+def test_patch_session_rejects_an_overlong_abstract(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"description": "x" * 10_001}
+    )
+    assert response.status_code == 400
+
+
+def test_patch_session_with_nothing_to_change_400s(client, auth_headers, submission_db):
+    assert (
+        client.patch(f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={}).status_code
+        == 400
+    )
+
+
+def test_patch_another_orgs_session_404s(client, auth_headers, submission_db):
+    """A session id from another org is not editable, however valid the payload."""
+    submission_db.rows("sessions")[0]["org_id"] = OTHER_ORG_ID
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}", headers=auth_headers, json={"title": "Stolen"}
+    )
+    assert response.status_code == 404
+    assert submission_db.rows("sessions")[0]["title"] == "Scaling LLM inference"
+
+
+def test_patch_session_requires_auth(client, submission_db):
+    assert client.patch(f"/api/sessions/{SESSION_ID}", json={"title": "X"}).status_code == 401

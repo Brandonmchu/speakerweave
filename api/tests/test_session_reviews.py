@@ -218,3 +218,251 @@ def test_list_submissions_carries_the_average_review_score(client, auth_headers,
     row = next(item for item in body["submissions"] if item["id"] == SESSION_ID)
     assert row["review_score"] == 3.5
     assert row["review_count"] == 2
+
+
+# ── non-numeric criteria in the aggregate (ABS-03) ─────────────────────────
+# A scorecard can ask for a choice or a paragraph as well as a rating. The
+# organizer's aggregate has to report all three without ever averaging a
+# string, and without the additions disturbing what a scale criterion reports.
+
+MIXED_PLAN_ID = "plan-mixed"
+MIXED_SESSION_ID = "99999999-9999-9999-9999-9999999999b2"
+
+
+@pytest.fixture
+def mixed_reviews_db(seeded_db):
+    seeded_db.seed(
+        "evaluation_plans",
+        {
+            "id": MIXED_PLAN_ID,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Mixed scorecard",
+            "anonymized": False,
+            "scale": "1_5",
+            "criteria": [
+                {"name": "Relevance", "weight": 100},
+                {
+                    "name": "Track fit",
+                    "weight": 0,
+                    "kind": "select",
+                    "options": ["Yes", "No", "Unsure"],
+                },
+                {"name": "Advice", "weight": 0, "kind": "text"},
+            ],
+            "status": "open",
+            "session_filter": {},
+        },
+    )
+    seeded_db.seed(
+        "sessions",
+        {
+            "id": MIXED_SESSION_ID,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "A talk with questions attached",
+            "status": "pending",
+        },
+    )
+    seeded_db.seed(
+        "evaluators",
+        {"id": "mix-ada", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "email": "ada@test.dev", "name": "Ada Lovelace"},
+        {"id": "mix-grace", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "email": "grace@test.dev", "name": "Grace Hopper"},
+        {"id": "mix-kat", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "email": "kat@test.dev", "name": "Katherine J"},
+    )
+    seeded_db.seed(
+        "assignments",
+        {"id": "mix-asg-ada", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "evaluator_id": "mix-ada", "session_id": MIXED_SESSION_ID},
+        {"id": "mix-asg-grace", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "evaluator_id": "mix-grace", "session_id": MIXED_SESSION_ID},
+        {"id": "mix-asg-kat", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "evaluator_id": "mix-kat", "session_id": MIXED_SESSION_ID},
+    )
+    seeded_db.seed(
+        "reviews",
+        {
+            "id": "mix-rev-ada",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "mix-asg-ada",
+            "scores": {"Relevance": 5, "Track fit": "Yes", "Advice": "Tighten the intro."},
+            "overall": 5.0,
+            "comment": None,
+            "abstained": False,
+            "is_draft": False,
+            "submitted_at": "2026-01-01T00:00:00+00:00",
+        },
+        {
+            "id": "mix-rev-grace",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "mix-asg-grace",
+            "scores": {"Relevance": 3, "Track fit": "Yes", "Advice": "Needs a live demo."},
+            "overall": 3.0,
+            "comment": None,
+            "abstained": False,
+            "is_draft": False,
+            "submitted_at": "2026-01-02T00:00:00+00:00",
+        },
+        # Answered the rating and the choice, skipped the optional prose.
+        {
+            "id": "mix-rev-kat",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "mix-asg-kat",
+            "scores": {"Relevance": 4, "Track fit": "No"},
+            "overall": 4.0,
+            "comment": None,
+            "abstained": False,
+            "is_draft": False,
+            "submitted_at": "2026-01-03T00:00:00+00:00",
+        },
+    )
+    return seeded_db
+
+
+def test_a_scale_only_aggregate_gains_nothing_but_its_kind(client, auth_headers, reviews_db):
+    """Additive only: an old plan's criteria report exactly what they did,
+    plus the kind that was always implicit."""
+    aggregate = client.get(f"/api/sessions/{SESSION_ID}/reviews", headers=auth_headers).json()
+
+    for criterion in aggregate["criteria"]:
+        assert criterion["kind"] == "scale"
+        assert "counts" not in criterion
+        assert "responses" not in criterion
+    by_name = {item["name"]: item for item in aggregate["criteria"]}
+    assert by_name["Relevance"]["average"] == 4.0
+    assert by_name["Relevance"]["weight"] == 40
+    assert aggregate["avg_overall"] == 3.5
+
+
+def test_choice_criteria_report_their_value_counts(client, auth_headers, mixed_reviews_db):
+    aggregate = client.get(f"/api/sessions/{MIXED_SESSION_ID}/reviews", headers=auth_headers).json()
+
+    # The rating still averages, over the numbers only.
+    by_name = {item["name"]: item for item in aggregate["criteria"]}
+    assert by_name["Relevance"]["average"] == 4.0
+    assert aggregate["avg_overall"] == 4.0
+
+    choice = by_name["Track fit"]
+    assert choice["kind"] == "select"
+    assert choice["options"] == ["Yes", "No", "Unsure"]
+    assert choice["counts"] == {"Yes": 2, "No": 1}
+    # No average for a choice — which is exactly how a reader that only knows
+    # about averages (the inbox drawer) leaves it alone.
+    assert choice["average"] is None
+
+
+def test_text_criteria_report_the_responses_with_their_reviewer(client, auth_headers, mixed_reviews_db):
+    aggregate = client.get(f"/api/sessions/{MIXED_SESSION_ID}/reviews", headers=auth_headers).json()
+
+    advice = next(item for item in aggregate["criteria"] if item["name"] == "Advice")
+    assert advice["kind"] == "text"
+    assert advice["average"] is None
+    assert advice["responses"] == [
+        {"reviewer": "Ada Lovelace", "value": "Tighten the intro."},
+        {"reviewer": "Grace Hopper", "value": "Needs a live demo."},
+    ]
+    # The verdict rows carry the strings through untouched.
+    verdicts = {row["reviewer"]: row for row in aggregate["reviews"]}
+    assert verdicts["Katherine J"]["scores"] == {"Relevance": 4, "Track fit": "No"}
+
+
+def test_anonymization_covers_the_text_responses(client, auth_headers, mixed_reviews_db):
+    mixed_reviews_db.rows("evaluation_plans")[0]["anonymized"] = True
+
+    aggregate = client.get(f"/api/sessions/{MIXED_SESSION_ID}/reviews", headers=auth_headers).json()
+
+    advice = next(item for item in aggregate["criteria"] if item["name"] == "Advice")
+    assert [row["reviewer"] for row in advice["responses"]] == ["Reviewer 1", "Reviewer 2"]
+    blob = str(aggregate)
+    assert "Ada Lovelace" not in blob
+    assert "ada@test.dev" not in blob
+    # The answers themselves still reach the organizer.
+    assert "Tighten the intro." in blob
+
+
+def test_an_abstention_contributes_no_choice_or_text(client, auth_headers, mixed_reviews_db):
+    mixed_reviews_db.seed(
+        "assignments",
+        {"id": "mix-asg-abs", "org_id": TEST_ORG_ID, "plan_id": MIXED_PLAN_ID, "evaluator_id": "mix-kat", "session_id": MIXED_SESSION_ID},
+    )
+    mixed_reviews_db.seed(
+        "reviews",
+        {
+            "id": "mix-rev-abs",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "mix-asg-abs",
+            "scores": {"Track fit": "Unsure", "Advice": "Conflicted."},
+            "overall": None,
+            "abstained": True,
+            "abstain_reason": "Conflict of interest",
+            "is_draft": False,
+            "submitted_at": "2026-01-04T00:00:00+00:00",
+        },
+    )
+
+    aggregate = client.get(f"/api/sessions/{MIXED_SESSION_ID}/reviews", headers=auth_headers).json()
+
+    by_name = {item["name"]: item for item in aggregate["criteria"]}
+    assert by_name["Track fit"]["counts"] == {"Yes": 2, "No": 1}
+    assert len(by_name["Advice"]["responses"]) == 2
+    assert aggregate["abstained_count"] == 1
+
+
+def test_a_questionnaire_plan_aggregates_without_an_overall(client, auth_headers, seeded_db):
+    """A plan with no scale criteria at all: no averages anywhere, no crash."""
+    seeded_db.seed(
+        "evaluation_plans",
+        {
+            "id": "plan-questions",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Questionnaire",
+            "anonymized": False,
+            "scale": "1_5",
+            "criteria": [
+                {"name": "Track fit", "weight": 0, "kind": "select", "options": ["Yes", "No"]},
+            ],
+            "status": "open",
+            "session_filter": {},
+        },
+    )
+    seeded_db.seed(
+        "sessions",
+        {
+            "id": "session-questions",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Only questions",
+            "status": "pending",
+        },
+    )
+    seeded_db.seed(
+        "evaluators",
+        {"id": "q-ada", "org_id": TEST_ORG_ID, "plan_id": "plan-questions", "email": "ada@test.dev", "name": "Ada Lovelace"},
+    )
+    seeded_db.seed(
+        "assignments",
+        {"id": "q-asg", "org_id": TEST_ORG_ID, "plan_id": "plan-questions", "evaluator_id": "q-ada", "session_id": "session-questions"},
+    )
+    seeded_db.seed(
+        "reviews",
+        {
+            "id": "q-rev",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "q-asg",
+            "scores": {"Track fit": "Yes"},
+            "overall": None,
+            "abstained": False,
+            "is_draft": False,
+            "submitted_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+
+    aggregate = client.get("/api/sessions/session-questions/reviews", headers=auth_headers).json()
+
+    assert aggregate["review_count"] == 1
+    assert aggregate["avg_overall"] is None
+    assert aggregate["criteria"][0]["counts"] == {"Yes": 1}
+    assert aggregate["reviews"][0]["overall"] is None
+    # The list column reports the count without inventing a score.
+    listed = client.get(f"/api/events/{TEST_EVENT_ID}/submissions", headers=auth_headers).json()
+    row = next(item for item in listed["submissions"] if item["id"] == "session-questions")
+    assert row["review_score"] is None
+    assert row["review_count"] == 1

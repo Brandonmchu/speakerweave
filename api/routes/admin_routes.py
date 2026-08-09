@@ -57,8 +57,26 @@ DEFAULT_FORMATS = (
 )
 
 
+# The organizer's central session editor (CNT-09). Lengths are checked in the
+# handler rather than by Field(max_length=…) so an over-long title comes back as
+# a 400 an organizer can read, not pydantic's 422.
+MAX_SESSION_TITLE = 300
+MAX_SESSION_DESCRIPTION = 10_000
+
+
 class SessionPatchRequest(BaseModel):
-    status: str
+    """A status move between tabs, an edit of the title/abstract, or both.
+
+    Every field is optional and read with ``exclude_unset``: sending only
+    ``title`` must not blank the description, and sending ``description: ""``
+    must clear it. ``abstract`` is accepted as an alias for ``description`` —
+    the CFP form and the manual-add dialog both call that field the abstract.
+    """
+
+    status: str | None = None
+    title: str | None = None
+    description: str | None = None
+    abstract: str | None = None
 
 
 class ManualSubmissionRequest(BaseModel):
@@ -634,15 +652,51 @@ async def update_session(
     payload: SessionPatchRequest,
     auth: tuple = Depends(get_current_user_and_org),
 ):
-    """Move a session between status tabs (accept/decline queues)."""
+    """Move a session between status tabs, and edit its title/abstract.
+
+    The inbox drawer is where an organizer reads a submission, so it is also
+    where they fix the typo in its title — CNT-09's "one central place to edit
+    a session" is this endpoint plus that drawer, not a second screen.
+    """
     _user_id, org_id = auth
-    if payload.status not in SESSION_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Unknown status '{payload.status}'")
+
+    provided = payload.model_dump(exclude_unset=True)
+    values: dict = {}
+
+    if payload.status is not None:
+        if payload.status not in SESSION_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Unknown status '{payload.status}'")
+        values["status"] = payload.status
+
+    if payload.title is not None:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        if len(title) > MAX_SESSION_TITLE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Title is too long (maximum {MAX_SESSION_TITLE} characters)",
+            )
+        values["title"] = title
+
+    # `abstract` is the same column under the name the forms use; an explicit
+    # empty string on either key clears it.
+    description = payload.description if "description" in provided else payload.abstract
+    if description is not None:
+        if len(description) > MAX_SESSION_DESCRIPTION:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Description is too long (maximum {MAX_SESSION_DESCRIPTION} characters)",
+            )
+        values["description"] = description.strip()
+
+    if not values:
+        raise HTTPException(status_code=400, detail="Nothing to update")
 
     existing = first(
         await db(
             lambda: supabase.table("sessions")
-            .select("id, org_id")
+            .select("id, org_id, event_id, status")
             .eq("id", session_id)
             .eq("org_id", org_id)
             .limit(1)
@@ -652,23 +706,35 @@ async def update_session(
     )
     verify_org_access(existing, org_id, "Session")
 
+    values["updated_at"] = datetime.now(timezone.utc).isoformat()
     updated = first(
         await db(
             lambda: supabase.table("sessions")
-            .update(
-                {
-                    "status": payload.status,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+            .update(values)
             .eq("id", session_id)
             .eq("org_id", org_id)
             .execute(),
-            "session_update_status",
+            "session_update",
         )
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Acceptance means the same thing on every path: a status flipped to
+    # 'accepted' here (the tab/status dropdown) provisions the speaker's
+    # onboarding exactly like the dedicated decision endpoint — idempotent
+    # upserts, so a talk accepted twice never duplicates tasks. Only the
+    # decision endpoint sends the (organizer-composed) decision email.
+    if (
+        values.get("status") == "accepted"
+        and (existing or {}).get("status") != "accepted"
+        and (existing or {}).get("event_id")
+    ):
+        try:
+            await provision_speaker_onboarding(org_id, existing["event_id"], session_id)
+        except Exception:
+            logger.exception("session PATCH: onboarding provisioning failed session=%s", session_id)
+
     return {"session": updated}
 
 
@@ -971,10 +1037,46 @@ class SpeakerPatchRequest(BaseModel):
     # ground transport, dietary and accessibility needs. Free-form because every
     # conference handles travel differently.
     logistics_notes: str | None = Field(default=None, max_length=50_000)
+    # Manual workflow status (migration 010). Explicit null (or "") clears it
+    # back to "not set" — the state most of a roster is in on day one.
+    speaker_status: str | None = Field(default=None, max_length=32)
 
 
 # Contact columns the speaker PATCH may write verbatim (strings, trimmed).
 _SPEAKER_TEXT_FIELDS = ("first_name", "last_name", "company_name", "title", "about", "logistics_notes")
+
+# contacts.speaker_status — the organizer's own record of where the conversation
+# with a speaker stands. Deliberately NOT derived from the portal invite or the
+# onboarding tasks: those answer "did we send a link" and "is their paperwork
+# in", this answers "have they said yes".
+SPEAKER_STATUSES = ("invited", "confirmed", "declined")
+
+# Columns a later migration adds. On a database that hasn't run it, PostgREST
+# rejects the whole UPDATE for one unknown column — so drop that column and save
+# the rest rather than lose the organizer's other edits to a pending migration.
+_OPTIONAL_CONTACT_COLUMNS = {
+    "logistics_notes": "Travel & logistics isn't available yet on this database.",
+    "speaker_status": "Speaker status isn't available yet on this database.",
+}
+
+
+def _validate_speaker_status(value: object) -> str | None:
+    """One of SPEAKER_STATUSES, or None for "not set". Anything else is a 400.
+
+    Mirrors the CHECK constraint from migration 010, so a bad value is refused
+    with a readable message instead of surfacing as a 500 from Postgres.
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None  # "" from a cleared <select> means "not set"
+    if text not in SPEAKER_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown speaker status '{value}' — use one of: {', '.join(SPEAKER_STATUSES)}.",
+        )
+    return text
 
 
 async def _fetch_event_contact(event_id: str, contact_id: str, org_id: str) -> dict:
@@ -996,6 +1098,48 @@ async def _fetch_event_contact(event_id: str, contact_id: str, org_id: str) -> d
         )
     )
     return verify_org_access(contact, org_id, "Speaker")
+
+
+@router.get("/events/{event_id}/speaker-statuses")
+async def list_speaker_statuses(
+    event_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Every set workflow status on this event's contacts, in one flat query.
+
+    The roster itself is assembled elsewhere; this rides alongside it so the
+    list can show and filter by status without a request per row. Contacts with
+    no status set are simply absent — the roster reads them as "not set".
+    """
+    _user_id, org_id = auth
+    await fetch_event(event_id, org_id, columns="id, org_id")
+
+    try:
+        contacts = rows(
+            await db(
+                lambda: supabase.table("contacts")
+                .select("id, speaker_status")
+                .eq("org_id", org_id)
+                .eq("event_id", event_id)
+                .execute(),
+                "speaker_statuses",
+            )
+        )
+    except APIError as exc:
+        # Pre-010 database: no column, so nobody has a status. An empty map is
+        # the honest answer and leaves the roster fully usable.
+        if "speaker_status" not in str(exc):
+            raise
+        logger.warning("speakers: speaker_status column missing — reporting no statuses")
+        contacts = []
+
+    return {
+        "statuses": [
+            {"contact_id": contact["id"], "speaker_status": contact.get("speaker_status")}
+            for contact in contacts
+            if contact.get("id") and contact.get("speaker_status")
+        ]
+    }
 
 
 @router.get("/events/{event_id}/speakers/{contact_id}")
@@ -1203,6 +1347,10 @@ async def get_speaker_profile(
         # Absent on a database that hasn't run migration 009 yet — reads as null
         # rather than blowing up the whole drawer.
         "logistics_notes": contact.get("logistics_notes"),
+        # The organizer's manual workflow status (migration 010). Null = not
+        # set, and stays distinct from `invited` below, which is derived from
+        # whether a portal magic link was ever minted.
+        "speaker_status": contact.get("speaker_status"),
         "photo_url": contact.get("photo_url"),
         "pronouns": contact.get("pronouns"),
         "linkedin_url": contact.get("linkedin_url"),
@@ -1340,6 +1488,9 @@ async def update_speaker(
             value = provided[key]
             patch[key] = value.strip() if isinstance(value, str) else value
 
+    if "speaker_status" in provided:
+        patch["speaker_status"] = _validate_speaker_status(provided["speaker_status"])
+
     if "email" in provided:
         email = speaker_crm.normalize_email(provided.get("email") or "")
         if not speaker_crm.looks_like_email(email):
@@ -1382,18 +1533,22 @@ async def update_speaker(
     try:
         updated = await _write(patch)
     except APIError as exc:
-        # contacts.logistics_notes arrives in migration 009. On a database that
-        # hasn't run it, PostgREST rejects the whole UPDATE for one unknown
-        # column — drop it and save the rest rather than lose the organizer's
-        # other edits to a pending migration.
-        if "logistics_notes" not in patch or "logistics_notes" not in str(exc):
+        # logistics_notes (009) and speaker_status (010) arrive by migration —
+        # see _OPTIONAL_CONTACT_COLUMNS.
+        missing = [
+            column
+            for column in _OPTIONAL_CONTACT_COLUMNS
+            if column in patch and column in str(exc)
+        ]
+        if not missing:
             raise
-        logger.warning("speakers: logistics_notes column missing — saving other fields")
-        patch.pop("logistics_notes")
+        logger.warning("speakers: column(s) %s missing — saving other fields", ", ".join(missing))
+        for column in missing:
+            patch.pop(column)
         if len(patch) == 1:  # only updated_at left — nothing real to write
             raise HTTPException(
                 status_code=503,
-                detail="Travel & logistics isn't available yet on this database.",
+                detail=_OPTIONAL_CONTACT_COLUMNS[missing[0]],
             ) from exc
         updated = await _write(patch)
 
@@ -1402,4 +1557,7 @@ async def update_speaker(
     updated["name"] = speaker_crm.full_name(
         updated.get("first_name"), updated.get("last_name"), updated.get("email")
     )
+    # Absent pre-010: the wire shape stays stable so the UI reads "not set"
+    # rather than undefined.
+    updated.setdefault("speaker_status", None)
     return {"speaker": updated}

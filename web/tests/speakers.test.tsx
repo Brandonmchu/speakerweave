@@ -37,6 +37,8 @@ let roster: EventSpeaker[]
 let rosterGetCount: number
 let importCalls: unknown[]
 let patchCalls: Array<{ contactId: string; body: Record<string, unknown> }>
+/** GET /api/events/{id}/speaker-statuses — {contact_id, speaker_status} rows. */
+let statusRows: Array<{ contact_id: string; speaker_status: string }>
 
 const PROFILE = {
   event: EVENT,
@@ -50,6 +52,7 @@ const PROFILE = {
     title: 'Mathematician',
     about: 'The first programmer.',
     logistics_notes: null as string | null,
+    speaker_status: null as string | null,
     photo_url: null,
     pronouns: null,
     linkedin_url: null,
@@ -146,6 +149,8 @@ describe('Speakers CRM', () => {
     rosterGetCount = 0
     importCalls = []
     patchCalls = []
+    // Ada has been confirmed; Ben has no workflow status set at all.
+    statusRows = [{ contact_id: ADA, speaker_status: 'confirmed' }]
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -156,6 +161,9 @@ describe('Speakers CRM', () => {
         if (url.endsWith('/speakers/import') && method === 'POST') {
           importCalls.push(JSON.parse(String(init?.body ?? '{}')))
           return json(IMPORT_RESULT)
+        }
+        if (url.endsWith('/speaker-statuses') && method === 'GET') {
+          return json({ statuses: statusRows })
         }
         if (url.endsWith('/speakers') && method === 'GET') {
           rosterGetCount += 1
@@ -311,6 +319,93 @@ describe('Speakers CRM', () => {
     expect(patchCalls[0].body.logistics_notes).toBe('BA 117, JFK→LHR, Sep 2. Gluten-free.')
     // …and the other profile fields ride along untouched.
     expect(patchCalls[0].body.company_name).toBe('Analytical Engines')
+  })
+
+  // ── speaker workflow status (SPK-04) ──────────────────────────────────────
+  // Invited / Confirmed / Declined is the organizer's own record of where the
+  // conversation stands — settable from the drawer, visible on every row, and
+  // a filter of its own. It must stay distinct from the DERIVED portal-invite
+  // signal that already lives on the roster.
+
+  it('badges each roster row with its workflow status', async () => {
+    renderSpeakers()
+    expect(await screen.findByTestId(`speaker-status-${ADA}`)).toHaveTextContent('Confirmed')
+    // Nothing set reads as an em dash, not as a fabricated state.
+    expect(screen.getByTestId(`speaker-status-${BEN}`)).toHaveTextContent('—')
+  })
+
+  it('the status filter narrows the roster', async () => {
+    statusRows = [
+      { contact_id: ADA, speaker_status: 'confirmed' },
+      { contact_id: BEN, speaker_status: 'declined' },
+    ]
+    renderSpeakers()
+    await screen.findByTestId(`speaker-row-${ADA}`)
+
+    fireEvent.change(screen.getByTestId('filter-speaker-status'), {
+      target: { value: 'confirmed' },
+    })
+    expect(screen.getByTestId(`speaker-row-${ADA}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`speaker-row-${BEN}`)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId('filter-speaker-status'), {
+      target: { value: 'declined' },
+    })
+    expect(screen.getByTestId(`speaker-row-${BEN}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`speaker-row-${ADA}`)).not.toBeInTheDocument()
+  })
+
+  it('filters down to the speakers nobody has a status for yet', async () => {
+    renderSpeakers()
+    await screen.findByTestId(`speaker-row-${ADA}`)
+
+    fireEvent.change(screen.getByTestId('filter-speaker-status'), { target: { value: 'unset' } })
+    expect(screen.getByTestId(`speaker-row-${BEN}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`speaker-row-${ADA}`)).not.toBeInTheDocument()
+  })
+
+  it('sets a speaker status from the profile drawer and refreshes the roster', async () => {
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+    const select = await screen.findByTestId('speaker-status-select')
+    expect(select.tagName).toBe('SELECT')
+    const before = rosterGetCount
+    fireEvent.change(select, { target: { value: 'declined' } })
+
+    await waitFor(() => expect(patchCalls).toHaveLength(1))
+    expect(patchCalls[0].contactId).toBe(ADA)
+    expect(patchCalls[0].body).toEqual({ speaker_status: 'declined' })
+    await waitFor(() => expect(rosterGetCount).toBeGreaterThan(before))
+  })
+
+  it('clears a speaker status back to "not set"', async () => {
+    PROFILE.speaker.speaker_status = 'invited'
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+    const select = (await screen.findByTestId('speaker-status-select')) as HTMLSelectElement
+    expect(select.value).toBe('invited') // prefilled from the record
+    fireEvent.change(select, { target: { value: '' } })
+
+    await waitFor(() => expect(patchCalls).toHaveLength(1))
+    expect(patchCalls[0].body).toEqual({ speaker_status: '' })
+    PROFILE.speaker.speaker_status = null
+  })
+
+  it('keeps the derived portal-invite signal distinct from the workflow status', async () => {
+    PROFILE.speaker.speaker_status = 'declined'
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+    // Ada has a portal link (derived) AND has declined (organizer-set). Both
+    // are readable in the drawer, and neither is presented as the other.
+    const drawer = within(await screen.findByRole('dialog'))
+    expect((await drawer.findByTestId('speaker-status-select')) as HTMLSelectElement).toHaveValue(
+      'declined'
+    )
+    expect(drawer.getByText('Portal invited')).toBeInTheDocument()
+    PROFILE.speaker.speaker_status = null
   })
 
   it('prefills the edit form with the notes already on the record', async () => {

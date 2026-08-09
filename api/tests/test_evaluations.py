@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from auth import get_current_user_and_org
 from deps.portal_deps import get_reviewer
 from routes.evaluation_routes import router as evaluation_router
 from routes.review_routes import router as review_router
-from services.evaluations import weighted_overall
+from services.evaluations import DEFAULT_CRITERIA, normalize_criteria, weighted_overall
 from tests.conftest import OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
 
 PLAN_ID = "plan-1"
@@ -20,6 +20,14 @@ TRACK_A = "track-platform"
 TRACK_B = "track-ai"
 
 
+CLASSIC_CRITERIA = [
+    {"name": "Relevance", "weight": 40},
+    {"name": "Originality", "weight": 30},
+    {"name": "Speaker", "weight": 20},
+    {"name": "Clarity", "weight": 10},
+]
+
+
 def _seed_plan(
     fake_db,
     *,
@@ -27,6 +35,7 @@ def _seed_plan(
     anonymized: bool = False,
     opens_at: str | None = None,
     closes_at: str | None = None,
+    criteria: list[dict] | None = None,
 ) -> None:
     record = {
         "id": PLAN_ID,
@@ -36,12 +45,7 @@ def _seed_plan(
         "instructions": "Judge the proposal, not the fame.",
         "anonymized": anonymized,
         "scale": "1_5",
-        "criteria": [
-            {"name": "Relevance", "weight": 40},
-            {"name": "Originality", "weight": 30},
-            {"name": "Speaker", "weight": 20},
-            {"name": "Clarity", "weight": 10},
-        ],
+        "criteria": [dict(item) for item in (criteria or CLASSIC_CRITERIA)],
         "status": status,
         "session_filter": {},
     }
@@ -1286,3 +1290,285 @@ def test_remind_laggards_is_org_scoped(evaluation_client):
     )
     assert client.post("/api/plans/foreign-plan/remind-laggards").status_code == 404
     assert fake_db.rows("email_outbox") == []
+
+
+# ── non-numeric criteria (ABS-03) ──────────────────────────────────────────
+# A criterion can now be a fixed CHOICE or free TEXT as well as the weighted
+# rating it always was. The contract that matters most is the one these tests
+# pin first: a criterion with no `kind` is a scale criterion, stores as
+# `{name, weight}`, and scores exactly as it did before any of this existed.
+
+MIXED_CRITERIA = [
+    {"name": "Relevance", "weight": 60},
+    {"name": "Originality", "weight": 40},
+    {"name": "Track fit", "weight": 0, "kind": "select", "options": ["Yes", "No", "Unsure"]},
+    {"name": "Advice", "weight": 0, "kind": "text"},
+]
+UNSCORED_CRITERIA = [
+    {"name": "Track fit", "weight": 0, "kind": "select", "options": ["Yes", "No"]},
+    {"name": "Advice", "weight": 0, "kind": "text"},
+]
+
+
+def _create_plan(client, criteria: list[dict], name: str = "Mixed scorecard"):
+    return client.post(
+        f"/api/events/{TEST_EVENT_ID}/evaluation-plans",
+        json={"name": name, "criteria": criteria},
+    )
+
+
+def test_an_old_shape_plan_normalizes_to_itself(evaluation_client):
+    """THE regression pin: nothing about a pre-ABS-03 criterion changes.
+
+    No `kind` key is read, none is written, and normalizing is a fixed point —
+    so every stored plan (including the seeded demo one) round-trips byte for
+    byte through a save.
+    """
+    assert normalize_criteria(CLASSIC_CRITERIA) == CLASSIC_CRITERIA
+    assert normalize_criteria(DEFAULT_CRITERIA) == DEFAULT_CRITERIA
+    assert normalize_criteria(normalize_criteria(CLASSIC_CRITERIA)) == CLASSIC_CRITERIA
+    assert all(set(item) == {"name", "weight"} for item in normalize_criteria(CLASSIC_CRITERIA))
+
+
+def test_an_explicit_scale_kind_is_stored_as_the_old_shape():
+    """The new UI sends kind='scale'; storage stays the pre-ABS-03 two keys."""
+    assert normalize_criteria([{"name": "Relevance", "weight": 100, "kind": "scale"}]) == [
+        {"name": "Relevance", "weight": 100}
+    ]
+
+
+def test_choice_and_text_criteria_normalize_without_a_weight():
+    saved = normalize_criteria(
+        [
+            {"name": "Relevance", "weight": 100},
+            {"name": "Track fit", "kind": "select", "options": [" Yes ", "No", "yes", ""]},
+            # A weight sent for a text criterion is ignored, not honoured.
+            {"name": "Advice", "kind": "text", "weight": 55},
+        ]
+    )
+    assert saved == [
+        {"name": "Relevance", "weight": 100},
+        {"name": "Track fit", "weight": 0, "kind": "select", "options": ["Yes", "No"]},
+        {"name": "Advice", "weight": 0, "kind": "text"},
+    ]
+
+
+def test_a_choice_criterion_needs_options():
+    for options in (None, [], ["", "  "]):
+        with pytest.raises(HTTPException) as raised:
+            normalize_criteria([{"name": "Track fit", "kind": "select", "options": options}])
+        assert raised.value.status_code == 400
+
+
+def test_an_unknown_criterion_type_is_rejected():
+    with pytest.raises(HTTPException) as raised:
+        normalize_criteria([{"name": "Track fit", "weight": 100, "kind": "slider"}])
+    assert raised.value.status_code == 400
+    assert "unknown type" in str(raised.value.detail)
+
+
+def test_only_scale_weights_count_toward_the_hundred(evaluation_client):
+    client, _fake_db, _reviewer = evaluation_client
+
+    ok = _create_plan(client, MIXED_CRITERIA)
+    assert ok.status_code == 201
+    assert ok.json()["plan"]["criteria"] == [
+        {"name": "Relevance", "weight": 60},
+        {"name": "Originality", "weight": 40},
+        {"name": "Track fit", "weight": 0, "kind": "select", "options": ["Yes", "No", "Unsure"]},
+        {"name": "Advice", "weight": 0, "kind": "text"},
+    ]
+
+    short = _create_plan(client, [{"name": "Relevance", "weight": 60}, *UNSCORED_CRITERIA])
+    assert short.status_code == 400
+    assert short.json()["detail"] == "Criterion weights must add up to 100"
+
+
+def test_a_plan_with_no_scale_criteria_is_allowed(evaluation_client):
+    """Nothing to weight means no 100% rule — the scorecard is all questions."""
+    client, _fake_db, _reviewer = evaluation_client
+
+    created = _create_plan(client, UNSCORED_CRITERIA, name="Questionnaire")
+
+    assert created.status_code == 201
+    assert created.json()["plan"]["criteria"] == UNSCORED_CRITERIA
+
+
+def test_weighted_overall_skips_the_non_scale_criteria():
+    assert weighted_overall(
+        {"Relevance": 5, "Originality": 2, "Track fit": "Yes", "Advice": "Tighten the intro."},
+        MIXED_CRITERIA,
+    ) == 3.8  # (5*60 + 2*40) / 100 — the strings never enter the mean
+    # A missing SCALE answer is still incomplete...
+    assert weighted_overall({"Relevance": 5, "Track fit": "Yes"}, MIXED_CRITERIA) is None
+    # ...but a missing text answer is not.
+    assert weighted_overall({"Relevance": 5, "Originality": 5, "Track fit": "Yes"}, MIXED_CRITERIA) == 5.0
+    # Nothing to weight at all: no overall, never a crash on a string.
+    assert weighted_overall({"Track fit": "Yes", "Advice": "Nice"}, UNSCORED_CRITERIA) is None
+
+
+def test_an_old_shape_review_is_saved_exactly_as_before(evaluation_client):
+    """The reviewer-side regression pin, end to end on a pre-ABS-03 plan."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    _seed_owned_assignment(fake_db)
+
+    saved = client.put("/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD)
+
+    assert saved.status_code == 200
+    review = saved.json()["review"]
+    assert review["scores"] == {"Relevance": 5, "Originality": 4, "Speaker": 3, "Clarity": 2}
+    assert review["overall"] == 4.0
+    assert review["is_draft"] is False
+
+
+def test_a_mixed_scorecard_stores_strings_beside_the_scores(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    saved = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={
+            "scores": {
+                "Relevance": 5,
+                "Originality": 2,
+                "Track fit": "Yes",
+                "Advice": "  Tighten the intro.  ",
+            },
+            "is_draft": False,
+        },
+    )
+
+    assert saved.status_code == 200
+    review = saved.json()["review"]
+    assert review["scores"] == {
+        "Relevance": 5,
+        "Originality": 2,
+        "Track fit": "Yes",
+        "Advice": "Tighten the intro.",
+    }
+    # The overall is the weighted mean of the SCALE part only.
+    assert review["overall"] == 3.8
+
+
+def test_a_choice_answer_must_be_one_of_the_options(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    for value in ("Maybe", "yes", 3, True):
+        rejected = client.put(
+            "/public/review/submissions/assignment-owned",
+            json={
+                "scores": {"Relevance": 5, "Originality": 2, "Track fit": value, "Advice": "x"},
+                "is_draft": False,
+            },
+        )
+        assert rejected.status_code == 400
+        assert rejected.json()["detail"] == "Answer for 'Track fit' must be one of: Yes, No, Unsure"
+    assert fake_db.rows("reviews") == []
+
+
+def test_a_text_answer_is_capped(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    def submit(advice: str):
+        return client.put(
+            "/public/review/submissions/assignment-owned",
+            json={
+                "scores": {
+                    "Relevance": 5,
+                    "Originality": 2,
+                    "Track fit": "No",
+                    "Advice": advice,
+                },
+                "is_draft": False,
+            },
+        )
+
+    too_long = submit("a" * 2001)
+    assert too_long.status_code == 400
+    assert "2000 characters or fewer" in too_long.json()["detail"]
+    assert submit("a" * 2000).status_code == 200
+
+
+def test_a_choice_is_required_on_submit_but_free_text_is_not(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    missing_choice = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Relevance": 5, "Originality": 2, "Advice": "Nice"}, "is_draft": False},
+    )
+    assert missing_choice.status_code == 400
+    assert missing_choice.json()["detail"] == "Score required for: Track fit"
+
+    without_prose = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Relevance": 5, "Originality": 2, "Track fit": "No"}, "is_draft": False},
+    )
+    assert without_prose.status_code == 200
+    assert "Advice" not in without_prose.json()["review"]["scores"]
+
+
+def test_a_blank_choice_or_text_answer_is_no_answer(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    draft = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Relevance": 5, "Track fit": "   ", "Advice": ""}, "is_draft": True},
+    )
+
+    assert draft.status_code == 200
+    assert draft.json()["review"]["scores"] == {"Relevance": 5}
+
+
+def test_a_scorecard_with_no_scale_criteria_submits_without_an_overall(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=UNSCORED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    saved = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Track fit": "Yes", "Advice": "Ship it."}, "is_draft": False},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["review"]["overall"] is None
+    # The plan summary has to survive a session whose reviews carry no number.
+    summary = client.get(f"/api/evaluation-plans/{PLAN_ID}/summary")
+    assert summary.status_code == 200
+    row = summary.json()["per_session"][0]
+    assert row["avg_overall"] is None
+    assert row["completed_count"] == 1
+    assert row["review_count"] == 0
+
+
+def test_an_unknown_criterion_is_still_rejected(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    rejected = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Relevance": 5, "Vibes": "great"}, "is_draft": True},
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Unknown criterion: Vibes"
+
+
+def test_the_reviewer_portal_carries_the_criterion_kinds(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", criteria=MIXED_CRITERIA)
+    _seed_owned_assignment(fake_db)
+
+    home = client.get("/public/review/me").json()
+
+    assert home["plan"]["criteria"] == MIXED_CRITERIA

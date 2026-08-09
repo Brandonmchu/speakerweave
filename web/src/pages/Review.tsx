@@ -4,10 +4,12 @@ import { AlertCircle, ArrowRight, Check, ClipboardCheck, Save, ShieldCheck } fro
 import { useParams } from 'react-router-dom'
 
 import {
+  criterionKind,
   getReviewerHome,
   getReviewerSubmission,
   saveReviewerReview,
   type EvaluationCriterion,
+  type ReviewScoreValue,
   type ReviewerAssignment,
   type ReviewerHome,
 } from '@/lib/evaluationApi'
@@ -16,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
@@ -257,7 +260,9 @@ function Scorecard({
   existingReview: Awaited<ReturnType<typeof getReviewerSubmission>>['review']
   onSaved: (advance: boolean) => Promise<void>
 }) {
-  const [scores, setScores] = useState<Record<string, number>>(existingReview?.scores ?? {})
+  const [scores, setScores] = useState<Record<string, ReviewScoreValue>>(
+    existingReview?.scores ?? {}
+  )
   const [comment, setComment] = useState(existingReview?.comment ?? '')
   const [abstained, setAbstained] = useState(Boolean(existingReview?.abstained))
   const [abstainReason, setAbstainReason] = useState(existingReview?.abstain_reason ?? '')
@@ -278,7 +283,13 @@ function Scorecard({
   })
 
   const maximum = home.plan.scale === '1_10' ? 10 : 5
-  const completeScores = home.plan.criteria.every((criterion) => scores[criterion.name] !== undefined)
+  // A rating and a choice have to be answered; free text is the reviewer's to
+  // leave blank, exactly as the server treats it.
+  const completeScores = home.plan.criteria.every((criterion) => {
+    if (criterionKind(criterion) === 'text') return true
+    const value = scores[criterion.name]
+    return value !== undefined && value !== ''
+  })
   const canSubmit = home.plan.status === 'open' && (abstained ? Boolean(abstainReason.trim()) : completeScores)
   const speakerNames = !home.plan.anonymized
     ? (session.speakers ?? [])
@@ -307,20 +318,49 @@ function Scorecard({
         <div>
           <h3 className="text-base font-semibold text-foreground">Score this proposal</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Choose one score per criterion. Your weighted overall is calculated automatically.
+            Answer every criterion. Your weighted overall is calculated automatically from the
+            scored ones.
           </p>
         </div>
         <div className={cn('mt-6 space-y-7', abstained && 'pointer-events-none opacity-45')}>
-          {home.plan.criteria.map((criterion) => (
-            <RatingRow
-              key={criterion.name}
-              criterion={criterion}
-              maximum={maximum}
-              value={scores[criterion.name]}
-              disabled={abstained}
-              onChange={(value) => setScores((current) => ({ ...current, [criterion.name]: value }))}
-            />
-          ))}
+          {home.plan.criteria.map((criterion) => {
+            const kind = criterionKind(criterion)
+            const value = scores[criterion.name]
+            const setValue = (next: ReviewScoreValue) =>
+              setScores((current) => ({ ...current, [criterion.name]: next }))
+            if (kind === 'select') {
+              return (
+                <ChoiceRow
+                  key={criterion.name}
+                  criterion={criterion}
+                  value={typeof value === 'string' ? value : ''}
+                  disabled={abstained}
+                  onChange={setValue}
+                />
+              )
+            }
+            if (kind === 'text') {
+              return (
+                <ResponseRow
+                  key={criterion.name}
+                  criterion={criterion}
+                  value={typeof value === 'string' ? value : ''}
+                  disabled={abstained}
+                  onChange={setValue}
+                />
+              )
+            }
+            return (
+              <RatingRow
+                key={criterion.name}
+                criterion={criterion}
+                maximum={maximum}
+                value={typeof value === 'number' ? value : undefined}
+                disabled={abstained}
+                onChange={setValue}
+              />
+            )
+          })}
         </div>
 
         <div className="mt-8 space-y-2 border-t border-border pt-6">
@@ -441,6 +481,79 @@ function RatingRow({
         <span>Low</span>
         <span>High</span>
       </div>
+    </fieldset>
+  )
+}
+
+/** A stable control id for an organizer-typed criterion name. */
+function criterionFieldId(name: string): string {
+  return `criterion-${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+}
+
+/**
+ * A fixed-choice criterion: a real native `<select>` of the organizer's own
+ * options, whose value travels as that option string. The server accepts
+ * nothing that isn't on the list, so what you can pick is what it will take.
+ */
+function ChoiceRow({
+  criterion,
+  value,
+  disabled,
+  onChange,
+}: {
+  criterion: EvaluationCriterion
+  value: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  const id = criterionFieldId(criterion.name)
+  return (
+    <fieldset disabled={disabled} className="space-y-2">
+      <div className="flex items-end justify-between gap-3">
+        <label htmlFor={id} className="text-sm font-medium text-foreground">
+          {criterion.name}
+        </label>
+        <span className="text-xs text-muted-foreground">Choose one</span>
+      </div>
+      <NativeSelect
+        id={id}
+        value={value}
+        placeholder="Select an option"
+        onValueChange={onChange}
+        options={(criterion.options ?? []).map((option) => ({ value: option }))}
+      />
+    </fieldset>
+  )
+}
+
+/** A free-text criterion — the answer a rating can't hold. Optional by design. */
+function ResponseRow({
+  criterion,
+  value,
+  disabled,
+  onChange,
+}: {
+  criterion: EvaluationCriterion
+  value: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  const id = criterionFieldId(criterion.name)
+  return (
+    <fieldset disabled={disabled} className="space-y-2">
+      <div className="flex items-end justify-between gap-3">
+        <label htmlFor={id} className="text-sm font-medium text-foreground">
+          {criterion.name}
+        </label>
+        <span className="text-xs text-muted-foreground">Optional</span>
+      </div>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Write your answer for the selection committee."
+        maxLength={2000}
+      />
     </fieldset>
   )
 }

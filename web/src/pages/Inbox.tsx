@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
@@ -27,6 +27,7 @@ import {
   decideSubmission,
   getSessionDetail,
   unwrapList,
+  updateSession,
   updateSessionStatus,
   type EventSummary,
   type SessionAnswer,
@@ -317,6 +318,13 @@ export function Inbox() {
   const [filterTrack, setFilterTrack] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [addOpen, setAddOpen] = useState(false)
+  // The drawer's edit mode (CNT-09). `editIntent` is the request to edit; the
+  // form only opens once the authoritative detail has loaded, so a Save can
+  // never write a half-known row back over the real one.
+  const [editIntent, setEditIntent] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editAbstract, setEditAbstract] = useState('')
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -439,6 +447,50 @@ export function Inbox() {
     queryKey: ['session', openId],
     queryFn: () => getSessionDetail(openId!),
     enabled: Boolean(openId),
+  })
+
+  // Seed the edit form from the loaded detail — never from the list row, which
+  // carries no abstract and would blank it on save.
+  const loadedDetail = detailQuery.data
+  useEffect(() => {
+    if (!editIntent || !loadedDetail) return
+    setEditTitle(loadedDetail.session.title ?? '')
+    setEditAbstract(loadedDetail.session.description ?? '')
+    setEditing(true)
+    setEditIntent(false)
+  }, [editIntent, loadedDetail])
+
+  const closeEditor = () => {
+    setEditIntent(false)
+    setEditing(false)
+  }
+
+  /** Open the drawer on a row, optionally straight into edit mode. */
+  const openRow = (id: string, edit = false) => {
+    closeEditor()
+    setOpenId(id)
+    if (edit) setEditIntent(true)
+  }
+
+  /**
+   * The central session edit (CNT-09): title + abstract, saved from the drawer
+   * the organizer is already reading the submission in. On success both the
+   * drawer and the list row are refetched, so the new title is visible in the
+   * queue without a reload.
+   */
+  const saveSessionEdits = useMutation({
+    mutationFn: ({ id, title, description }: { id: string; title: string; description: string }) =>
+      updateSession(id, { title, description }),
+    onSuccess: (session) => {
+      toast({ title: 'Session updated', description: `Saved “${session.title || 'Untitled'}”.` })
+      closeEditor()
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't save", description: error.message }),
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: submissionsKey })
+      queryClient.invalidateQueries({ queryKey: ['session', variables.id] })
+    },
   })
 
   /**
@@ -852,11 +904,11 @@ export function Inbox() {
                     openId === submission.id || selected.has(submission.id) ? 'selected' : undefined
                   }
                   tabIndex={0}
-                  onClick={() => setOpenId(submission.id)}
+                  onClick={() => openRow(submission.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
-                      setOpenId(submission.id)
+                      openRow(submission.id)
                     }
                   }}
                 >
@@ -871,14 +923,16 @@ export function Inbox() {
                       aria-label={`Select ${submission.title || 'submission'}`}
                     />
                   </TableCell>
-                  {/* Same destination as the row click; present because Sessionboard
-                      surfaces an explicit edit affordance per row. */}
+                  {/* The row opens the drawer to read; the pencil opens the same
+                      drawer already in edit mode, so "fix this title" is one
+                      click from the queue. */}
                   <TableCell className="px-0" onClick={(e) => e.stopPropagation()}>
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       aria-label={`Edit ${submission.title || 'submission'}`}
-                      onClick={() => setOpenId(submission.id)}
+                      data-testid={`edit-row-${submission.id}`}
+                      onClick={() => openRow(submission.id, true)}
                     >
                       <Pencil />
                     </Button>
@@ -1034,6 +1088,7 @@ export function Inbox() {
           if (!open) {
             setOpenId(null)
             resetDecisionForm()
+            closeEditor()
           }
         }}
       >
@@ -1056,10 +1111,50 @@ export function Inbox() {
                       {detailSession.friendly_id}
                     </span>
                   )}
+                  {!editing && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="ml-auto"
+                      data-testid="edit-session"
+                      disabled={saveSessionEdits.isPending}
+                      // The form opens as soon as the detail lands (see the
+                      // seeding effect) — never disabled on a pending load, so
+                      // the click is always accepted.
+                      onClick={() => setEditIntent(true)}
+                    >
+                      <Pencil />
+                      Edit
+                    </Button>
+                  )}
                 </div>
-                <DialogTitle className="mt-2 text-xl leading-snug">
-                  {detailSession.title || 'Untitled'}
-                </DialogTitle>
+                {editing ? (
+                  <>
+                    {/* Radix needs a title for the sheet's accessible name even
+                        while the visible one is an input. */}
+                    <DialogTitle className="sr-only">Edit submission</DialogTitle>
+                    <div className="mt-2 space-y-1.5">
+                      <label
+                        htmlFor="session-title"
+                        className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      >
+                        Title
+                      </label>
+                      <Input
+                        id="session-title"
+                        data-testid="session-title-input"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="Session title"
+                        className="text-base font-medium"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <DialogTitle className="mt-2 text-xl leading-snug">
+                    {detailSession.title || 'Untitled'}
+                  </DialogTitle>
+                )}
                 <DialogDescription className="mt-1.5">
                   {submitterName(detailSession)}
                   {detailSession.submitter?.email ? ` · ${detailSession.submitter.email}` : ''}
@@ -1073,11 +1168,66 @@ export function Inbox() {
               {/* min-h-0 so this pane, not the sheet, is what scrolls — the
                   header and the decision buttons stay put. */}
               <div className="min-h-0 flex-1 overflow-y-auto scrollbar-app px-6 py-5">
+                {editing && (
+                  <form
+                    className="mb-6 rounded-lg border border-border bg-muted/40 p-4"
+                    onSubmit={(formEvent) => {
+                      formEvent.preventDefault()
+                      if (!editTitle.trim()) return
+                      saveSessionEdits.mutate({
+                        id: detailSession.id,
+                        title: editTitle.trim(),
+                        description: editAbstract,
+                      })
+                    }}
+                  >
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="session-abstract"
+                        className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      >
+                        Abstract
+                      </label>
+                      <Textarea
+                        id="session-abstract"
+                        data-testid="session-abstract-input"
+                        value={editAbstract}
+                        onChange={(e) => setEditAbstract(e.target.value)}
+                        placeholder="A short description of the session."
+                        className="min-h-[140px] bg-card text-sm"
+                        disabled={saveSessionEdits.isPending}
+                      />
+                    </div>
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      {!editTitle.trim() && (
+                        <span className="mr-auto text-xs text-destructive">
+                          A session needs a title.
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={saveSessionEdits.isPending}
+                        onClick={closeEditor}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={!editTitle.trim() || saveSessionEdits.isPending}
+                      >
+                        {saveSessionEdits.isPending ? 'Saving…' : 'Save'}
+                      </Button>
+                    </div>
+                  </form>
+                )}
                 <SubmissionDetail
                   detail={detailQuery.data}
                   isPending={detailQuery.isPending}
                   error={detailQuery.error}
-                  description={detailSession.description}
+                  description={editing ? null : detailSession.description}
                 />
               </div>
 

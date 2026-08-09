@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { formatDayLabel } from '@/lib/programApi'
 import { PublicSchedule } from '@/pages/PublicSchedule'
 
 const SCHEDULE = {
@@ -181,6 +182,41 @@ describe('PublicSchedule', () => {
     // Speaker-name match on the inactive day 2 (Bob Beta speaks on Closing Notes).
     fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'bob' } })
     expect(await screen.findByText('Closing Notes')).toBeInTheDocument()
+  })
+
+  it('a query switches the list to day-labelled results spanning both days (EMB-02)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    // Day 1 is the active tab and stays active — searching does not silently
+    // move the reader to another day, it widens the list instead.
+    const dayOne = formatDayLabel('2026-10-12')
+    const dayTwo = formatDayLabel('2026-10-13')
+    expect(screen.getByRole('tab', { name: dayOne })).toHaveAttribute('data-state', 'active')
+
+    // "Main Hall" is a room used on BOTH days.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'main hall' } })
+
+    // Both days' matches are listed together…
+    expect(await screen.findByText('Closing Notes')).toBeInTheDocument()
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
+    expect(screen.queryByText('Vector Databases')).not.toBeInTheDocument()
+
+    // …the result set announces that it spans every day…
+    expect(screen.getByText(/2 results across all days/)).toBeInTheDocument()
+
+    // …each card is labelled with the day it belongs to, so a cross-day hit is
+    // never mistaken for a session on the tab you are looking at…
+    expect(within(cardFor('Opening Keynote')).getByText(dayOne)).toBeInTheDocument()
+    expect(within(cardFor('Closing Notes')).getByText(dayTwo)).toBeInTheDocument()
+
+    // …and the active tab is still day 1.
+    expect(screen.getByRole('tab', { name: dayOne })).toHaveAttribute('data-state', 'active')
+
+    // Clearing the search drops back to the active day only.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: '' } })
+    await waitFor(() => expect(screen.queryByText('Closing Notes')).not.toBeInTheDocument())
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
   })
 
   it('counts the cross-day matches beside the search box (EMB-02)', async () => {

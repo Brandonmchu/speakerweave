@@ -8,6 +8,7 @@ import {
   listContent,
   postPortalComment,
   remindOutstanding,
+  restoreContentVersion,
 } from '@/lib/contentApi'
 
 interface Call {
@@ -98,8 +99,30 @@ describe('organizer content library fetchers', () => {
     expect(result.reminded).toBe(3)
   })
 
+  it('restoreContentVersion POSTs the version to restore', async () => {
+    nextPayload = {
+      item: {},
+      versions: [],
+      comments: [],
+      restored: { version: 1, file_id: 'f1', changed: true },
+    }
+    const result = await restoreContentVersion('assign-9', 1)
+    expect(last().url).toBe('/api/task-assignments/assign-9/restore')
+    expect(last().method).toBe('POST')
+    expect(JSON.parse(String(last().body))).toEqual({ version: 1 })
+    expect(result.restored.version).toBe(1)
+  })
+
   it('contentExportPath builds the authed export path', () => {
     expect(contentExportPath('e1')).toBe('/api/events/e1/content/export')
+  })
+
+  it('contentExportPath appends only the ids that were picked', () => {
+    expect(contentExportPath('e1', ['a1', 'a2'])).toBe(
+      '/api/events/e1/content/export?assignment_ids=a1%2Ca2'
+    )
+    // An empty selection means "the whole event", not "an empty bundle".
+    expect(contentExportPath('e1', [])).toBe('/api/events/e1/content/export')
   })
 
   it('fetchContentBundle downloads a blob with the bearer token', async () => {
@@ -108,6 +131,13 @@ describe('organizer content library fetchers', () => {
     expect(last().url).toBe('/api/events/e1/content/export')
     expect(last().headers.get('Authorization')).toBe('Bearer admin-token')
     expect(blob).toBeInstanceOf(Blob)
+  })
+
+  it('fetchContentBundle carries the selected ids through to the request', async () => {
+    nextBlob = new Blob(['PKzip'], { type: 'application/zip' })
+    await fetchContentBundle('e1', ['a1', 'a2'])
+    expect(last().url).toBe('/api/events/e1/content/export?assignment_ids=a1%2Ca2')
+    expect(last().headers.get('Authorization')).toBe('Bearer admin-token')
   })
 })
 

@@ -5,10 +5,33 @@ import { apiGet, apiPatch, apiPost, request } from '@/lib/api'
 export type EvaluationScale = '1_5' | '1_10'
 export type EvaluationPlanStatus = 'draft' | 'open' | 'closed'
 
+/**
+ * What a scorecard row asks for.
+ *
+ * `scale` is the weighted 1–N rating that criteria have always been, and an
+ * absent `kind` means exactly that — every plan saved before choice/text
+ * criteria existed keeps its shape and its behaviour. `select` asks for one of
+ * a fixed list of options; `text` asks for a paragraph.
+ */
+export type EvaluationCriterionKind = 'scale' | 'select' | 'text'
+
 export interface EvaluationCriterion {
   name: string
+  /** Only scale criteria are weighted; the others carry 0 and sit outside the 100%. */
   weight: number
+  /** Omitted = 'scale'. */
+  kind?: EvaluationCriterionKind
+  /** The choices offered when `kind` is 'select'. */
+  options?: string[]
 }
+
+/** An absent kind is a scale criterion — the pre-existing numeric one. */
+export function criterionKind(criterion: EvaluationCriterion): EvaluationCriterionKind {
+  return criterion.kind ?? 'scale'
+}
+
+/** A number for a scale criterion, the chosen option or typed prose otherwise. */
+export type ReviewScoreValue = number | string
 
 export interface EvaluationPlan {
   id: string
@@ -351,7 +374,7 @@ export interface ReviewerHome {
 export interface ReviewRecord {
   id?: string
   assignment_id: string
-  scores: Record<string, number>
+  scores: Record<string, ReviewScoreValue>
   overall?: number | null
   comment?: string | null
   abstained: boolean
@@ -367,7 +390,7 @@ export interface ReviewerSubmission {
 }
 
 export interface ReviewInput {
-  scores: Record<string, number>
+  scores: Record<string, ReviewScoreValue>
   comment?: string
   abstained?: boolean
   abstain_reason?: string

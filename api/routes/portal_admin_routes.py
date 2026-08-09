@@ -61,6 +61,11 @@ class CommentRequest(BaseModel):
     notify: bool = True
 
 
+class RestoreRequest(BaseModel):
+    # which version of the item's history to make current again
+    version: int = Field(..., ge=1)
+
+
 class RemindRequest(BaseModel):
     # by default only nudge speakers missing REQUIRED content
     required_only: bool = True
@@ -544,6 +549,23 @@ async def get_content_item(assignment_id: str, auth: tuple = Depends(get_current
     return await content_pipeline.content_item(org_id, assignment_id)
 
 
+@router.post("/task-assignments/{assignment_id}/restore")
+async def restore_content_version(
+    assignment_id: str,
+    payload: RestoreRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Roll a content item back to one of its earlier versions.
+
+    The version history IS the change log, and this is its undo: the prior
+    upload becomes current again while every version row stays on disk, so the
+    move is auditable and reversible. Returns the item's refreshed detail
+    (versions + thread) so the caller re-renders from one response.
+    """
+    _user_id, org_id = auth
+    return await content_pipeline.restore_version(org_id, assignment_id, payload.version)
+
+
 @router.post("/task-assignments/{assignment_id}/comments", status_code=201)
 async def add_content_comment(
     assignment_id: str,
@@ -640,14 +662,25 @@ async def remind_outstanding(
 async def export_content(
     event_id: str,
     format: str = Query(default="zip", description="zip|manifest"),
+    assignment_ids: str | None = Query(
+        default=None,
+        description="comma-separated content item ids; omit to export the whole event",
+    ),
     auth: tuple = Depends(get_current_user_and_org),
 ):
-    """Bundle every collected file (current version) into a ZIP named by
-    speaker/item. ``?format=manifest`` returns a metadata-only JSON listing
-    (filenames, sizes, URLs) without downloading a single byte."""
+    """Bundle collected files (current version of each) into a ZIP named by
+    speaker/item.
+
+    Every item on the event by default; pass ``?assignment_ids=a,b,c`` to bundle
+    only the ones an organizer ticked in the library. Ids are intersected with
+    the event's own items, so an id from another org contributes nothing.
+    ``?format=manifest`` returns a metadata-only JSON listing (filenames, sizes,
+    URLs) without downloading a single byte."""
     _user_id, org_id = auth
+    selected = [part.strip() for part in (assignment_ids or "").split(",") if part.strip()] or None
     if format == "manifest":
-        return await content_pipeline.export_manifest(org_id, event_id)
-    zip_bytes = await content_pipeline.build_export_zip(org_id, event_id)
-    headers = {"Content-Disposition": f'attachment; filename="content-{event_id}.zip"'}
+        return await content_pipeline.export_manifest(org_id, event_id, selected)
+    zip_bytes = await content_pipeline.build_export_zip(org_id, event_id, selected)
+    suffix = f"-{len(selected)}-selected" if selected else ""
+    headers = {"Content-Disposition": f'attachment; filename="content-{event_id}{suffix}.zip"'}
     return Response(content=zip_bytes, media_type="application/zip", headers=headers)

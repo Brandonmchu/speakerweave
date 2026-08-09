@@ -63,7 +63,28 @@ const DETAIL = {
   ],
 }
 
+/** The same item after v1 has been restored: the pointer moved, history didn't. */
+const RESTORED_DETAIL = {
+  ...DETAIL,
+  item: { ...DETAIL.item, current_version: 1 },
+  versions: [
+    { ...DETAIL.versions[0], is_current: false },
+    { ...DETAIL.versions[1], is_current: true },
+  ],
+  comments: [
+    ...DETAIL.comments,
+    {
+      id: 'k2',
+      author_role: 'organizer',
+      author_label: 'Organizer',
+      body: 'Restored v1 (slides-v1.pdf) as the current version.',
+      created_at: '2026-08-06T09:00:00Z',
+    },
+  ],
+}
+
 let calls: { url: string; method: string; body: unknown }[] = []
+let restored = false
 
 function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -82,7 +103,12 @@ function stub() {
       if (u.includes('/content/remind')) return json({ reminded: 1, contacts: ['ben'] })
       if (u.includes('/content/export')) return new Response(new Blob(['zip']), { status: 200 })
       if (u.endsWith('/comments')) return json({ comment: { id: 'new', author_role: 'organizer' } })
-      if (u.includes('/task-assignments/')) return json(DETAIL)
+      if (u.endsWith('/restore')) {
+        restored = true
+        return json({ ...RESTORED_DETAIL, restored: { version: 1, file_id: 'f1', changed: true } })
+      }
+      // Once v1 has been restored the item detail reports it as current.
+      if (u.includes('/task-assignments/')) return json(restored ? RESTORED_DETAIL : DETAIL)
       if (u.includes('/content')) return json(LIBRARY)
       if (u.includes('/api/events')) return json([{ id: 'e1', name: 'AI Builders Summit', slug: 'summit' }])
       return json({})
@@ -103,6 +129,7 @@ function renderLibrary() {
 
 beforeEach(() => {
   calls = []
+  restored = false
   window.localStorage.setItem('dais.token', 'admin-token')
   vi.stubGlobal('URL', {
     ...URL,
@@ -210,5 +237,100 @@ describe('ContentLibrary', () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url.includes('/content/export'))).toBe(true)
     )
+  })
+
+  it('reads as a change history: every version labelled with when it landed (CNT-11)', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const list = await screen.findByTestId('content-version-list')
+    expect(within(list).getByText(/History \(2 versions\)/)).toBeInTheDocument()
+    expect(within(list).getAllByTestId('content-version-row')).toHaveLength(2)
+    // each entry says when it was uploaded…
+    expect(within(list).getAllByText(/Uploaded .* ago/)).toHaveLength(2)
+    // …and which one is live right now.
+    expect(within(list).getByText(/v2 · current/)).toBeInTheDocument()
+  })
+
+  it('restores a prior version: calls the endpoint and refreshes the item (CNT-11)', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const dialog = await screen.findByRole('dialog')
+    // Only the non-current versions offer a restore — v2 is already live.
+    expect(await within(dialog).findByTestId('restore-version-1')).toBeInTheDocument()
+    expect(within(dialog).queryByTestId('restore-version-2')).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByTestId('restore-version-1'))
+
+    await waitFor(() => {
+      const post = calls.find(
+        (c) => c.url.endsWith('/task-assignments/a1/restore') && c.method === 'POST'
+      )
+      expect(post).toBeTruthy()
+      expect((post!.body as { version: number }).version).toBe(1)
+    })
+
+    // The dialog refetches, so the restored version now reads as current…
+    expect(await within(dialog).findByText(/v1 · current/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Current: v1/)).toBeInTheDocument()
+    // …the audit line is in the thread, and v2 is still there to restore back to.
+    expect(
+      within(dialog).getByText('Restored v1 (slides-v1.pdf) as the current version.')
+    ).toBeInTheDocument()
+    expect(within(dialog).getByTestId('restore-version-2')).toBeInTheDocument()
+    // the library list is refreshed too
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/content?') || c.url.endsWith('/content')).length)
+        .toBeGreaterThan(1)
+    )
+  })
+
+  it('multi-selects rows and downloads just those items (CNT-14)', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    // Nothing ticked: the action is present but inert, with no count.
+    const button = screen.getByTestId('download-selected')
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('Download selected')
+    expect(button).not.toHaveTextContent('(')
+
+    // A row with no uploaded file has nothing to bundle, so it can't be ticked.
+    expect(screen.getByTestId('select-item-a2')).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId('select-item-a1'))
+    expect(button).toBeEnabled()
+    expect(button).toHaveTextContent('Download selected (1)')
+    expect(screen.getByTestId('selection-summary')).toHaveTextContent('1 item selected')
+
+    fireEvent.click(button)
+    await waitFor(() => {
+      const call = calls.find((c) => c.url.includes('/content/export?assignment_ids='))
+      expect(call).toBeTruthy()
+      expect(decodeURIComponent(call!.url)).toContain('assignment_ids=a1')
+    })
+    // "Export all content" is untouched — it still has no id filter.
+    fireEvent.click(screen.getByTestId('export-all'))
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith('/content/export'))).toBe(true)
+    )
+  })
+
+  it('select-all ticks every downloadable row, and clearing empties the selection', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    fireEvent.click(screen.getByTestId('select-all-content'))
+    // a1 has a file; a2 (missing) is skipped rather than silently exported empty
+    expect(screen.getByTestId('select-item-a1')).toBeChecked()
+    expect(screen.getByTestId('select-item-a2')).not.toBeChecked()
+    expect(screen.getByTestId('download-selected')).toHaveTextContent('Download selected (1)')
+
+    fireEvent.click(screen.getByTestId('clear-selection'))
+    expect(screen.getByTestId('select-item-a1')).not.toBeChecked()
+    expect(screen.getByTestId('download-selected')).toBeDisabled()
   })
 })

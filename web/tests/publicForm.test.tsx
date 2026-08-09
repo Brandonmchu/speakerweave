@@ -416,6 +416,117 @@ describe('PublicForm — co-speakers', () => {
 })
 
 /**
+ * CFP-07: an autosaved draft is not applied in silence. A returning speaker gets
+ * a dated banner with two unmistakable ways forward — resume, or clear.
+ */
+describe('PublicForm — resume an unfinished draft', () => {
+  beforeEach(() => {
+    submitted = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/submissions')) {
+          submitted.push(JSON.parse(String(init?.body ?? '{}')))
+          return jsonResponse({ id: 'sub-4', friendly_id: 'DAIS-004' }, 201)
+        }
+        return jsonResponse(FORM_PAYLOAD)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function seedDraft(savedAt: string | null = new Date(Date.now() - 2 * 3600_000).toISOString()) {
+    window.localStorage.setItem(
+      'dais.cfp-draft:cfp',
+      JSON.stringify({
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@example.com',
+        title: 'Analytical Engines',
+        answers: {},
+        coSpeakers: [],
+        ...(savedAt ? { savedAt } : {}),
+      })
+    )
+  }
+
+  const valueOf = (id: string) => (document.getElementById(id) as HTMLInputElement).value
+
+  it('announces the draft with its age and both ways forward', async () => {
+    seedDraft()
+    renderForm()
+
+    const banner = await screen.findByTestId('resume-draft-banner')
+    expect(banner).toHaveTextContent(/unfinished draft from about 2 hours ago/)
+    expect(screen.getByTestId('resume-draft')).toBeInTheDocument()
+    expect(screen.getByTestId('discard-draft')).toBeInTheDocument()
+    // the values are already back in the fields — the banner just says so
+    expect(valueOf('first_name')).toBe('Ada')
+    expect(valueOf('title')).toBe('Analytical Engines')
+  })
+
+  it('falls back to an undated message for a draft saved by an older build', async () => {
+    seedDraft(null)
+    renderForm()
+
+    const banner = await screen.findByTestId('resume-draft-banner')
+    expect(banner).toHaveTextContent(/unfinished draft/)
+    expect(banner).not.toHaveTextContent(/from ago|from Invalid/)
+  })
+
+  it('Resume draft returns to the form with every value intact', async () => {
+    seedDraft()
+    renderForm()
+    fireEvent.click(await screen.findByTestId('resume-draft'))
+
+    // the prompt is answered…
+    expect(screen.queryByTestId('resume-draft-banner')).not.toBeInTheDocument()
+    expect(screen.getByTestId('draft-resumed-note')).toBeInTheDocument()
+    // …the answers are still there, and still submit
+    expect(valueOf('first_name')).toBe('Ada')
+    expect(window.localStorage.getItem('dais.cfp-draft:cfp')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].title).toBe('Analytical Engines')
+  })
+
+  it('Clear draft empties the form and forgets the stored draft', async () => {
+    seedDraft()
+    renderForm()
+    fireEvent.click(await screen.findByTestId('discard-draft'))
+
+    await waitFor(() => expect(valueOf('first_name')).toBe(''))
+    expect(valueOf('title')).toBe('')
+    expect(screen.queryByTestId('resume-draft-banner')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('dais.cfp-draft:cfp')).toBeNull()
+  })
+
+  it('stays out of the way when there is no draft', async () => {
+    renderForm()
+    await screen.findByLabelText(/Session title/)
+    expect(screen.queryByTestId('resume-draft-banner')).not.toBeInTheDocument()
+  })
+
+  it('stamps every autosave with the time it was written', async () => {
+    renderForm()
+    await screen.findByLabelText(/Session title/)
+
+    fireEvent.change(screen.getByLabelText(/Session title/), { target: { value: 'Ada on Engines' } })
+
+    await waitFor(() => {
+      const draft = JSON.parse(window.localStorage.getItem('dais.cfp-draft:cfp') ?? '{}')
+      expect(draft.title).toBe('Ada on Engines')
+      expect(Number.isNaN(Date.parse(draft.savedAt))).toBe(false)
+    })
+  })
+})
+
+/**
  * The eval-legibility contract: Track and Session format are native `<select>`
  * elements (so a blind browser agent / the harness `select` tool can drive
  * them), and a native change still records the right answer and submits — the

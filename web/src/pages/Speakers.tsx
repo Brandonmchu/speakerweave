@@ -26,11 +26,13 @@ import {
   apiGet,
   getSpeakerProfile,
   importSpeakers,
+  listSpeakerStatuses,
   unwrapList,
   updateSpeaker,
   type EventSummary,
   type SpeakerImportResult,
   type SpeakerProfile,
+  type SpeakerStatus,
   type SubmissionStatus,
 } from '@/lib/api'
 import {
@@ -57,6 +59,46 @@ import { toast } from '@/ui/use-toast'
 
 type OnboardingFilter = 'all' | 'onboarded' | 'outstanding'
 type InviteFilter = 'all' | 'invited' | 'uninvited'
+/** 'unset' is a real answer to "who haven't we asked yet?" — hence its own option. */
+type WorkflowFilter = 'all' | SpeakerStatus | 'unset'
+
+/**
+ * A roster row plus the organizer's manual workflow status, which arrives from
+ * its own flat per-event call rather than a request per row.
+ */
+type RosterSpeaker = EventSpeaker & { speaker_status: SpeakerStatus | null }
+
+const WORKFLOW_META: Record<
+  SpeakerStatus,
+  { label: string; variant: 'success' | 'warning' | 'destructive' }
+> = {
+  invited: { label: 'Invited', variant: 'warning' },
+  confirmed: { label: 'Confirmed', variant: 'success' },
+  declined: { label: 'Declined', variant: 'destructive' },
+}
+
+const WORKFLOW_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: '— Not set' },
+  { value: 'invited', label: 'Invited' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'declined', label: 'Declined' },
+]
+
+/**
+ * The organizer's own answer to "have they said yes?" — distinct from the
+ * derived portal-invite badge next to it, which only means a link was minted.
+ */
+function WorkflowStatusBadge({ status }: { status: SpeakerStatus | null }) {
+  if (!status) {
+    return (
+      <span className="text-sm text-muted-foreground" title="No workflow status set yet">
+        —
+      </span>
+    )
+  }
+  const meta = WORKFLOW_META[status]
+  return <Badge variant={meta.variant}>{meta.label}</Badge>
+}
 
 export function Speakers() {
   const queryClient = useQueryClient()
@@ -67,6 +109,7 @@ export function Speakers() {
   const [search, setSearch] = useState('')
   const [onboardingFilter, setOnboardingFilter] = useState<OnboardingFilter>('all')
   const [inviteFilter, setInviteFilter] = useState<InviteFilter>('all')
+  const [workflowFilter, setWorkflowFilter] = useState<WorkflowFilter>('all')
   const [openContactId, setOpenContactId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -84,7 +127,23 @@ export function Speakers() {
     enabled: Boolean(event?.id),
   })
 
-  const speakers = useMemo(() => speakersQuery.data?.speakers ?? [], [speakersQuery.data])
+  // The workflow statuses ride alongside the roster in one flat call. A failure
+  // (or a backend without migration 010) just leaves every row "not set" — the
+  // roster itself stays fully usable.
+  const statusesKey = ['speakerStatuses', event?.id]
+  const statusesQuery = useQuery({
+    queryKey: statusesKey,
+    queryFn: () => listSpeakerStatuses(event!.id),
+    enabled: Boolean(event?.id),
+  })
+
+  const speakers = useMemo<RosterSpeaker[]>(() => {
+    const byContact = statusesQuery.data ?? {}
+    return (speakersQuery.data?.speakers ?? []).map((s) => ({
+      ...s,
+      speaker_status: byContact[s.contact_id] ?? null,
+    }))
+  }, [speakersQuery.data, statusesQuery.data])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -98,9 +157,13 @@ export function Speakers() {
       if (onboardingFilter === 'outstanding' && s.tasks_outstanding === 0) return false
       if (inviteFilter === 'invited' && !s.invited) return false
       if (inviteFilter === 'uninvited' && s.invited) return false
+      if (workflowFilter === 'unset' && s.speaker_status !== null) return false
+      if (workflowFilter !== 'all' && workflowFilter !== 'unset' && s.speaker_status !== workflowFilter) {
+        return false
+      }
       return true
     })
-  }, [speakers, search, onboardingFilter, inviteFilter])
+  }, [speakers, search, onboardingFilter, inviteFilter, workflowFilter])
 
   const invite = useMutation({
     mutationFn: (contactId: string) => sendPortalInvite(contactId),
@@ -115,7 +178,10 @@ export function Speakers() {
       toast({ variant: 'destructive', title: "Couldn't send invite", description: error.message }),
   })
 
-  const refreshRoster = () => queryClient.invalidateQueries({ queryKey: speakersKey })
+  const refreshRoster = () => {
+    queryClient.invalidateQueries({ queryKey: speakersKey })
+    queryClient.invalidateQueries({ queryKey: statusesKey })
+  }
 
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && speakersQuery.isPending)
   const error = eventsQuery.error ?? speakersQuery.error
@@ -219,8 +285,22 @@ export function Speakers() {
             className="w-auto min-w-[150px]"
             options={[
               { value: 'all', label: 'All speakers' },
+              { value: 'invited', label: 'Portal invited' },
+              { value: 'uninvited', label: 'Portal not invited' },
+            ]}
+          />
+          <NativeSelect
+            aria-label="Filter by speaker status"
+            data-testid="filter-speaker-status"
+            value={workflowFilter}
+            onValueChange={(v) => setWorkflowFilter(v as WorkflowFilter)}
+            className="w-auto min-w-[150px]"
+            options={[
+              { value: 'all', label: 'Any status' },
               { value: 'invited', label: 'Invited' },
-              { value: 'uninvited', label: 'Not invited' },
+              { value: 'confirmed', label: 'Confirmed' },
+              { value: 'declined', label: 'Declined' },
+              { value: 'unset', label: 'No status set' },
             ]}
           />
           <div className="ml-auto">
@@ -283,6 +363,7 @@ export function Speakers() {
                   setSearch('')
                   setOnboardingFilter('all')
                   setInviteFilter('all')
+                  setWorkflowFilter('all')
                 }}
               >
                 Clear filters
@@ -297,6 +378,7 @@ export function Speakers() {
                   <Checkbox checked={headerChecked} onCheckedChange={toggleAll} aria-label="Select all speakers" />
                 </TableHead>
                 <TableHead>Speaker</TableHead>
+                <TableHead className="w-[120px]">Status</TableHead>
                 <TableHead className="w-[90px] text-center">Sessions</TableHead>
                 <TableHead className="w-[180px]">Onboarding</TableHead>
                 <TableHead className="w-[150px]">Last portal visit</TableHead>
@@ -334,6 +416,9 @@ export function Speakers() {
                         )}
                       </div>
                     </button>
+                  </TableCell>
+                  <TableCell data-testid={`speaker-status-${speaker.contact_id}`}>
+                    <WorkflowStatusBadge status={speaker.speaker_status} />
                   </TableCell>
                   <TableCell className="text-center tabular-nums text-foreground">
                     {speaker.session_count}
@@ -553,6 +638,26 @@ function SpeakerProfileBody({
       toast({ variant: 'destructive', title: "Couldn't save", description: error.message }),
   })
 
+  /**
+   * The workflow status saves on change — one control, one click, no edit mode.
+   * It is the field an organizer updates most often (a speaker replies, you
+   * mark them confirmed), so making it wait behind Edit → Save would be wrong.
+   */
+  const setStatus = useMutation({
+    mutationFn: (next: SpeakerStatus | '') =>
+      updateSpeaker(eventId, speaker.contact_id, { speaker_status: next }),
+    onSuccess: (_saved, next) => {
+      toast({
+        title: next ? `Marked ${WORKFLOW_META[next].label.toLowerCase()}` : 'Status cleared',
+        description: speaker.name,
+      })
+      queryClient.invalidateQueries({ queryKey: ['speakerProfile', eventId, speaker.contact_id] })
+      onChanged()
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't set status", description: error.message }),
+  })
+
   return (
     <>
       <div className="border-b border-border px-6 py-5 pr-12">
@@ -575,13 +680,16 @@ function SpeakerProfileBody({
               )}
             </DialogDescription>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {/* Derived, not chosen: "a portal magic link exists". Named for
+                  what it means so it can't be read as the workflow status the
+                  organizer sets below. */}
               {speaker.invited ? (
                 <Badge variant="success" className="gap-1">
                   <CheckCircle2 className="h-3 w-3" />
-                  Invited
+                  Portal invited
                 </Badge>
               ) : (
-                <Badge variant="outline">Not invited</Badge>
+                <Badge variant="outline">No portal invite</Badge>
               )}
               <Badge variant="muted">{speaker.session_count} session{speaker.session_count === 1 ? '' : 's'}</Badge>
               {speaker.tasks_total > 0 && (
@@ -591,6 +699,21 @@ function SpeakerProfileBody({
                     : `${speaker.tasks_done}/${speaker.tasks_total} tasks`}
                 </Badge>
               )}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Label htmlFor="speaker-status" className="text-xs text-muted-foreground">
+                Speaker status
+              </Label>
+              <NativeSelect
+                id="speaker-status"
+                aria-label="Speaker status"
+                data-testid="speaker-status-select"
+                value={speaker.speaker_status ?? ''}
+                disabled={setStatus.isPending}
+                onValueChange={(v) => setStatus.mutate(v as SpeakerStatus | '')}
+                className="h-8 w-auto min-w-[150px]"
+                options={WORKFLOW_OPTIONS}
+              />
             </div>
           </div>
           {!editing && (

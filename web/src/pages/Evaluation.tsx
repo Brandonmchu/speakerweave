@@ -25,6 +25,7 @@ import {
   assignEvaluationSessions,
   assignReviewerToSubmission,
   createEvaluationPlan,
+  criterionKind,
   deleteEvaluator,
   getEvaluationPlan,
   getEvaluationSummary,
@@ -40,6 +41,7 @@ import {
   type AssignableSubmission,
   type EvaluationAssignMode,
   type EvaluationCriterion,
+  type EvaluationCriterionKind,
   type EvaluationPlan,
   type EvaluationPlanStatus,
   type EvaluationScale,
@@ -633,6 +635,14 @@ function PlanWorkspace({
   )
 }
 
+/** "Yes, No, Unsure" as the option list the server stores (blanks dropped). */
+function parseCriterionOptions(text: string): string[] {
+  return text
+    .split(',')
+    .map((option) => option.trim())
+    .filter(Boolean)
+}
+
 function PlanEditor({
   plan,
   onRefresh,
@@ -644,6 +654,10 @@ function PlanEditor({
   const [instructions, setInstructions] = useState(plan.instructions ?? '')
   const [anonymized, setAnonymized] = useState(plan.anonymized)
   const [criteria, setCriteria] = useState<EvaluationCriterion[]>(plan.criteria)
+  // The choices of a select criterion, kept as the raw comma-separated text
+  // the organizer is typing — round-tripping through the array would eat the
+  // comma the moment they press it.
+  const [optionsText, setOptionsText] = useState<Record<number, string>>({})
   const [opensAt, setOpensAt] = useState(toDateInputValue(plan.opens_at))
   const [closesAt, setClosesAt] = useState(toDateInputValue(plan.closes_at))
 
@@ -652,6 +666,7 @@ function PlanEditor({
     setInstructions(plan.instructions ?? '')
     setAnonymized(plan.anonymized)
     setCriteria(plan.criteria)
+    setOptionsText({})
     setOpensAt(toDateInputValue(plan.opens_at))
     setClosesAt(toDateInputValue(plan.closes_at))
   }, [plan])
@@ -672,11 +687,19 @@ function PlanEditor({
       toast({ title: 'Plan settings saved' })
     },
   })
-  const weightTotal = criteria.reduce((sum, criterion) => sum + Number(criterion.weight || 0), 0)
+  // Only the scored rows carry weight: a choice or a paragraph collects an
+  // answer, not a score, so it stays out of the 100% and out of the overall.
+  const scaleCriteria = criteria.filter((item) => criterionKind(item) === 'scale')
+  const weightTotal = scaleCriteria.reduce((sum, criterion) => sum + Number(criterion.weight || 0), 0)
+  const weightsBalance = scaleCriteria.length === 0 || weightTotal === 100
   const canSave =
     Boolean(name.trim()) &&
-    criteria.every((item) => item.name.trim() && Number(item.weight) > 0) &&
-    weightTotal === 100
+    criteria.every((item) => item.name.trim()) &&
+    scaleCriteria.every((item) => Number(item.weight) > 0) &&
+    criteria.every(
+      (item) => criterionKind(item) !== 'select' || (item.options?.length ?? 0) > 0
+    ) &&
+    weightsBalance
 
   const updateCriterion = (index: number, patch: Partial<EvaluationCriterion>) => {
     setCriteria((current) =>
@@ -684,6 +707,24 @@ function PlanEditor({
         criterionIndex === index ? { ...criterion, ...patch } : criterion
       )
     )
+  }
+
+  const changeCriterionKind = (index: number, kind: EvaluationCriterionKind) => {
+    // The row is becoming a different question — the half-typed choice list of
+    // whatever it was before shouldn't linger under it.
+    setOptionsText((current) => {
+      const { [index]: _dropped, ...rest } = current
+      return rest
+    })
+    if (kind === 'select') {
+      updateCriterion(index, { kind, weight: 0, options: criteria[index].options ?? [] })
+      return
+    }
+    if (kind === 'text') {
+      updateCriterion(index, { kind, weight: 0, options: undefined })
+      return
+    }
+    updateCriterion(index, { kind: 'scale', options: undefined })
   }
 
   return (
@@ -730,39 +771,91 @@ function PlanEditor({
             <div>
               <h3 className="text-base font-semibold text-foreground">Weighted criteria</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Scores are normalized by weight and stay on the {plan.scale === '1_10' ? '1–10' : '1–5'} scale.
+                Scored criteria are normalized by weight and stay on the{' '}
+                {plan.scale === '1_10' ? '1–10' : '1–5'} scale. Choice and text criteria collect an
+                answer instead, so they carry no weight and never move the overall.
               </p>
             </div>
-            <Badge variant={weightTotal === 100 ? 'success' : 'destructive'}>{weightTotal}%</Badge>
+            <Badge variant={weightsBalance ? 'success' : 'destructive'}>
+              {scaleCriteria.length === 0 ? 'Unscored' : `${weightTotal}%`}
+            </Badge>
           </div>
           <div className="mt-4 space-y-2">
-            {criteria.map((criterion, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_84px_32px] gap-2">
-                <Input
-                  aria-label={`Criterion ${index + 1} name`}
-                  value={criterion.name}
-                  onChange={(event) => updateCriterion(index, { name: event.target.value })}
-                />
-                <Input
-                  type="number"
-                  aria-label={`${criterion.name || `Criterion ${index + 1}`} weight`}
-                  min={1}
-                  max={100}
-                  value={criterion.weight}
-                  onChange={(event) => updateCriterion(index, { weight: Number(event.target.value) })}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Remove ${criterion.name || 'criterion'}`}
-                  disabled={criteria.length === 1}
-                  onClick={() => setCriteria((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            ))}
+            {criteria.map((criterion, index) => {
+              const kind = criterionKind(criterion)
+              const label = criterion.name || `Criterion ${index + 1}`
+              return (
+                <div key={index} className="space-y-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_104px_76px_32px] gap-2">
+                    <Input
+                      aria-label={`Criterion ${index + 1} name`}
+                      value={criterion.name}
+                      onChange={(event) => updateCriterion(index, { name: event.target.value })}
+                    />
+                    <NativeSelect
+                      aria-label={`${label} type`}
+                      value={kind}
+                      onValueChange={(value) =>
+                        changeCriterionKind(index, value as EvaluationCriterionKind)
+                      }
+                      options={[
+                        { value: 'scale', label: 'Scale' },
+                        { value: 'select', label: 'Choice' },
+                        { value: 'text', label: 'Text' },
+                      ]}
+                    />
+                    {kind === 'scale' ? (
+                      <Input
+                        type="number"
+                        aria-label={`${label} weight`}
+                        min={1}
+                        max={100}
+                        value={criterion.weight}
+                        onChange={(event) =>
+                          updateCriterion(index, { weight: Number(event.target.value) })
+                        }
+                      />
+                    ) : (
+                      <span
+                        className="flex h-9 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground"
+                        title="Choice and text criteria aren't weighted"
+                      >
+                        No weight
+                      </span>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${criterion.name || 'criterion'}`}
+                      disabled={criteria.length === 1}
+                      onClick={() => {
+                        // Removing a row renumbers the ones after it, so the
+                        // raw option text (keyed by index) is re-derived.
+                        setOptionsText({})
+                        setCriteria((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index)
+                        )
+                      }}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                  {kind === 'select' && (
+                    <Input
+                      aria-label={`${label} choices`}
+                      placeholder="Comma-separated choices, e.g. Yes, No, Unsure"
+                      value={optionsText[index] ?? (criterion.options ?? []).join(', ')}
+                      onChange={(event) => {
+                        const text = event.target.value
+                        setOptionsText((current) => ({ ...current, [index]: text }))
+                        updateCriterion(index, { options: parseCriterionOptions(text) })
+                      }}
+                    />
+                  )}
+                </div>
+              )
+            })}
             <Button
               type="button"
               variant="ghost"

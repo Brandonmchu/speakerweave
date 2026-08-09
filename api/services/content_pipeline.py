@@ -5,7 +5,10 @@ this module turns that raw stream into a managed pipeline:
 
 * **Versioning** — every re-upload is a new ``files`` row with an incremented
   ``version`` (see ``services.portal.upload_task_file``); ``versions_for`` reads
-  the history back, newest first, marking the current one.
+  the history back, newest first, marking the current one. That history is also
+  the item's change log, and ``restore_version`` rolls it back: "current" is
+  only whichever row the assignment's ``file_id`` points at, so a restore moves
+  a pointer and deletes nothing (and is itself reversible).
 * **Comments / feedback** — a thread per content item (a ``task_assignment``)
   in ``content_comments``; organizers leave feedback, speakers reply. Scoping is
   always ``org_id`` (organizer) or ``contact_id`` (speaker), never the body.
@@ -15,7 +18,8 @@ this module turns that raw stream into a managed pipeline:
 * **Reminders** — ``outstanding_by_contact`` groups missing required items per
   speaker so the route can queue one nudge each.
 * **Export** — ``build_export_zip`` bundles the current version of every
-  collected file into a ZIP named by speaker / item.
+  collected file into a ZIP named by speaker / item; pass ``assignment_ids`` to
+  bundle only a hand-picked selection instead of the whole event.
 
 Pure helpers (``classify_item_type``, ``content_status``) carry no I/O so both
 surfaces classify identically.
@@ -448,6 +452,101 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
     }
 
 
+async def _task_for(org_id: str, assignment: dict) -> dict:
+    """The task behind an assignment, org-scoped (never trusted from the body)."""
+    return (
+        first(
+            await db(
+                lambda: supabase.table("tasks")
+                .select("id, name, event_id")
+                .eq("id", assignment.get("task_id"))
+                .eq("org_id", org_id)
+                .limit(1)
+                .execute(),
+                "content_assignment_task",
+            )
+        )
+        or {}
+    )
+
+
+async def _audit_comment(org_id: str, assignment: dict, task: dict, body: str) -> None:
+    """Write an audit line into the item's thread. Best-effort: a failed audit
+    must not undo the action it describes."""
+    try:
+        await db(
+            lambda: supabase.table("content_comments")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "event_id": task.get("event_id"),
+                    "task_assignment_id": assignment.get("id"),
+                    "contact_id": assignment.get("contact_id"),
+                    "author_role": "organizer",
+                    "author_label": "Organizer",
+                    "body": body,
+                    "created_at": _now_iso(),
+                }
+            )
+            .execute(),
+            "content_audit_comment",
+        )
+    except Exception:
+        logger.warning("content: could not record audit line for %s", assignment.get("id"), exc_info=True)
+
+
+async def restore_version(org_id: str, assignment_id: str, version: int) -> dict:
+    """Make a prior version current again — a pointer move, not a rewrite.
+
+    Every upload is kept as its own ``files`` row; the only thing that says
+    which one is live is the assignment's ``file_id``. Restoring re-points it at
+    the requested version and touches nothing else: no row is deleted, the
+    version numbers keep their original meaning, and the restore can itself be
+    undone by restoring the other way. An audit line lands in the item's comment
+    thread so the change log reads as one story.
+
+    Org-scoped through ``_get_org_assignment`` — a foreign item is a 404, and an
+    unknown version on an item you DO own is a 404 too.
+    """
+    assignment = await _get_org_assignment(org_id, assignment_id)
+    file_rows = await _files_for(org_id, assignment_id)
+    try:
+        wanted = int(version)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="version must be a number") from None
+
+    target = next((f for f in file_rows if int(f.get("version") or 1) == wanted), None)
+    if not target or not target.get("id"):
+        raise HTTPException(status_code=404, detail=f"Version {wanted} not found for this item")
+
+    already_current = assignment.get("file_id") == target["id"]
+    if not already_current:
+        updated = first(
+            await db(
+                lambda: supabase.table("task_assignments")
+                .update({"file_id": target["id"]})
+                .eq("id", assignment_id)
+                .eq("org_id", org_id)
+                .execute(),
+                "content_restore_version",
+            )
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Content item not found")
+        task = await _task_for(org_id, assignment)
+        filename = target.get("filename") or "file"
+        await _audit_comment(
+            org_id,
+            assignment,
+            task,
+            f"Restored v{wanted} ({filename}) as the current version.",
+        )
+
+    detail = await content_item(org_id, assignment_id)
+    detail["restored"] = {"version": wanted, "file_id": target["id"], "changed": not already_current}
+    return detail
+
+
 async def add_organizer_comment(org_id: str, assignment_id: str, body: str) -> dict:
     """Organizer leaves feedback on a speaker's item. Returns the comment plus the
     speaker + task context so the route can queue a notification."""
@@ -599,24 +698,48 @@ def _export_records(ctx: dict) -> list[dict]:
     return records
 
 
-async def export_manifest(org_id: str, event_id: str) -> dict:
+def _selected(ctx: dict, assignment_ids: list[str] | None) -> dict:
+    """Narrow a collected context to a hand-picked set of items.
+
+    ``ctx["assignments"]`` is already org- AND event-scoped by ``_collect``, so
+    intersecting with a client-supplied id list can only ever remove rows: an id
+    from another org (or another event) simply matches nothing. An empty/omitted
+    list means "everything", which is what the whole-event export wants.
+    """
+    if not assignment_ids:
+        return ctx
+    wanted = {aid for aid in assignment_ids if aid}
+    return {**ctx, "assignments": [a for a in ctx["assignments"] if a.get("id") in wanted]}
+
+
+async def export_manifest(
+    org_id: str, event_id: str, assignment_ids: list[str] | None = None
+) -> dict:
     """A metadata-only listing of the collected files — filenames, sizes, URLs and
-    the archive path each would take. Does NO downloads (cheap; safe at any scale)."""
+    the archive path each would take. Does NO downloads (cheap; safe at any scale).
+
+    ``assignment_ids`` narrows it to a chosen subset (see ``_selected``)."""
     await fetch_event(event_id, org_id, columns="id, org_id, name")
-    ctx = await _collect(org_id, event_id)
+    ctx = _selected(await _collect(org_id, event_id), assignment_ids)
     files = [{k: v for k, v in r.items() if k != "bucket_path"} for r in _export_records(ctx)]
     return {"event_id": event_id, "files": files, "count": len(files)}
 
 
-async def build_export_zip(org_id: str, event_id: str) -> bytes:
-    """Bundle the current version of every collected file into an in-memory ZIP.
+async def build_export_zip(
+    org_id: str, event_id: str, assignment_ids: list[str] | None = None
+) -> bytes:
+    """Bundle the current version of the collected files into an in-memory ZIP.
+
+    Every item on the event by default; only the given items when
+    ``assignment_ids`` is passed (the "download selected" path) — always the
+    CURRENT version of each, never the whole history.
 
     Entries are ``{Speaker}-{id}/{Item}-{id}-v{n}-{filename}`` — unique and
     traversal-safe (see ``_entry_name``). A file whose bytes can't be fetched is
     skipped rather than aborting the whole export.
     """
     await fetch_event(event_id, org_id, columns="id, org_id, name")
-    ctx = await _collect(org_id, event_id)
+    ctx = _selected(await _collect(org_id, event_id), assignment_ids)
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

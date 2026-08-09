@@ -62,7 +62,6 @@ import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { NativeSelect } from '@/ui/native-select'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs'
 import { Textarea } from '@/ui/textarea'
@@ -722,21 +721,19 @@ function FieldRow({
 
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Page</span>
-              <Select
-                value={String(field.page)}
-                onValueChange={(value) => onChange({ page: Number(value) })}
-              >
-                <SelectTrigger className="h-8 w-[190px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PAGES.map((page) => (
-                    <SelectItem key={page} value={String(page)}>
-                      {page} · {pageLabel(page)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="w-[190px]">
+                <NativeSelect
+                  aria-label={`Page for ${field.public_name}`}
+                  data-testid={`field-page-${field.key}`}
+                  className="h-8 text-sm"
+                  value={String(field.page)}
+                  onValueChange={(value) => onChange({ page: Number(value) })}
+                  options={PAGES.map((page) => ({
+                    value: String(page),
+                    label: `${page} · ${pageLabel(page)}`,
+                  }))}
+                />
+              </div>
             </div>
 
             <Button
@@ -943,34 +940,24 @@ function AddFieldDialog({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Answer type</Label>
-                <Select value={fieldType} onValueChange={setFieldType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FIELD_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="new-field-type">Answer type</Label>
+                <NativeSelect
+                  id="new-field-type"
+                  data-testid="new-field-type"
+                  value={fieldType}
+                  onValueChange={setFieldType}
+                  options={FIELD_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+                />
               </div>
               <div className="space-y-1.5">
-                <Label>Applies to</Label>
-                <Select value={scope} onValueChange={setScope}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCOPES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="new-field-scope">Applies to</Label>
+                <NativeSelect
+                  id="new-field-scope"
+                  data-testid="new-field-scope"
+                  value={scope}
+                  onValueChange={setScope}
+                  options={SCOPES}
+                />
               </div>
             </div>
 
