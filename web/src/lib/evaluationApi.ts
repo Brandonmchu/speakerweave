@@ -21,6 +21,9 @@ export interface EvaluationPlan {
   criteria: EvaluationCriterion[]
   status: EvaluationPlanStatus
   session_filter?: Record<string, unknown>
+  /** Review window. null on either side = that bound is unset. */
+  opens_at?: string | null
+  closes_at?: string | null
   evaluator_count?: number
   assignment_count?: number
   review_count?: number
@@ -33,6 +36,9 @@ export interface EvaluationPlanInput {
   scale?: EvaluationScale
   anonymized?: boolean
   criteria?: EvaluationCriterion[]
+  /** A date ("2026-10-01") or a full instant; omit for no bound. */
+  opens_at?: string | null
+  closes_at?: string | null
 }
 
 export interface EvaluationPlanPatch {
@@ -41,6 +47,9 @@ export interface EvaluationPlanPatch {
   anonymized?: boolean
   criteria?: EvaluationCriterion[]
   status?: EvaluationPlanStatus
+  /** Send null to clear a bound; omit to leave it alone. */
+  opens_at?: string | null
+  closes_at?: string | null
 }
 
 /** A talk belongs to one or more tracks; a reviewer covers one or more. */
@@ -195,6 +204,79 @@ export function assignEvaluationSessions(
     ...selection,
     mode,
   })
+}
+
+/** ── per-submission assignment ──────────────────────────────────────────
+ * Assigning by track is a bulk stroke; this is the single deliberate pairing
+ * — "this reviewer reads THIS submission" — and both dedupe on the same key.
+ */
+export interface SubmissionReviewer {
+  assignment_id: string
+  evaluator_id: string
+  name: string
+  email: string | null
+  review_status: ReviewerAssignmentStatus
+}
+
+export interface AssignableSubmission {
+  session_id: string
+  title: string
+  friendly_id?: string | null
+  status?: string | null
+  tracks?: EvaluationTrack[]
+  assignments: SubmissionReviewer[]
+}
+
+export interface AssignmentBoard {
+  evaluators: Array<{ id: string; name: string; email: string | null; track_ids?: string[] }>
+  sessions: AssignableSubmission[]
+}
+
+export function getPlanAssignments(planId: string): Promise<AssignmentBoard> {
+  return apiGet<AssignmentBoard>(`/api/plans/${planId}/assignments`)
+}
+
+export interface CreatedAssignment {
+  id: string
+  plan_id: string
+  evaluator_id: string
+  session_id: string
+  evaluator_name: string
+  evaluator_email: string | null
+  session_title: string | null
+  review_status: ReviewerAssignmentStatus
+}
+
+export function assignReviewerToSubmission(
+  planId: string,
+  input: { evaluator_id: string; session_id: string }
+): Promise<CreatedAssignment> {
+  return apiPost<{ assignment: CreatedAssignment }>(
+    `/api/plans/${planId}/assignments`,
+    input
+  ).then((response) => response.assignment)
+}
+
+export function unassignReviewerFromSubmission(
+  planId: string,
+  assignmentId: string
+): Promise<void> {
+  return request<void>(`/api/plans/${planId}/assignments/${assignmentId}`, { method: 'DELETE' })
+}
+
+export interface LaggardReminderResult {
+  reminded: number
+  evaluators: string[]
+  skipped: number
+  already_reminded: string[]
+  incomplete_reviewers: number
+  outstanding: number
+}
+
+/** Email only the reviewers with unfinished work. Deduped per reviewer per
+ * day server-side, so a second click reminds nobody. */
+export function remindLaggingReviewers(planId: string): Promise<LaggardReminderResult> {
+  return apiPost<LaggardReminderResult>(`/api/plans/${planId}/remind-laggards`)
 }
 
 export function openEvaluationPlan(

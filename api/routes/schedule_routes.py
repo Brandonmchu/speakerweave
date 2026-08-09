@@ -24,6 +24,7 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel
 
 from auth import get_current_user_and_org, verify_org_access
+from services.auto_place import plan_auto_placements
 from services.scheduling import (
     Labels,
     detect_conflicts,
@@ -453,6 +454,82 @@ async def update_session_schedule(
     if not updated:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session": updated}
+
+
+@router.post("/events/{event_id}/schedule/auto-place")
+async def auto_place_schedule(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
+    """Fill the tray in one action: every unscheduled session into a clean slot.
+
+    The decision is made by `services/auto_place.py` against the *same* rule
+    engine the conflicts endpoint sweeps with, so this endpoint can only ever
+    write placements the grid would draw green. What it cannot fit it leaves in
+    the tray with a reason — a schedule is never forced.
+
+    The writes are the ordinary schedule columns, one row at a time, so an
+    auto-placed card is indistinguishable from a dragged one afterwards: it can
+    be moved, unscheduled, and re-auto-placed. Postgres still has the last word
+    on room double-booking; if the exclusion constraint refuses a row (another
+    organizer moved something mid-run) that one session becomes a skip rather
+    than a 500 that abandons the rest of the plan.
+    """
+    _user_id, org_id = auth
+    agenda = await _assemble_agenda(event_id, org_id)  # 404s a foreign / unknown event
+
+    plan = plan_auto_placements(agenda)
+    placed: list[dict] = []
+    skipped: list[dict] = [entry.as_dict() for entry in plan.skipped]
+
+    for placement in plan.placed:
+        patch = {
+            "room_id": placement.room_id,
+            "starts_at": placement.starts_at,
+            "ends_at": placement.ends_at,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            updated = first(
+                await db(
+                    lambda patch=patch, session_id=placement.session_id: supabase.table("sessions")
+                    .update(patch)
+                    .eq("id", session_id)
+                    .eq("org_id", org_id)
+                    .execute(),
+                    "schedule_auto_place",
+                )
+            )
+        except APIError as exc:
+            # ANY per-session write failure becomes a skip: earlier placements
+            # in this run have already persisted, so raising here would turn a
+            # partial success into a 500 the caller can't reconcile.
+            reason = (
+                ROOM_DOUBLE_BOOKED
+                if _is_room_double_book(exc)
+                else "Could not save this placement."
+            )
+            logger.warning(
+                "auto-place: write rejected session_id=%s: %s", placement.session_id, exc
+            )
+            skipped.append(
+                {
+                    "id": placement.session_id,
+                    "title": placement.title,
+                    "reason": reason,
+                }
+            )
+            continue
+
+        if not updated:
+            skipped.append(
+                {
+                    "id": placement.session_id,
+                    "title": placement.title,
+                    "reason": "Session could not be updated.",
+                }
+            )
+            continue
+        placed.append(placement.as_dict())
+
+    return {"placed": placed, "skipped": skipped}
 
 
 @router.post("/events/{event_id}/schedule/publish")

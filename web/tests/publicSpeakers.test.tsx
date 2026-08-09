@@ -138,6 +138,23 @@ describe('PublicSpeakers', () => {
     expect(screen.getByText('No speakers match')).toBeInTheDocument()
   })
 
+  it('counts the speakers a search matches (EMB-05/12)', async () => {
+    renderAt('/e/ai-builders-summit/speakers')
+    await screen.findByText('Alice Alpha')
+
+    // No query → no count.
+    expect(screen.queryByTestId('speaker-result-count')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search speakers'), { target: { value: 'a' } })
+    expect(screen.getByTestId('speaker-result-count')).toHaveTextContent('2 speakers match')
+
+    fireEvent.change(screen.getByLabelText('Search speakers'), { target: { value: 'alpha' } })
+    expect(screen.getByTestId('speaker-result-count')).toHaveTextContent('1 speaker matches')
+
+    fireEvent.change(screen.getByLabelText('Search speakers'), { target: { value: 'zzzz' } })
+    expect(screen.getByTestId('speaker-result-count')).toHaveTextContent('0 speakers match')
+  })
+
   it('opens a speaker dialog with bio and their sessions', async () => {
     renderAt('/e/ai-builders-summit/speakers')
     fireEvent.click(await screen.findByText('Alice Alpha'))

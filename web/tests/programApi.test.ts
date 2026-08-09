@@ -3,10 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildScheduleIcs,
   buildSessionIcs,
+  embedIframeSnippet,
+  embedScriptSnippet,
+  embedScriptUrl,
   formatTimeZoneNote,
   getProgramSchedule,
   getProgramSession,
   getProgramSpeakers,
+  publicProgramPath,
+  publicProgramUrl,
   readStarredIds,
   toggleStarredId,
   writeStarredIds,
@@ -176,6 +181,60 @@ describe('buildScheduleIcs (my schedule export)', () => {
     expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1)
     expect(buildScheduleIcs([{ id: 'b', title: 'Unplaced', starts_at: null, ends_at: null }])).toBe('')
     expect(buildScheduleIcs([])).toBe('')
+  })
+})
+
+describe('public links + embed snippets (EMB-15)', () => {
+  const SLUG = 'ai-builders-summit'
+  const origin = () => window.location.origin
+
+  it('builds the two public page URLs', () => {
+    expect(publicProgramPath(SLUG)).toBe('/e/ai-builders-summit/schedule')
+    expect(publicProgramPath(SLUG, 'speakers')).toBe('/e/ai-builders-summit/speakers')
+    expect(publicProgramUrl(SLUG)).toBe(`${origin()}/e/ai-builders-summit/schedule`)
+  })
+
+  it('points the loader at the route the API actually serves', () => {
+    // GET /public/program/{slug}/embed.js — same origin as the /e/ pages, which
+    // is what the loader derives the iframe src from.
+    expect(embedScriptUrl(SLUG)).toBe(
+      `${origin()}/public/program/ai-builders-summit/embed.js`
+    )
+  })
+
+  it('emits a script snippet carrying the loader’s data-* contract', () => {
+    const snippet = embedScriptSnippet(SLUG, 'speakers')
+    expect(snippet).toContain(`<script src="${embedScriptUrl(SLUG)}"`)
+    expect(snippet).toContain('data-dais-event="ai-builders-summit"')
+    expect(snippet).toContain('data-dais-widget="speakers"')
+    expect(snippet.trimEnd().endsWith('</script>')).toBe(true)
+    // async/defer would null out document.currentScript inside the loader.
+    expect(snippet).not.toMatch(/\basync\b|\bdefer\b/)
+  })
+
+  it('attribute-escapes a hostile slug so the snippet stays inert markup', () => {
+    const hostile = 'x" onload="alert(1)></script><script>evil()'
+    const snippet = embedScriptSnippet(hostile)
+    // The raw quote/angle characters must never survive into the attribute:
+    // everything after `data-dais-event="` up to the widget attr is entity-safe.
+    const attr = snippet.split('data-dais-event="')[1].split('"\n')[0]
+    expect(attr).not.toMatch(/["<>]/)
+    expect(attr).toContain('&quot;')
+    expect(attr).toContain('&lt;')
+    // And the URL half is percent-encoded by encodeURIComponent.
+    expect(snippet).toContain(encodeURIComponent(hostile))
+  })
+
+  it('emits an iframe snippet in embed mode with a sane default height', () => {
+    const snippet = embedIframeSnippet(SLUG)
+    expect(snippet).toContain(`src="${origin()}/e/ai-builders-summit/schedule?embed=1"`)
+    expect(snippet).toContain('style="width:100%;height:600px;border:0"')
+    expect(snippet.trimEnd().endsWith('</iframe>')).toBe(true)
+  })
+
+  it('escapes a slug that would otherwise break the URL', () => {
+    expect(publicProgramUrl('a b')).toBe(`${origin()}/e/a%20b/schedule`)
+    expect(embedScriptUrl('a b')).toBe(`${origin()}/public/program/a%20b/embed.js`)
   })
 })
 

@@ -28,6 +28,7 @@ import {
   List,
   RotateCcw,
   Send,
+  Wand2,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -36,6 +37,7 @@ import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import {
   addMinutesToIso,
   agendaDays,
+  autoPlaceSchedule,
   buildZonedTimestamp,
   getAgenda,
   getAgendaConflicts,
@@ -49,6 +51,7 @@ import {
   type Agenda as AgendaPayload,
   type AgendaRoom,
   type AgendaSession,
+  type AutoPlaceResult,
   type GridGeometry,
   type PublishResult,
   type SchedulePatch,
@@ -1135,6 +1138,10 @@ export function Agenda() {
   // The confirmation shown after "Publish schedule" — the timestamp + the public
   // URL to share. Cleared only by publishing again.
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
+  // What the last "Auto-place remaining" run did. Kept on screen (not just in a
+  // toast) because the interesting half is what it *couldn't* place and why —
+  // that list is a to-do, and a toast that vanishes is no place for one.
+  const [autoPlaceResult, setAutoPlaceResult] = useState<AutoPlaceResult | null>(null)
 
   /**
    * Which slot *within* the dragged card the pointer grabbed. Without it, a
@@ -1318,6 +1325,44 @@ export function Agenda() {
     onSettled: () => {
       // Only the conflict sweep — the board itself is already correct.
       queryClient.invalidateQueries({ queryKey: conflictsKey })
+    },
+  })
+
+  /**
+   * "Auto-place remaining" — the whole tray, in one action.
+   *
+   * The server does the choosing (api/services/auto_place.py): it walks the
+   * event's real days, slots and rooms and takes the first opening that creates
+   * ZERO conflicts, validated with the same rule engine this page reconciles
+   * against. So the board is refetched rather than patched optimistically —
+   * there is nothing to guess, and the placements it made are ordinary ones the
+   * organizer can immediately drag, move or unschedule.
+   */
+  const autoPlace = useMutation({
+    mutationFn: () => autoPlaceSchedule(eventId!),
+    onSuccess: async (result) => {
+      setAutoPlaceResult(result)
+      // Both queries: the board changed, so its conflict sweep did too.
+      await Promise.all([agendaQuery.refetch(), conflictsQuery.refetch()])
+      const placed = result.placed.length
+      const skipped = result.skipped.length
+      toast({
+        title: `Placed ${placed} session${placed === 1 ? '' : 's'}, skipped ${skipped}`,
+        description:
+          skipped === 0
+            ? 'Every remaining session found a conflict-free slot.'
+            : result.skipped
+                .slice(0, 3)
+                .map((entry) => `${entry.title ?? entry.id}: ${entry.reason}`)
+                .join(' · '),
+      })
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't auto-place the remaining sessions",
+        description: error.message,
+      })
     },
   })
 
@@ -1781,6 +1826,22 @@ export function Agenda() {
                 <RotateCcw className="h-4 w-4" />
                 Refresh
               </Button>
+              {/* The one-action fill. Only shown while there is something left
+                  to place — an empty tray makes it a button that does nothing. */}
+              {unscheduled.length > 0 && (
+                <Button
+                  size="sm"
+                  data-testid="auto-place"
+                  disabled={!eventId || autoPlace.isPending}
+                  title="Schedule every remaining session into the first conflict-free slot"
+                  onClick={() => autoPlace.mutate()}
+                >
+                  <Wand2 className="h-4 w-4" />
+                  {autoPlace.isPending
+                    ? 'Placing…'
+                    : `Auto-place remaining (${unscheduled.length})`}
+                </Button>
+              )}
               <Button
                 size="sm"
                 data-testid="publish-schedule"
@@ -1794,6 +1855,57 @@ export function Agenda() {
           </header>
 
           <ViewTabs value={view} onChange={setView} conflictCount={conflicts.length} />
+
+          {autoPlaceResult && (
+            <div
+              data-testid="auto-place-summary"
+              data-placed={autoPlaceResult.placed.length}
+              data-skipped={autoPlaceResult.skipped.length}
+              className="mt-4 rounded-lg border border-primary/40 bg-primary-subtle px-3 py-2.5 text-sm"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Wand2 className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-foreground">
+                  Placed{' '}
+                  <strong className="font-semibold tabular-nums">
+                    {autoPlaceResult.placed.length}
+                  </strong>{' '}
+                  session{autoPlaceResult.placed.length === 1 ? '' : 's'}, skipped{' '}
+                  <strong className="font-semibold tabular-nums">
+                    {autoPlaceResult.skipped.length}
+                  </strong>
+                  .
+                </span>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  data-testid="auto-place-dismiss"
+                  onClick={() => setAutoPlaceResult(null)}
+                  className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {/* The skipped list is the point of keeping this on screen: each
+                  line is a decision the organizer still has to make by hand. */}
+              {autoPlaceResult.skipped.length > 0 && (
+                <ul className="mt-1.5 space-y-1 pl-6">
+                  {autoPlaceResult.skipped.map((entry) => (
+                    <li
+                      key={entry.id}
+                      data-testid={`auto-place-skipped-${entry.id}`}
+                      className="flex flex-wrap items-baseline gap-x-2 text-xs"
+                    >
+                      <span className="font-medium text-foreground">
+                        {entry.title ?? titles.get(entry.id) ?? entry.id}
+                      </span>
+                      <span className="text-muted-foreground">{entry.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {publishResult && (
             <div

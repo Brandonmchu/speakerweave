@@ -183,6 +183,93 @@ describe('PublicSchedule', () => {
     expect(await screen.findByText('Closing Notes')).toBeInTheDocument()
   })
 
+  it('counts the cross-day matches beside the search box (EMB-02)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    // Nothing typed → no count to show.
+    expect(screen.queryByTestId('search-result-count')).not.toBeInTheDocument()
+
+    // "Main Hall" is the room of one day-1 and one day-2 session.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'main hall' } })
+    expect(await screen.findByTestId('search-result-count')).toHaveTextContent('2 sessions match')
+
+    // Singular reads correctly.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'keynote' } })
+    expect(screen.getByTestId('search-result-count')).toHaveTextContent('1 session matches')
+
+    // A miss still reports a count rather than going silent.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'zzzz' } })
+    expect(screen.getByTestId('search-result-count')).toHaveTextContent('0 sessions match')
+  })
+
+  it('filters the day by Format (EMB-03)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    const formatFilter = screen.getByLabelText('Filter by format')
+    // Options come from the published programme only.
+    expect(within(formatFilter).getByRole('option', { name: 'All formats' })).toBeInTheDocument()
+    expect(within(formatFilter).getByRole('option', { name: 'Keynote' })).toBeInTheDocument()
+
+    fireEvent.change(formatFilter, { target: { value: 'Talk' } })
+    expect(screen.getByText('Vector Databases')).toBeInTheDocument()
+    expect(screen.queryByText('Opening Keynote')).not.toBeInTheDocument()
+
+    fireEvent.change(formatFilter, { target: { value: 'Keynote' } })
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
+    expect(screen.queryByText('Vector Databases')).not.toBeInTheDocument()
+  })
+
+  it('filters the day by Room (EMB-03)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    const roomFilter = screen.getByLabelText('Filter by room')
+    expect(within(roomFilter).getByRole('option', { name: 'Room A' })).toBeInTheDocument()
+
+    fireEvent.change(roomFilter, { target: { value: 'Main Hall' } })
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
+    expect(screen.queryByText('Vector Databases')).not.toBeInTheDocument()
+  })
+
+  it('composes the format/room facets with the track chips and the search', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    // Engineering ∩ Talk is empty on day 1 (the keynote is Engineering, the
+    // only day-1 Talk is Research).
+    fireEvent.click(screen.getByRole('button', { name: 'Engineering' }))
+    fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'Talk' } })
+    expect(screen.getByText('No sessions match')).toBeInTheDocument()
+
+    // The same pair does match a day-2 session, which the cross-day search finds.
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'closing' } })
+    expect(await screen.findByText('Closing Notes')).toBeInTheDocument()
+    expect(screen.getByTestId('search-result-count')).toHaveTextContent('1 session matches')
+
+    // Narrowing the room to one the match isn't in empties the result.
+    fireEvent.change(screen.getByLabelText('Filter by room'), { target: { value: 'Room A' } })
+    expect(screen.getByTestId('search-result-count')).toHaveTextContent('0 sessions match')
+    expect(screen.queryByText('Closing Notes')).not.toBeInTheDocument()
+  })
+
+  it('clears every facet and the search at once', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    fireEvent.change(screen.getByLabelText('Filter by room'), { target: { value: 'Room A' } })
+    fireEvent.change(screen.getByLabelText('Search sessions'), { target: { value: 'zzzz' } })
+    expect(screen.getByTestId('search-result-count')).toHaveTextContent('0 sessions match')
+
+    fireEvent.click(screen.getByTestId('clear-filters'))
+
+    expect(screen.queryByTestId('search-result-count')).not.toBeInTheDocument()
+    expect(screen.getByText('Opening Keynote')).toBeInTheDocument()
+    expect(screen.getByText('Vector Databases')).toBeInTheDocument()
+    expect(screen.getByLabelText('Filter by room')).toHaveValue('__all__')
+  })
+
   it('notes that times are shown in the event timezone', async () => {
     renderAt('/e/ai-builders-summit/schedule')
     await screen.findByText('Opening Keynote')

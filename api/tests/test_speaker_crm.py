@@ -357,6 +357,60 @@ def test_update_speaker_fields(client, auth_headers, crm_db):
     assert row["company_name"] == "Franklin Press"
 
 
+def test_logistics_notes_round_trip_through_patch_and_aggregate(client, auth_headers, crm_db):
+    """Travel & logistics is a field ON the speaker record (migration 009), not
+    an onboarding task: what the organizer writes is what the drawer reads back."""
+    notes = "UA 482 arrives Sep 1, 08:10. Hotel Marlowe, 2 nights. Vegetarian."
+    saved = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"logistics_notes": notes},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["speaker"]["logistics_notes"] == notes
+    assert next(c for c in crm_db.rows("contacts") if c["id"] == ADA)["logistics_notes"] == notes
+
+    profile = client.get(f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}", headers=auth_headers)
+    assert profile.json()["speaker"]["logistics_notes"] == notes
+
+
+def test_logistics_notes_are_null_until_written(client, auth_headers, crm_db):
+    """A pre-009 row (no column, no value) reads as null — never a 500."""
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/speakers/{BEN}", headers=auth_headers)
+    assert body.status_code == 200
+    assert body.json()["speaker"]["logistics_notes"] is None
+
+
+def test_logistics_notes_can_be_cleared(client, auth_headers, crm_db):
+    client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"logistics_notes": "Booked."},
+    )
+    cleared = client.patch(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}",
+        headers=auth_headers,
+        json={"logistics_notes": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["speaker"]["logistics_notes"] == ""
+
+
+def test_logistics_notes_are_event_and_org_scoped(client, auth_headers, crm_db):
+    """The travel field is reachable only through the org+event-scoped path."""
+    assert (
+        client.patch(
+            f"/api/events/{TEST_EVENT_ID}/speakers/{FOREIGN}",
+            headers=auth_headers,
+            json={"logistics_notes": "Leak"},
+        ).status_code
+        == 404
+    )
+    assert next(c for c in crm_db.rows("contacts") if c["id"] == FOREIGN).get(
+        "logistics_notes"
+    ) is None
+
+
 def test_update_speaker_foreign_404s(client, auth_headers, crm_db):
     resp = client.patch(
         f"/api/events/{TEST_EVENT_ID}/speakers/{FOREIGN}",

@@ -13,6 +13,7 @@ import {
   MapPin,
   MessageSquare,
   Pencil,
+  Plane,
   Plus,
   Search,
   Send,
@@ -516,6 +517,9 @@ function SpeakerProfileBody({
   const [company, setCompany] = useState('')
   const [title, setTitle] = useState('')
   const [about, setAbout] = useState('')
+  // Travel & logistics lives ON the speaker record, not in an onboarding task:
+  // flights and hotel nights are facts about the person, not work to be done.
+  const [logistics, setLogistics] = useState('')
 
   const beginEdit = () => {
     setFirstName(speaker.first_name ?? '')
@@ -524,6 +528,7 @@ function SpeakerProfileBody({
     setCompany(speaker.company_name ?? '')
     setTitle(speaker.title ?? '')
     setAbout(speaker.about ?? '')
+    setLogistics(speaker.logistics_notes ?? '')
     setEditing(true)
   }
 
@@ -536,6 +541,7 @@ function SpeakerProfileBody({
         company_name: company.trim(),
         title: title.trim(),
         about: about.trim(),
+        logistics_notes: logistics.trim(),
       }),
     onSuccess: () => {
       toast({ title: 'Speaker updated', description: `Saved changes for ${speaker.name}.` })
@@ -627,6 +633,21 @@ function SpeakerProfileBody({
               <Label htmlFor="edit-about">Bio</Label>
               <Textarea id="edit-about" value={about} onChange={(e) => setAbout(e.target.value)} rows={4} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-logistics">Travel &amp; logistics</Label>
+              <p className="text-xs text-muted-foreground">
+                Flights, hotel, arrival and departure, ground transport, dietary or accessibility
+                needs.
+              </p>
+              <Textarea
+                id="edit-logistics"
+                data-testid="logistics-notes"
+                value={logistics}
+                onChange={(e) => setLogistics(e.target.value)}
+                rows={4}
+                placeholder="UA 482 arrives Sep 1, 08:10 — Hotel Marlowe, 2 nights — vegetarian"
+              />
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditing(false)} disabled={save.isPending}>
                 Cancel
@@ -643,6 +664,22 @@ function SpeakerProfileBody({
                 <p className="whitespace-pre-wrap text-sm text-foreground">{speaker.about}</p>
               </Section>
             )}
+
+            {/* Always rendered, even when empty: an organizer looking for a
+                speaker's flight needs to find the field, not infer that it
+                doesn't exist. A backend without migration 009 sends null and
+                this reads as "nothing recorded yet". */}
+            <Section icon={<Plane className="h-4 w-4" />} title="Travel &amp; logistics">
+              {speaker.logistics_notes?.trim() ? (
+                <p data-testid="logistics-notes" className="whitespace-pre-wrap text-sm text-foreground">
+                  {speaker.logistics_notes}
+                </p>
+              ) : (
+                <p data-testid="logistics-notes" className="text-sm text-muted-foreground">
+                  No travel or logistics recorded. Use Edit to add flights, hotel, or arrival details.
+                </p>
+              )}
+            </Section>
 
             <Section
               icon={<FileText className="h-4 w-4" />}

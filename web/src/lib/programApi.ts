@@ -133,6 +133,76 @@ export function getProgramSpeakers(slug: string): Promise<ProgramSpeakers> {
   return apiGet<ProgramSpeakers>(`/public/program/${encodeURIComponent(slug)}/speakers`)
 }
 
+// ── public links + embed snippets (organizer-facing) ─────────────────────────
+// What Settings shows an organizer so they can share the programme or drop it
+// into their own marketing site.
+//
+// ONE origin is correct for everything here: the origin the organizer is
+// looking at. nginx serves the /e/ pages as the SPA *and* proxies /public/* to
+// the API from that same host (web/nginx/default.conf), and the loader script
+// derives the iframe origin from its own `script.src` — so a snippet built
+// against `window.location.origin` resolves to the same place either way.
+
+export type EmbedWidget = 'schedule' | 'speakers'
+
+/** The origin public pages are served from ('' when there's no DOM). */
+export function publicProgramOrigin(): string {
+  return typeof window === 'undefined' ? '' : window.location.origin
+}
+
+/** `/e/{slug}/schedule` | `/e/{slug}/speakers` — the public page routes. */
+export function publicProgramPath(slug: string, widget: EmbedWidget = 'schedule'): string {
+  return `/e/${encodeURIComponent(slug)}/${widget}`
+}
+
+/** The absolute, shareable URL of a public program page. */
+export function publicProgramUrl(slug: string, widget: EmbedWidget = 'schedule'): string {
+  return `${publicProgramOrigin()}${publicProgramPath(slug, widget)}`
+}
+
+/** The loader served by `GET /public/program/{slug}/embed.js`. */
+export function embedScriptUrl(slug: string): string {
+  return `${publicProgramOrigin()}/public/program/${encodeURIComponent(slug)}/embed.js`
+}
+
+/**
+ * The `<script>` embed — the recommended one, because the loader listens for
+ * the page's `dais-embed-height` postMessage and resizes the iframe to fit.
+ *
+ * The loader reads `data-dais-event` / `data-dais-widget` off its OWN tag via
+ * `document.currentScript`, so the snippet must carry neither `async` nor
+ * `defer`: `currentScript` is null for those and the widget would never mount.
+ */
+/**
+ * HTML-attribute escape for values interpolated into snippet markup. Slugs are
+ * server-validated, but the snippet is copy-pasteable HTML — a quote or angle
+ * bracket smuggled into one must never be able to break out of the attribute.
+ */
+function attrEscape(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+export function embedScriptSnippet(slug: string, widget: EmbedWidget = 'schedule'): string {
+  return [
+    `<script src="${embedScriptUrl(slug)}"`,
+    `        data-dais-event="${attrEscape(slug)}"`,
+    `        data-dais-widget="${widget}"></script>`,
+  ].join('\n')
+}
+
+/** The no-JavaScript fallback: the same page in a plain, fixed-height iframe. */
+export function embedIframeSnippet(slug: string, widget: EmbedWidget = 'schedule'): string {
+  return [
+    `<iframe src="${publicProgramUrl(slug, widget)}?embed=1"`,
+    `        title="dais ${widget}" loading="lazy" scrolling="no"`,
+    `        style="width:100%;height:600px;border:0"></iframe>`,
+  ].join('\n')
+}
+
 // ── formatting helpers (shared by both pages) ────────────────────────────────
 
 /**

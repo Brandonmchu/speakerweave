@@ -402,6 +402,17 @@ export async function getPublicForm(slug: string): Promise<PublicForm> {
   }
 }
 
+/**
+ * A co-presenter named on the public CFP form. Email is the identity: the
+ * backend upserts a contact on (event, email), so a co-speaker the organizer
+ * already knows resolves to their existing record.
+ */
+export interface CoSpeakerInput {
+  first_name: string
+  last_name: string
+  email: string
+}
+
 export interface SubmissionInput {
   first_name: string
   last_name: string
@@ -409,6 +420,8 @@ export interface SubmissionInput {
   title: string
   description?: string
   answers: Record<string, string | boolean>
+  /** Optional co-presenters (max 3, enforced both sides). */
+  co_speakers?: CoSpeakerInput[]
 }
 
 // ── Submission detail (organizer inbox) ─────────────────────────────────────
@@ -556,6 +569,7 @@ export function submitPublicForm(slug: string, input: SubmissionInput): Promise<
     title: input.title,
     description: input.description ?? '',
     answers: input.answers,
+    co_speakers: input.co_speakers ?? [],
   })
 }
 
@@ -674,6 +688,12 @@ export interface SpeakerProfileContact {
   company_name: string | null
   title: string | null
   about: string | null
+  /**
+   * Travel & logistics for this speaker — flights, hotel, arrival/departure,
+   * ground transport, dietary/accessibility needs. Null on a backend that
+   * predates migration 009, which the drawer renders as "nothing recorded".
+   */
+  logistics_notes?: string | null
   photo_url: string | null
   pronouns: string | null
   linkedin_url: string | null
@@ -805,6 +825,7 @@ export interface SpeakerEditInput {
   company_name?: string
   title?: string
   about?: string
+  logistics_notes?: string
 }
 
 /** PATCH /api/events/{id}/speakers/{contactId} — edit profile fields. */

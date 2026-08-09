@@ -61,6 +61,7 @@ import {
 import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
+import { NativeSelect } from '@/ui/native-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs'
@@ -1186,62 +1187,52 @@ function RuleDialog({
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-[130px_1fr]">
             <div className="space-y-1.5">
-              <Label>Action</Label>
-              <Select
+              <Label htmlFor="rule-action">Action</Label>
+              <NativeSelect
+                id="rule-action"
+                data-testid="rule-action"
                 value={draft.action}
                 onValueChange={(value) => setDraft({ ...draft, action: value as RuleAction })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ACTIONS.map((a) => (
-                    <SelectItem key={a.value} value={a.value}>
-                      {a.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={ACTIONS}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Question</Label>
-              {/* Radix shows the placeholder for `undefined`, not for '' — an
-                  empty draft must map to undefined or the trigger renders blank. */}
-              <Select
-                value={draft.target_field_id || undefined}
+              <Label htmlFor="rule-target">Question</Label>
+              <NativeSelect
+                id="rule-target"
+                data-testid="rule-target"
+                value={draft.target_field_id}
                 onValueChange={(value) => setDraft({ ...draft, target_field_id: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a question" />
-                </SelectTrigger>
-                <SelectContent>
-                  {fields.map((f) => (
-                    <SelectItem key={f.field_id} value={f.field_id}>
-                      {f.label_override.trim() || f.public_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Choose a question"
+                options={fields.map((f) => ({
+                  value: f.field_id,
+                  label: f.label_override.trim() || f.public_name,
+                }))}
+              />
             </div>
           </div>
 
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                When
-              </span>
-              <Select
-                value={draft.match}
-                onValueChange={(value) => setDraft({ ...draft, match: value as RuleMatch })}
+              <Label
+                htmlFor="rule-match"
+                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                <SelectTrigger className="h-7 w-[150px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">all conditions</SelectItem>
-                  <SelectItem value="any">any condition</SelectItem>
-                </SelectContent>
-              </Select>
+                When
+              </Label>
+              <div className="w-[150px]">
+                <NativeSelect
+                  id="rule-match"
+                  data-testid="rule-match"
+                  className="h-7"
+                  value={draft.match}
+                  onValueChange={(value) => setDraft({ ...draft, match: value as RuleMatch })}
+                  options={[
+                    { value: 'all', label: 'all conditions' },
+                    { value: 'any', label: 'any condition' },
+                  ]}
+                />
+              </div>
               <span className="text-xs text-muted-foreground">match</span>
             </div>
 
@@ -1254,6 +1245,7 @@ function RuleDialog({
               {draft.when.map((condition, index) => (
                 <ConditionRow
                   key={index}
+                  index={index}
                   condition={condition}
                   fields={fields}
                   onChange={(patch) => setCondition(index, patch)}
@@ -1308,11 +1300,14 @@ function RuleDialog({
 }
 
 function ConditionRow({
+  index,
   condition,
   fields,
   onChange,
   onRemove,
 }: {
+  /** Row position — only used to give each control a stable, addressable testid. */
+  index: number
   condition: RuleCondition
   fields: DraftField[]
   onChange: (patch: Partial<RuleCondition>) => void
@@ -1324,37 +1319,35 @@ function ConditionRow({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Select
-        value={condition.field || undefined}
-        onValueChange={(value) => onChange({ field: value, value: '' })}
-      >
-        <SelectTrigger className="h-8 w-[200px]">
-          <SelectValue placeholder="Question" />
-        </SelectTrigger>
-        <SelectContent>
-          {fields.map((f) => (
-            <SelectItem key={f.field_id} value={f.field_id}>
-              {f.label_override.trim() || f.public_name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="w-[200px]">
+        <NativeSelect
+          data-testid={`rule-condition-field-${index}`}
+          aria-label="Condition question"
+          className="h-8"
+          value={condition.field}
+          onValueChange={(value) => onChange({ field: value, value: '' })}
+          placeholder="Question"
+          options={fields.map((f) => ({
+            value: f.field_id,
+            label: f.label_override.trim() || f.public_name,
+          }))}
+        />
+      </div>
 
-      <Select value={condition.op} onValueChange={(value) => onChange({ op: value as RuleOp })}>
-        <SelectTrigger className="h-8 w-[160px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {RULE_OPS.map((op) => (
-            <SelectItem key={op} value={op}>
-              {opPhrase(op)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="w-[160px]">
+        <NativeSelect
+          data-testid={`rule-condition-op-${index}`}
+          aria-label="Condition operator"
+          className="h-8"
+          value={condition.op}
+          onValueChange={(value) => onChange({ op: value as RuleOp })}
+          options={RULE_OPS.map((op) => ({ value: op, label: opPhrase(op) }))}
+        />
+      </div>
 
       {!isValuelessOp(condition.op) && (
         <ValueInput
+          index={index}
           type={type}
           choices={choices}
           value={condition.value}
@@ -1377,53 +1370,59 @@ function ConditionRow({
 
 /** The compared field's type decides the control — never a raw JSON box. */
 function ValueInput({
+  index,
   type,
   choices,
   value,
   onChange,
 }: {
+  index: number
   type?: string
   choices: string[]
   value: RuleCondition['value']
   onChange: (value: RuleCondition['value']) => void
 }) {
+  const testId = `rule-condition-value-${index}`
+
   if (type === 'checkbox') {
     return (
-      <Select
-        value={value === true || value === 'true' ? 'true' : 'false'}
-        onValueChange={(v) => onChange(v === 'true')}
-      >
-        <SelectTrigger className="h-8 w-[140px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="true">Yes</SelectItem>
-          <SelectItem value="false">No</SelectItem>
-        </SelectContent>
-      </Select>
+      <div className="w-[140px]">
+        <NativeSelect
+          data-testid={testId}
+          aria-label="Condition value"
+          className="h-8"
+          value={value === true || value === 'true' ? 'true' : 'false'}
+          onValueChange={(v) => onChange(v === 'true')}
+          options={[
+            { value: 'true', label: 'Yes' },
+            { value: 'false', label: 'No' },
+          ]}
+        />
+      </div>
     )
   }
 
   if (type === 'dropdown' && choices.length > 0) {
     return (
-      <Select value={value == null || value === '' ? undefined : String(value)} onValueChange={(v) => onChange(v)}>
-        <SelectTrigger className="h-8 w-[200px]">
-          <SelectValue placeholder="Choose…" />
-        </SelectTrigger>
-        <SelectContent>
-          {choices.map((choice) => (
-            <SelectItem key={choice} value={choice}>
-              {choice}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="w-[200px]">
+        <NativeSelect
+          data-testid={testId}
+          aria-label="Condition value"
+          className="h-8"
+          value={value == null ? '' : String(value)}
+          onValueChange={(v) => onChange(v)}
+          placeholder="Choose…"
+          options={choices.map((choice) => ({ value: choice, label: choice }))}
+        />
+      </div>
     )
   }
 
   if (type === 'number') {
     return (
       <Input
+        data-testid={testId}
+        aria-label="Condition value"
         type="number"
         className="h-8 w-[140px]"
         value={value == null ? '' : String(value)}
@@ -1434,6 +1433,8 @@ function ValueInput({
 
   return (
     <Input
+      data-testid={testId}
+      aria-label="Condition value"
       className="h-8 w-[200px]"
       placeholder="Value"
       value={value == null ? '' : String(value)}

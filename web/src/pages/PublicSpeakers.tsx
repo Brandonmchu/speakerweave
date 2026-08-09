@@ -86,15 +86,26 @@ export function PublicSpeakers() {
   } else {
     body = (
       <div className="space-y-5">
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search speakers"
-            className="pl-9"
-            aria-label="Search speakers"
-          />
+        <div className="w-full sm:max-w-xs">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search speakers by name or company"
+              className="pl-9"
+              aria-label="Search speakers"
+            />
+          </div>
+          {search.trim() && (
+            <p
+              role="status"
+              data-testid="speaker-result-count"
+              className="mt-1.5 text-xs font-medium text-muted-foreground"
+            >
+              {filtered.length === 1 ? '1 speaker matches' : `${filtered.length} speakers match`}
+            </p>
+          )}
         </div>
         {filtered.length === 0 ? (
           <EmptyState

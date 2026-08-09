@@ -24,6 +24,10 @@ class PlanCreateRequest(BaseModel):
     scale: Literal["1_5", "1_10"] = "1_5"
     anonymized: bool = False
     criteria: list[CriterionInput] | None = None
+    # Review window (migration 008). A bare date ("2026-10-01") or a full
+    # instant; null/omitted = no bound.
+    opens_at: str | None = Field(default=None, max_length=64)
+    closes_at: str | None = Field(default=None, max_length=64)
 
     @field_validator("name")
     @classmethod
@@ -39,6 +43,9 @@ class PlanPatchRequest(BaseModel):
     criteria: list[CriterionInput] | None = None
     anonymized: bool | None = None
     status: Literal["draft", "open", "closed"] | None = None
+    # Sent explicitly as null to clear a bound; omitted to leave it alone.
+    opens_at: str | None = Field(default=None, max_length=64)
+    closes_at: str | None = Field(default=None, max_length=64)
 
     @field_validator("name")
     @classmethod
@@ -73,6 +80,14 @@ class AssignRequest(BaseModel):
     evaluator_ids: list[str] | None = None
     # by_track pairs each reviewer with the sessions whose tracks they cover.
     mode: Literal["all_to_all", "by_track"] = "all_to_all"
+
+
+class SingleAssignmentRequest(BaseModel):
+    """One reviewer, one submission — the deliberate pairing the bulk modes
+    can't express."""
+
+    evaluator_id: str = Field(..., min_length=1, max_length=64)
+    session_id: str = Field(..., min_length=1, max_length=64)
 
 
 @router.post("/events/{event_id}/evaluation-plans", status_code=201)
@@ -179,6 +194,64 @@ async def assign_sessions(
         session_ids=payload.session_ids,
         evaluator_ids=payload.evaluator_ids,
     )
+
+
+# ── per-submission assignment ──────────────────────────────────────────────
+# Registered under both /plans and /evaluation-plans: the rest of this router
+# uses the long form, and the short form is the documented public path.
+
+
+@router.get("/plans/{plan_id}/assignments")
+@router.get("/evaluation-plans/{plan_id}/assignments")
+async def list_plan_assignments(
+    plan_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Every reviewable submission with the reviewers currently on it."""
+    _user_id, org_id = auth
+    return await evaluations.assignment_board(org_id, plan_id)
+
+
+@router.post("/plans/{plan_id}/assignments", status_code=201)
+@router.post("/evaluation-plans/{plan_id}/assignments", status_code=201)
+async def create_plan_assignment(
+    plan_id: str,
+    payload: SingleAssignmentRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Assign one reviewer to one submission. 409 when the pair already exists."""
+    _user_id, org_id = auth
+    assignment = await evaluations.create_assignment(
+        org_id, plan_id, payload.evaluator_id, payload.session_id
+    )
+    return {"assignment": assignment}
+
+
+@router.delete("/plans/{plan_id}/assignments/{assignment_id}", status_code=204)
+@router.delete("/evaluation-plans/{plan_id}/assignments/{assignment_id}", status_code=204)
+async def delete_plan_assignment(
+    plan_id: str,
+    assignment_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    _user_id, org_id = auth
+    await evaluations.delete_assignment(org_id, plan_id, assignment_id)
+    return Response(status_code=204)
+
+
+@router.post("/plans/{plan_id}/remind-laggards")
+@router.post("/evaluation-plans/{plan_id}/remind-laggards")
+async def remind_lagging_reviewers(
+    plan_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Queue a reminder for the reviewers with unfinished work — only them.
+
+    Deduped per reviewer per day, so a second click is a no-op rather than a
+    second inbox hit.
+    """
+    _user_id, org_id = auth
+    return await evaluations.remind_laggards(org_id, plan_id)
 
 
 @router.post("/evaluation-plans/{plan_id}/open")

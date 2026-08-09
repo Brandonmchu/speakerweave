@@ -164,6 +164,258 @@ describe('PublicForm — live conditional logic', () => {
 })
 
 /**
+ * Co-speakers (ABS-11): a talk is often co-presented, and the CFP is the only
+ * place a submitter can say so. Multi-speaker sessions already rendered on the
+ * organizer side; what was missing was any way to CREATE one from the public
+ * form. These tests cover the row lifecycle, what reaches the payload, and that
+ * the draft autosave — which another feature owns — carries the rows too.
+ */
+describe('PublicForm — co-speakers', () => {
+  beforeEach(() => {
+    submitted = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/submissions')) {
+          submitted.push(JSON.parse(String(init?.body ?? '{}')))
+          return jsonResponse({ id: 'sub-3', friendly_id: 'DAIS-003' }, 201)
+        }
+        return jsonResponse(FORM_PAYLOAD)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Co-speaker inputs share labels with the submitter's, so address them by id. */
+  function fillField(id: string, value: string) {
+    const el = document.getElementById(id)
+    if (!el) throw new Error(`no field #${id}`)
+    fireEvent.change(el, { target: { value } })
+  }
+
+  function fillSubmitter() {
+    fillField('first_name', 'Ada')
+    fillField('last_name', 'Lovelace')
+    fillField('email', 'ada@example.com')
+    fillField('title', 'Analytical Engines')
+  }
+
+  function addRow() {
+    fireEvent.click(screen.getByTestId('add-co-speaker'))
+  }
+
+  function fillCoSpeaker(index: number, first: string, last: string, email: string) {
+    fillField(`co_speaker_${index}_first_name`, first)
+    fillField(`co_speaker_${index}_last_name`, last)
+    fillField(`co_speaker_${index}_email`, email)
+  }
+
+  function submitForm() {
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+  }
+
+  it('shows no co-speaker rows until one is asked for', async () => {
+    renderForm()
+    expect(await screen.findByTestId('add-co-speaker')).toBeInTheDocument()
+    expect(screen.queryByTestId('co-speaker-row-0')).not.toBeInTheDocument()
+
+    addRow()
+    expect(screen.getByTestId('co-speaker-row-0')).toBeInTheDocument()
+  })
+
+  it('adds rows up to three and then stops offering more', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    addRow()
+    addRow()
+    addRow()
+
+    expect(screen.getByTestId('co-speaker-row-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('add-co-speaker')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('co-speaker-row-3')).not.toBeInTheDocument()
+  })
+
+  it('removes a row and keeps the remaining rows’ values', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    addRow()
+    addRow()
+    fillCoSpeaker(0, 'Grace', 'Hopper', 'grace@example.com')
+    fillCoSpeaker(1, 'Alan', 'Turing', 'alan@example.com')
+
+    fireEvent.click(screen.getByTestId('remove-co-speaker-0'))
+
+    expect(screen.queryByTestId('co-speaker-row-1')).not.toBeInTheDocument()
+    // Alan slid up into row 0 — his values came with him.
+    expect((document.getElementById('co_speaker_0_email') as HTMLInputElement).value).toBe(
+      'alan@example.com'
+    )
+  })
+
+  it('submits the co-speakers alongside the proposal', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    addRow()
+    addRow()
+    fillCoSpeaker(0, 'Grace', 'Hopper', '  grace@example.com  ')
+    fillCoSpeaker(1, 'Alan', 'Turing', 'alan@example.com')
+    submitForm()
+
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].co_speakers).toEqual([
+      { first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' },
+      { first_name: 'Alan', last_name: 'Turing', email: 'alan@example.com' },
+    ])
+  })
+
+  it('sends an empty list when nobody was added', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    submitForm()
+
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].co_speakers).toEqual([])
+  })
+
+  it('drops a row the submitter opened but never filled in', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    addRow()
+    addRow()
+    fillCoSpeaker(0, 'Grace', 'Hopper', 'grace@example.com')
+    submitForm()
+
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].co_speakers).toEqual([
+      { first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' },
+    ])
+  })
+
+  it('blocks submit when a named co-speaker has no email', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    addRow()
+    fillField('co_speaker_0_first_name', 'Grace')
+    submitForm()
+
+    expect(await screen.findByText(/identified by email/)).toBeInTheDocument()
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('blocks submit when a co-speaker email is malformed', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    addRow()
+    fillCoSpeaker(0, 'Grace', 'Hopper', 'not-an-email')
+    submitForm()
+
+    expect(await screen.findByText('Enter a valid email address')).toBeInTheDocument()
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('blocks submit when a co-speaker is the submitter or a repeat', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    fillSubmitter()
+    addRow()
+    fillCoSpeaker(0, 'Ada', 'Lovelace', 'ADA@example.com')
+    submitForm()
+
+    expect(await screen.findByText(/already on this proposal/)).toBeInTheDocument()
+    expect(submitted).toHaveLength(0)
+
+    // …and the same address twice across two rows is the same mistake.
+    fillField('co_speaker_0_email', 'grace@example.com')
+    addRow()
+    fillCoSpeaker(1, 'Grace', 'Hopper', 'grace@example.com')
+    submitForm()
+
+    expect(await screen.findByText(/already on this proposal/)).toBeInTheDocument()
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('autosaves co-speaker rows into the draft', async () => {
+    renderForm()
+    await screen.findByTestId('add-co-speaker')
+
+    addRow()
+    fillCoSpeaker(0, 'Grace', 'Hopper', 'grace@example.com')
+
+    await waitFor(() => {
+      const draft = JSON.parse(window.localStorage.getItem('dais.cfp-draft:cfp') ?? '{}')
+      expect(draft.coSpeakers).toEqual([
+        { first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' },
+      ])
+    })
+  })
+
+  it('restores co-speaker rows from a saved draft', async () => {
+    window.localStorage.setItem(
+      'dais.cfp-draft:cfp',
+      JSON.stringify({
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        email: 'ada@example.com',
+        title: 'Analytical Engines',
+        answers: {},
+        coSpeakers: [{ first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' }],
+      })
+    )
+
+    renderForm()
+    await screen.findByText(/Draft restored/)
+
+    expect(screen.getByTestId('co-speaker-row-0')).toBeInTheDocument()
+    expect((document.getElementById('co_speaker_0_email') as HTMLInputElement).value).toBe(
+      'grace@example.com'
+    )
+
+    // …and a restored row still reaches the payload on submit.
+    submitForm()
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].co_speakers).toEqual([
+      { first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' },
+    ])
+  })
+
+  it('clearing the draft clears the co-speaker rows too', async () => {
+    window.localStorage.setItem(
+      'dais.cfp-draft:cfp',
+      JSON.stringify({
+        firstName: 'Ada',
+        lastName: '',
+        email: '',
+        title: '',
+        answers: {},
+        coSpeakers: [{ first_name: 'Grace', last_name: 'Hopper', email: 'grace@example.com' }],
+      })
+    )
+
+    renderForm()
+    fireEvent.click(await screen.findByRole('button', { name: 'Clear draft' }))
+
+    await waitFor(() => expect(screen.queryByTestId('co-speaker-row-0')).not.toBeInTheDocument())
+  })
+})
+
+/**
  * The eval-legibility contract: Track and Session format are native `<select>`
  * elements (so a blind browser agent / the harness `select` tool can drive
  * them), and a native change still records the right answer and submits — the

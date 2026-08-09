@@ -485,6 +485,49 @@ export async function scheduleSession(
   return session ?? (wire as AgendaSession)
 }
 
+/** A session the auto-placer found a home for, with the slot it chose. */
+export interface AutoPlacedSession {
+  id: string
+  title?: string | null
+  room_id: string
+  starts_at: string
+  ends_at: string
+}
+
+/** A session the auto-placer deliberately left in the tray, and why. */
+export interface AutoPlaceSkip {
+  id: string
+  title?: string | null
+  reason: string
+}
+
+export interface AutoPlaceResult {
+  placed: AutoPlacedSession[]
+  skipped: AutoPlaceSkip[]
+}
+
+/**
+ * POST /api/events/{id}/schedule/auto-place — fill the unscheduled tray in one
+ * action.
+ *
+ * The server picks the slots (services/auto_place.py), validating every
+ * candidate against the same conflict engine this module's grid reconciles
+ * with, so nothing it writes can land red. Anything that cannot fit comes back
+ * in `skipped` with a reason rather than being forced somewhere.
+ *
+ * The caller refetches the board afterwards: auto-placed sessions are ordinary
+ * placements, indistinguishable from dragged ones once they are on the grid.
+ */
+export async function autoPlaceSchedule(eventId: string): Promise<AutoPlaceResult> {
+  const wire = await apiPost<Partial<AutoPlaceResult>>(
+    `/api/events/${encodeURIComponent(eventId)}/schedule/auto-place`
+  )
+  return {
+    placed: Array.isArray(wire?.placed) ? wire.placed : [],
+    skipped: Array.isArray(wire?.skipped) ? wire.skipped : [],
+  }
+}
+
 /** The result of pressing "Publish schedule": the stamp + the public link. */
 export interface PublishResult {
   event: { id: string; slug: string | null; program_published_at: string | null }

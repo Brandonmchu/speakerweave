@@ -49,6 +49,7 @@ const PROFILE = {
     company_name: 'Analytical Engines',
     title: 'Mathematician',
     about: 'The first programmer.',
+    logistics_notes: null as string | null,
     photo_url: null,
     pronouns: null,
     linkedin_url: null,
@@ -268,6 +269,60 @@ describe('Speakers CRM', () => {
     expect(patchCalls[0].contactId).toBe(ADA)
     expect(patchCalls[0].body.company_name).toBe('Babbage & Co')
     await waitFor(() => expect(rosterGetCount).toBeGreaterThan(before))
+  })
+
+  // ── travel & logistics (SPK-15) ───────────────────────────────────────────
+  // Flights and hotel nights are a property of the speaker, not an onboarding
+  // task: the drawer has to show them at a glance and let an organizer edit
+  // them inline.
+
+  it('shows the travel & logistics recorded on the speaker', async () => {
+    PROFILE.speaker.logistics_notes = 'UA 482 arrives Sep 1, 08:10. Hotel Marlowe, 2 nights.'
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+    expect(await screen.findByText('Travel & logistics')).toBeInTheDocument()
+    expect(screen.getByTestId('logistics-notes')).toHaveTextContent('Hotel Marlowe, 2 nights')
+    PROFILE.speaker.logistics_notes = null
+  })
+
+  it('shows the section with a prompt when nothing is recorded yet', async () => {
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+    // Present but empty — an organizer must be able to FIND the field, not
+    // infer from its absence that travel isn't tracked.
+    expect(await screen.findByTestId('logistics-notes')).toHaveTextContent(
+      /No travel or logistics recorded/
+    )
+  })
+
+  it('saves travel & logistics from the edit form', async () => {
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+    fireEvent.click(await screen.findByTestId('edit-speaker'))
+
+    const notes = screen.getByTestId('logistics-notes')
+    expect(notes.tagName).toBe('TEXTAREA')
+    fireEvent.change(notes, { target: { value: 'BA 117, JFK→LHR, Sep 2. Gluten-free.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(patchCalls).toHaveLength(1))
+    expect(patchCalls[0].body.logistics_notes).toBe('BA 117, JFK→LHR, Sep 2. Gluten-free.')
+    // …and the other profile fields ride along untouched.
+    expect(patchCalls[0].body.company_name).toBe('Analytical Engines')
+  })
+
+  it('prefills the edit form with the notes already on the record', async () => {
+    PROFILE.speaker.logistics_notes = 'Arrives Sep 1, needs airport pickup.'
+    renderSpeakers()
+    fireEvent.click(await screen.findByText('Ada Lovelace'))
+    fireEvent.click(await screen.findByTestId('edit-speaker'))
+
+    expect((screen.getByTestId('logistics-notes') as HTMLTextAreaElement).value).toBe(
+      'Arrives Sep 1, needs airport pickup.'
+    )
+    PROFILE.speaker.logistics_notes = null
   })
 })
 

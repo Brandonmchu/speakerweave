@@ -41,6 +41,24 @@ MAX_ANSWER_STR_LEN = 10000
 # track assignment.
 TRACK_ANSWER_FIELD_TYPES = {"dropdown", "multi_select"}
 
+# A talk can be co-presented. Three is the practical ceiling for a conference
+# session and, more to the point, a bound on how many contacts one anonymous
+# POST can create.
+MAX_CO_SPEAKERS = 3
+
+
+class CoSpeakerInput(BaseModel):
+    """A co-presenter named by the submitter on the public form.
+
+    Email is the identity: it is what the contact is upserted on, so a
+    co-speaker who later submits their own talk (or is imported by the
+    organizer) resolves to the same person rather than a duplicate.
+    """
+
+    email: EmailStr
+    first_name: str = Field(default="", max_length=120)
+    last_name: str = Field(default="", max_length=120)
+
 
 class SubmissionRequest(BaseModel):
     email: EmailStr
@@ -49,6 +67,9 @@ class SubmissionRequest(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)
     title: str = Field(..., min_length=1, max_length=300)
     description: str = Field(default="", max_length=10000)
+    # Optional co-presenters. Unbounded here on purpose so an over-long list
+    # gets a readable 400 from _clean_co_speakers instead of a raw 422.
+    co_speakers: list[CoSpeakerInput] = Field(default_factory=list)
 
 
 def _parse_iso(value: Any) -> datetime | None:
@@ -147,6 +168,41 @@ async def _tracks_from_answers(
     return chosen
 
 
+def _clean_co_speakers(
+    co_speakers: list[CoSpeakerInput], submitter_email: str
+) -> list[CoSpeakerInput]:
+    """Validate the co-speaker list, or 400 with something a speaker can act on.
+
+    Three rules, all of which the browser also enforces but none of which it is
+    trusted for: at most ``MAX_CO_SPEAKERS``, nobody listed twice, and nobody
+    listed who is the submitter. The last two matter beyond tidiness — the
+    contact upsert is keyed on (event, email), so a repeat would resolve to a
+    contact already on the session and try to add them as a participant twice.
+    """
+    if len(co_speakers) > MAX_CO_SPEAKERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can add up to {MAX_CO_SPEAKERS} co-speakers.",
+        )
+
+    submitter = submitter_email.strip().lower()
+    seen: set[str] = set()
+    for co_speaker in co_speakers:
+        email = str(co_speaker.email).strip().lower()
+        if email == submitter:
+            raise HTTPException(
+                status_code=400,
+                detail="A co-speaker needs a different email address than yours.",
+            )
+        if email in seen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{email} is listed as a co-speaker more than once.",
+            )
+        seen.add(email)
+    return co_speakers
+
+
 async def _get_form_by_slug(slug: str) -> dict:
     res = await db(
         lambda: supabase.table("forms").select("*").eq("slug", slug).limit(1).execute(),
@@ -203,13 +259,20 @@ async def get_public_form(request: Request, slug: str):
     }
 
 
-async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest) -> dict:
+async def _upsert_contact(
+    org_id: str,
+    event_id: str,
+    raw_email: str,
+    first_name: str = "",
+    last_name: str = "",
+) -> dict:
     """Get-or-create the contact for (event_id, lower(email)).
 
     contacts.email is citext with UNIQUE (event_id, email), so the DB is the
-    arbiter: on a lost insert race (23505) we re-read the winner's row.
+    arbiter: on a lost insert race (23505) we re-read the winner's row. Used for
+    the submitter and, identically, for each co-speaker they name.
     """
-    email = str(payload.email).strip().lower()
+    email = raw_email.strip().lower()
 
     def _select():
         return (
@@ -226,10 +289,10 @@ async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest
     if existing and existing.get("org_id") == org_id:
         # Fill blanks only — never clobber an organizer-curated name.
         patch = {}
-        if payload.first_name and not existing.get("first_name"):
-            patch["first_name"] = payload.first_name
-        if payload.last_name and not existing.get("last_name"):
-            patch["last_name"] = payload.last_name
+        if first_name and not existing.get("first_name"):
+            patch["first_name"] = first_name
+        if last_name and not existing.get("last_name"):
+            patch["last_name"] = last_name
         if patch:
             updated = first(
                 await db(
@@ -248,8 +311,8 @@ async def _upsert_contact(org_id: str, event_id: str, payload: SubmissionRequest
         "org_id": org_id,
         "event_id": event_id,
         "email": email,
-        "first_name": payload.first_name,
-        "last_name": payload.last_name,
+        "first_name": first_name,
+        "last_name": last_name,
     }
     try:
         created = first(
@@ -299,7 +362,26 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     if problem:
         raise HTTPException(status_code=400, detail=problem)
 
-    contact = await _upsert_contact(org_id, event_id, payload)
+    # Vet the co-presenter list BEFORE anything is written, so a bad one costs a
+    # 400 and no rows rather than a half-built submission.
+    co_speakers = _clean_co_speakers(payload.co_speakers, str(payload.email))
+
+    contact = await _upsert_contact(
+        org_id, event_id, str(payload.email), payload.first_name, payload.last_name
+    )
+
+    # Co-speakers become contacts on this event exactly like the submitter did —
+    # same (event, email) upsert, so naming someone who already exists reuses
+    # their record instead of duplicating it. Done before the session insert:
+    # a contact we can't create is a failure worth stopping on, and a stray
+    # contact with no session is harmless where a session missing its
+    # co-speakers is not.
+    co_speaker_contacts = [
+        await _upsert_contact(
+            org_id, event_id, str(co.email), co.first_name, co.last_name
+        )
+        for co in co_speakers
+    ]
 
     # Per-submitter cap on this form. Best-effort by design: the count-then-check
     # is not transactional, so two concurrent submissions can both pass and land
@@ -365,18 +447,40 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     if not session:
         raise HTTPException(status_code=500, detail="Could not create submission")
 
+    # The submitter is written twice on purpose: once as the primary 'speaker'
+    # and once as the 'submitter' of record. Consumers that resolve a session's
+    # speakers filter role='speaker' first (falling back to the submitter only
+    # when there are no speaker rows) — so if the submitter were only a
+    # 'submitter' row, adding a co-speaker would silently DROP them from the
+    # public program and from speaker double-booking checks. The dual row keeps
+    # the submitter a first-class speaker regardless of co-speakers.
+    participants = [
+        {
+            "org_id": org_id,
+            "session_id": session["id"],
+            "contact_id": contact["id"],
+            "role": "speaker",
+            "is_primary": True,
+        },
+        {
+            "org_id": org_id,
+            "session_id": session["id"],
+            "contact_id": contact["id"],
+            "role": "submitter",
+            "is_primary": False,
+        },
+    ] + [
+        {
+            "org_id": org_id,
+            "session_id": session["id"],
+            "contact_id": co_contact["id"],
+            "role": "speaker",
+            "is_primary": False,
+        }
+        for co_contact in co_speaker_contacts
+    ]
     await db(
-        lambda: supabase.table("session_participants")
-        .insert(
-            {
-                "org_id": org_id,
-                "session_id": session["id"],
-                "contact_id": contact["id"],
-                "role": "submitter",
-                "is_primary": True,
-            }
-        )
-        .execute(),
+        lambda: supabase.table("session_participants").insert(participants).execute(),
         "public_session_participant_create",
     )
 

@@ -7,17 +7,22 @@ therefore scoped by the authenticated org, including join-table lookups.
 from __future__ import annotations
 
 import html
+import logging
 import math
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from postgrest.exceptions import APIError
 
 from auth import verify_org_access
 from services import magic_links
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CRITERIA = [
     {"name": "Relevance", "weight": 40},
@@ -31,6 +36,143 @@ ASSIGNMENT_MODES = ("all_to_all", "by_track")
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── review window (migration 008) ──────────────────────────────────────────
+# A plan may declare when reviewing opens and when it closes. BOTH BOUNDS ARE
+# OPTIONAL and a missing bound is no bound, so every plan written before 008 —
+# including the seeded demo plan — keeps accepting reviews exactly as it did.
+
+WINDOW_FIELDS = ("opens_at", "closes_at")
+
+# Flipped off the first time the database says these columns aren't there, so an
+# API running ahead of migration 008 degrades to "no window" instead of 500ing
+# on every plan write. Never flipped back on: a process restart re-probes.
+_window_columns_present = True
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """A tolerant read of a stored/POSTed instant, always tz-aware (UTC)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text[-1] in "Zz":
+            text = f"{text[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _normalize_window_value(value: Any, *, field: str) -> str | None:
+    """A date input's value ("2026-10-01") or a full instant, stored as ISO.
+
+    A bare date means the whole day: the open bound starts at midnight and the
+    close bound runs to the last second, which is what an organizer typing
+    "reviews close Oct 10" means.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) == 10 and text.count("-") == 2:
+        text = f"{text}T23:59:59" if field == "closes_at" else f"{text}T00:00:00"
+    parsed = _parse_timestamp(text)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail=f"'{field}' must be a date or a timestamp")
+    return parsed.isoformat()
+
+
+def _validate_window_order(opens_at: Any, closes_at: Any) -> None:
+    opens, closes = _parse_timestamp(opens_at), _parse_timestamp(closes_at)
+    if opens and closes and closes < opens:
+        raise HTTPException(status_code=400, detail="The review window closes before it opens")
+
+
+def _window_patch(values: dict) -> dict:
+    """{opens_at, closes_at} for the keys the caller actually sent."""
+    return {
+        field: _normalize_window_value(values.get(field), field=field)
+        for field in WINDOW_FIELDS
+        if field in values
+    }
+
+
+def _has_window(payload: dict) -> bool:
+    return any(field in payload for field in WINDOW_FIELDS)
+
+
+def _strip_window(payload: dict) -> dict:
+    return {key: value for key, value in payload.items() if key not in WINDOW_FIELDS}
+
+
+def _mentions_window_column(exc: Exception) -> bool:
+    message = str(exc)
+    return any(field in message for field in WINDOW_FIELDS)
+
+
+async def _write_plan_row(payload: dict, build: Callable[[dict], Any], label: str) -> Any:
+    """Run a plan insert/update, surviving a database without migration 008.
+
+    The window columns are additive and nullable, so the only thing that can go
+    wrong on an un-migrated database is writing them at all — in which case the
+    dates are dropped (and remembered as unsupported) and the rest of the plan
+    still saves.
+    """
+    global _window_columns_present
+    attempt = dict(payload) if _window_columns_present else _strip_window(payload)
+    try:
+        return await db(lambda: build(attempt), label)
+    except Exception as exc:
+        if not _has_window(attempt) or not _mentions_window_column(exc):
+            raise
+        _window_columns_present = False
+        logger.warning(
+            "evaluation: review-window columns are missing (migration 008 not applied) — "
+            "saving %s without dates",
+            label,
+        )
+        return await db(lambda: build(_strip_window(payload)), f"{label}_no_window")
+
+
+def _plan_out(plan: dict) -> dict:
+    """A plan row that always carries the window keys, migrated or not."""
+    return {**plan, **{field: plan.get(field) for field in WINDOW_FIELDS}}
+
+
+def _friendly_instant(moment: datetime) -> str:
+    return f"{moment:%b} {moment.day}, {moment.year}"
+
+
+def ensure_review_window_open(plan: dict, *, now: datetime | None = None) -> None:
+    """403 unless the plan's review window is currently open.
+
+    Applies to every reviewer write, draft included — the window is the
+    deadline, and a draft saved after it would be a review the organizer never
+    asked for. NULL bounds are no bounds, so an un-dated plan is unrestricted.
+    """
+    opens_at = _parse_timestamp(plan.get("opens_at"))
+    closes_at = _parse_timestamp(plan.get("closes_at"))
+    if opens_at is None and closes_at is None:
+        return
+    moment = now or datetime.now(timezone.utc)
+    if opens_at is not None and moment < opens_at:
+        raise HTTPException(
+            status_code=403,
+            detail=f"The review window opens {_friendly_instant(opens_at)} — reviews aren't open yet.",
+        )
+    if closes_at is not None and moment > closes_at:
+        raise HTTPException(
+            status_code=403,
+            detail=f"The review window closed {_friendly_instant(closes_at)}.",
+        )
 
 
 # ── multi-track helpers (migration 004) ────────────────────────────────────
@@ -241,6 +383,8 @@ async def fetch_plan(plan_id: str, org_id: str) -> dict:
 
 async def create_plan(org_id: str, event_id: str, values: dict) -> dict:
     await _fetch_event(event_id, org_id)
+    window = _window_patch({field: values.get(field) for field in WINDOW_FIELDS})
+    _validate_window_order(window.get("opens_at"), window.get("closes_at"))
     record = {
         "org_id": org_id,
         "event_id": event_id,
@@ -251,16 +395,18 @@ async def create_plan(org_id: str, event_id: str, values: dict) -> dict:
         "criteria": normalize_criteria(values.get("criteria")),
         "status": "draft",
         "session_filter": {},
+        **window,
     }
     plan = first(
-        await db(
-            lambda: supabase.table("evaluation_plans").insert(record).execute(),
+        await _write_plan_row(
+            record,
+            lambda payload: supabase.table("evaluation_plans").insert(payload).execute(),
             "evaluation_plan_create",
         )
     )
     if not plan:
         raise HTTPException(status_code=500, detail="Could not create evaluation plan")
-    return plan
+    return _plan_out(plan)
 
 
 async def list_plans(org_id: str, event_id: str) -> list[dict]:
@@ -329,7 +475,7 @@ async def list_plans(org_id: str, event_id: str) -> list[dict]:
 
     return [
         {
-            **plan,
+            **_plan_out(plan),
             "evaluator_count": evaluator_counts.get(plan["id"], 0),
             "assignment_count": assignment_counts.get(plan["id"], 0),
             "review_count": review_counts.get(plan["id"], 0),
@@ -438,7 +584,7 @@ async def get_plan_detail(org_id: str, plan_id: str) -> dict:
             entry["review_count"] += 1
 
     return {
-        "plan": plan,
+        "plan": _plan_out(plan),
         "tracks": event_tracks,
         "evaluators": evaluator_summary,
         "assignments": {
@@ -451,17 +597,25 @@ async def get_plan_detail(org_id: str, plan_id: str) -> dict:
 
 
 async def update_plan(org_id: str, plan_id: str, patch: dict) -> dict:
-    await fetch_plan(plan_id, org_id)
+    existing = await fetch_plan(plan_id, org_id)
     if "name" in patch:
         patch["name"] = str(patch["name"]).strip()
     if "instructions" in patch:
         patch["instructions"] = str(patch["instructions"] or "").strip()
     if "criteria" in patch:
         patch["criteria"] = normalize_criteria(patch["criteria"])
+    if _has_window(patch):
+        patch.update(_window_patch(patch))
+        # A patch that only moves one bound is still checked against the other.
+        _validate_window_order(
+            patch.get("opens_at", existing.get("opens_at")),
+            patch.get("closes_at", existing.get("closes_at")),
+        )
     updated = first(
-        await db(
-            lambda: supabase.table("evaluation_plans")
-            .update(patch)
+        await _write_plan_row(
+            patch,
+            lambda payload: supabase.table("evaluation_plans")
+            .update(payload)
             .eq("id", plan_id)
             .eq("org_id", org_id)
             .execute(),
@@ -470,7 +624,7 @@ async def update_plan(org_id: str, plan_id: str, patch: dict) -> dict:
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Evaluation plan not found")
-    return updated
+    return _plan_out(updated)
 
 
 async def _validate_track_ids(org_id: str, event_id: str, track_ids: Any) -> list[str]:
@@ -757,6 +911,404 @@ async def assign_sessions(
     }
 
 
+# ── per-submission assignment (ABS-05) ─────────────────────────────────────
+# Assigning by track is a bulk stroke; a program chair also needs the single
+# deliberate pairing — "Ada should read THIS one". These three calls are that,
+# and they compose with the bulk modes because every mode dedupes on the same
+# (plan, evaluator, session) key.
+
+
+async def _plan_evaluator(org_id: str, plan_id: str, evaluator_id: str) -> dict:
+    evaluator = first(
+        await db(
+            lambda: supabase.table("evaluators")
+            .select("*")
+            .eq("id", evaluator_id)
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "evaluation_assignment_evaluator",
+        )
+    )
+    return verify_org_access(evaluator, org_id, "Evaluator")
+
+
+async def _plan_session(org_id: str, plan: dict, session_id: str) -> dict:
+    session = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, title, friendly_id, status, track_id, org_id")
+            .eq("id", session_id)
+            .eq("event_id", plan["event_id"])
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "evaluation_assignment_session",
+        )
+    )
+    return verify_org_access(session, org_id, "Session")
+
+
+def _reviewer_label(evaluator: dict) -> str:
+    return str(evaluator.get("name") or "").strip() or str(evaluator.get("email") or "Reviewer")
+
+
+def _review_status(review: dict | None) -> str:
+    if not review:
+        return "pending"
+    return "in_progress" if bool(review.get("is_draft")) else "reviewed"
+
+
+async def create_assignment(
+    org_id: str, plan_id: str, evaluator_id: str, session_id: str
+) -> dict:
+    """Assign ONE reviewer to ONE submission. 409 if the pair already exists."""
+    plan = await fetch_plan(plan_id, org_id)
+    evaluator = await _plan_evaluator(org_id, plan_id, evaluator_id)
+    session = await _plan_session(org_id, plan, session_id)
+    existing = first(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id")
+            .eq("plan_id", plan_id)
+            .eq("evaluator_id", evaluator_id)
+            .eq("session_id", session_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "evaluation_assignment_existing",
+        )
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{_reviewer_label(evaluator)} is already assigned to this submission",
+        )
+    try:
+        created = first(
+            await db(
+                lambda: supabase.table("assignments")
+                .insert(
+                    {
+                        "org_id": org_id,
+                        "plan_id": plan_id,
+                        "evaluator_id": evaluator_id,
+                        "session_id": session_id,
+                    }
+                )
+                .execute(),
+                "evaluation_assignment_create",
+            )
+        )
+    except APIError as exc:
+        # The pre-check above races a concurrent identical create; the unique
+        # constraint is the real arbiter — surface it as the promised 409.
+        if getattr(exc, "code", "") == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{_reviewer_label(evaluator)} is already assigned to this submission",
+            ) from exc
+        raise
+    if not created:
+        raise HTTPException(status_code=500, detail="Could not create the assignment")
+    return {
+        **created,
+        "evaluator_name": evaluator.get("name") or "",
+        "evaluator_email": evaluator.get("email"),
+        "session_title": session.get("title"),
+        "review_status": "pending",
+    }
+
+
+async def delete_assignment(org_id: str, plan_id: str, assignment_id: str) -> None:
+    """Unassign one reviewer from one submission, dropping their review with it."""
+    await fetch_plan(plan_id, org_id)
+    assignment = first(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, org_id")
+            .eq("id", assignment_id)
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "evaluation_assignment_lookup",
+        )
+    )
+    verify_org_access(assignment, org_id, "Assignment")
+    # One scoped delete: reviews.assignment_id is ON DELETE CASCADE, so Postgres
+    # removes the review atomically with its assignment. Deleting the review in
+    # a separate first step could lose it and then leave the assignment behind
+    # if the second write failed.
+    await db(
+        lambda: supabase.table("assignments")
+        .delete()
+        .eq("id", assignment_id)
+        .eq("plan_id", plan_id)
+        .eq("org_id", org_id)
+        .execute(),
+        "evaluation_assignment_delete",
+    )
+
+
+async def assignment_board(org_id: str, plan_id: str) -> dict:
+    """Every reviewable submission with the reviewers currently on it.
+
+    Backs the per-submission assignment UI: one row per candidate submission,
+    each carrying its assignments (with reviewer name and how far along they
+    are) so the organizer can add or drop a single reviewer without touching
+    the bulk modes. A flat set of queries — never one per submission.
+    """
+    plan = await fetch_plan(plan_id, org_id)
+    evaluators = rows(
+        await db(
+            lambda: supabase.table("evaluators")
+            .select("*")
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .order("name")
+            .execute(),
+            "evaluation_board_evaluators",
+        )
+    )
+    assignments = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("*")
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_board_assignments",
+        )
+    )
+    assignment_ids = [row["id"] for row in assignments]
+    reviews: list[dict] = []
+    if assignment_ids:
+        reviews = rows(
+            await db(
+                lambda: supabase.table("reviews")
+                .select("assignment_id, is_draft")
+                .in_("assignment_id", assignment_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "evaluation_board_reviews",
+            )
+        )
+    review_by_assignment = {row["assignment_id"]: row for row in reviews}
+    evaluator_by_id = {row["id"]: row for row in evaluators}
+
+    all_sessions = rows(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, title, friendly_id, status, track_id")
+            .eq("event_id", plan["event_id"])
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_board_sessions",
+        )
+    )
+    assigned_ids = {row["session_id"] for row in assignments}
+    session_filter = plan.get("session_filter") or {}
+    # Candidates are what the plan covers, plus anything already assigned — a
+    # submission whose status has moved on stays visible while reviewers are
+    # still attached to it.
+    candidates = [
+        session
+        for session in all_sessions
+        if session["id"] in assigned_ids or _matches_session_filter(session, session_filter)
+    ]
+    candidates.sort(key=lambda session: str(session.get("title") or "").casefold())
+    session_tracks = await tracks_for_sessions(org_id, candidates)
+
+    by_session: dict[str, list[dict]] = {}
+    for assignment in assignments:
+        evaluator = evaluator_by_id.get(assignment["evaluator_id"])
+        if not evaluator:
+            continue
+        by_session.setdefault(assignment["session_id"], []).append(
+            {
+                "assignment_id": assignment["id"],
+                "evaluator_id": assignment["evaluator_id"],
+                "name": evaluator.get("name") or "",
+                "email": evaluator.get("email"),
+                "review_status": _review_status(review_by_assignment.get(assignment["id"])),
+            }
+        )
+    for entries in by_session.values():
+        entries.sort(key=lambda entry: (str(entry["name"] or entry["email"] or "").casefold()))
+
+    return {
+        "evaluators": [
+            {
+                "id": evaluator["id"],
+                "name": evaluator.get("name") or "",
+                "email": evaluator.get("email"),
+                "track_ids": normalize_track_ids(evaluator.get("track_ids")),
+            }
+            for evaluator in evaluators
+        ],
+        "sessions": [
+            {
+                "session_id": session["id"],
+                "title": session.get("title") or "Untitled",
+                "friendly_id": session.get("friendly_id"),
+                "status": session.get("status"),
+                "tracks": session_tracks.get(session["id"], []),
+                "assignments": by_session.get(session["id"], []),
+            }
+            for session in candidates
+        ],
+    }
+
+
+# ── targeted reminders (ABS-09) ────────────────────────────────────────────
+
+
+def _incomplete_by_evaluator(assignments: list[dict], reviews: list[dict]) -> dict[str, int]:
+    """{evaluator_id: assignments with no submitted review}.
+
+    Incomplete means "no review row at all" OR "a draft" — a reviewer who saved
+    a scratch draft and stopped is exactly who a reminder is for.
+    """
+    review_by_assignment = {row["assignment_id"]: row for row in reviews}
+    pending: dict[str, int] = {}
+    for assignment in assignments:
+        review = review_by_assignment.get(assignment["id"])
+        if review is not None and not bool(review.get("is_draft")):
+            continue
+        evaluator_id = assignment["evaluator_id"]
+        pending[evaluator_id] = pending.get(evaluator_id, 0) + 1
+    return pending
+
+
+async def remind_laggards(org_id: str, plan_id: str) -> dict:
+    """Email only the reviewers with unfinished work — not the whole committee.
+
+    Idempotent per day: the outbox row is keyed
+    `eval-laggard:{evaluator_id}:{YYYY-MM-DD}`, so a second click the same day
+    reminds nobody instead of storming inboxes.
+    """
+    plan = await fetch_plan(plan_id, org_id)
+    event = await _fetch_event(plan["event_id"], org_id)
+    evaluators = rows(
+        await db(
+            lambda: supabase.table("evaluators")
+            .select("*")
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .order("name")
+            .execute(),
+            "evaluation_remind_evaluators",
+        )
+    )
+    assignments = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, evaluator_id, session_id")
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_remind_assignments",
+        )
+    )
+    assignment_ids = [row["id"] for row in assignments]
+    reviews: list[dict] = []
+    if assignment_ids:
+        reviews = rows(
+            await db(
+                lambda: supabase.table("reviews")
+                .select("assignment_id, is_draft")
+                .in_("assignment_id", assignment_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "evaluation_remind_reviews",
+            )
+        )
+    pending = _incomplete_by_evaluator(assignments, reviews)
+    laggards = [row for row in evaluators if pending.get(row["id"], 0) > 0]
+
+    frontend_url = (os.getenv("FRONTEND_URL") or "http://localhost:5173").rstrip("/")
+    today = datetime.now(timezone.utc).date().isoformat()
+    closes_at = _parse_timestamp(plan.get("closes_at"))
+    reminded: list[str] = []
+    skipped: list[str] = []
+
+    for evaluator in laggards:
+        dedupe_key = f"eval-laggard:{evaluator['id']}:{today}"
+        already = rows(
+            await db(
+                lambda dedupe_key=dedupe_key: supabase.table("email_outbox")
+                .select("id")
+                .eq("event_id", plan["event_id"])
+                .eq("dedupe_key", dedupe_key)
+                .limit(1)
+                .execute(),
+                "evaluation_remind_dedupe",
+            )
+        )
+        if already:
+            skipped.append(_reviewer_label(evaluator))
+            continue
+
+        outstanding = pending.get(evaluator["id"], 0)
+        token = await magic_links.mint(org_id, "review", evaluator_id=evaluator["id"], ttl_hours=168)
+        reviewer_link = f"{frontend_url}/review/{token}"
+        noun = "review" if outstanding == 1 else "reviews"
+        subject = f"[{event['name']}] {outstanding} {noun} still to complete"
+        deadline = (
+            f"<p>The review window closes {html.escape(_friendly_instant(closes_at))}.</p>"
+            if closes_at
+            else ""
+        )
+        body_html = (
+            f"<p>Hello {html.escape(_reviewer_label(evaluator))},</p>"
+            f"<p>You still have {outstanding} unfinished {noun} for "
+            f"{html.escape(str(event['name']))} ({html.escape(str(plan['name']))}).</p>"
+            f"{deadline}"
+            f'<p><a href="{html.escape(reviewer_link)}">Finish your reviews</a></p>'
+        )
+        await db(
+            lambda evaluator=evaluator, dedupe_key=dedupe_key, subject=subject, body_html=body_html, reviewer_link=reviewer_link, outstanding=outstanding: (
+                supabase.table("email_outbox")
+                .upsert(
+                    {
+                        "org_id": org_id,
+                        "event_id": plan["event_id"],
+                        "contact_id": None,
+                        "template_key": "evaluation_reminder",
+                        "payload": {
+                            "to": evaluator["email"],
+                            "subject": subject,
+                            "body_html": body_html,
+                            "reviewer_link": reviewer_link,
+                            "evaluator_id": evaluator["id"],
+                            "plan_id": plan_id,
+                            "outstanding": outstanding,
+                        },
+                        "dedupe_key": dedupe_key,
+                        "status": "queued",
+                        "attempts": 0,
+                        "last_error": None,
+                    },
+                    on_conflict="event_id,dedupe_key",
+                )
+                .execute()
+            ),
+            "evaluation_remind_queue",
+        )
+        reminded.append(_reviewer_label(evaluator))
+
+    return {
+        "reminded": len(reminded),
+        "evaluators": reminded,
+        "skipped": len(skipped),
+        "already_reminded": skipped,
+        "incomplete_reviewers": len(laggards),
+        "outstanding": sum(pending.values()),
+    }
+
+
 async def open_plan(org_id: str, plan_id: str) -> dict:
     plan = await fetch_plan(plan_id, org_id)
     event = await _fetch_event(plan["event_id"], org_id)
@@ -843,7 +1395,7 @@ async def open_plan(org_id: str, plan_id: str) -> dict:
             "evaluation_open_mark_invited",
         )
         queued += 1
-    return {"plan": updated_plan, "count": queued}
+    return {"plan": _plan_out(updated_plan), "count": queued}
 
 
 async def reviewer_links(org_id: str, plan_id: str) -> list[dict]:
@@ -1361,7 +1913,17 @@ async def reviewer_home(org_id: str, evaluator_id: str) -> dict:
         "evaluator": evaluator,
         "plan": {
             key: plan.get(key)
-            for key in ("id", "name", "instructions", "scale", "criteria", "anonymized", "status")
+            for key in (
+                "id",
+                "name",
+                "instructions",
+                "scale",
+                "criteria",
+                "anonymized",
+                "status",
+                # the reviewer should see their own deadline
+                *WINDOW_FIELDS,
+            )
         },
         "assignments": output_assignments,
     }
@@ -1472,6 +2034,7 @@ async def save_review(
     assignment, plan = await _review_context(org_id, evaluator_id, assignment_id)
     if plan.get("status") != "open":
         raise HTTPException(status_code=409, detail="This evaluation plan is not open")
+    ensure_review_window_open(plan)
     criteria = normalize_criteria(plan.get("criteria") or [])
     is_draft = bool(values.get("is_draft", True))
     abstained = bool(values.get("abstained", False))

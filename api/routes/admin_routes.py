@@ -11,6 +11,7 @@ from datetime import datetime, time, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field, field_validator
 
 from auth import get_current_user_and_org, verify_org_access
@@ -966,6 +967,14 @@ class SpeakerPatchRequest(BaseModel):
     company_name: str | None = Field(default=None, max_length=300)
     title: str | None = Field(default=None, max_length=300)
     about: str | None = Field(default=None, max_length=50_000)
+    # Travel & logistics (migration 009): flights, hotel, arrival/departure,
+    # ground transport, dietary and accessibility needs. Free-form because every
+    # conference handles travel differently.
+    logistics_notes: str | None = Field(default=None, max_length=50_000)
+
+
+# Contact columns the speaker PATCH may write verbatim (strings, trimmed).
+_SPEAKER_TEXT_FIELDS = ("first_name", "last_name", "company_name", "title", "about", "logistics_notes")
 
 
 async def _fetch_event_contact(event_id: str, contact_id: str, org_id: str) -> dict:
@@ -1191,6 +1200,9 @@ async def get_speaker_profile(
         "company_name": contact.get("company_name"),
         "title": contact.get("title"),
         "about": contact.get("about"),
+        # Absent on a database that hasn't run migration 009 yet — reads as null
+        # rather than blowing up the whole drawer.
+        "logistics_notes": contact.get("logistics_notes"),
         "photo_url": contact.get("photo_url"),
         "pronouns": contact.get("pronouns"),
         "linkedin_url": contact.get("linkedin_url"),
@@ -1323,7 +1335,7 @@ async def update_speaker(
 
     provided = payload.model_dump(exclude_unset=True)
     patch: dict = {}
-    for key in ("first_name", "last_name", "company_name", "title", "about"):
+    for key in _SPEAKER_TEXT_FIELDS:
         if key in provided:
             value = provided[key]
             patch[key] = value.strip() if isinstance(value, str) else value
@@ -1355,16 +1367,36 @@ async def update_speaker(
         raise HTTPException(status_code=400, detail="Nothing to update")
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    updated = first(
-        await db(
-            lambda: supabase.table("contacts")
-            .update(patch)
-            .eq("id", contact_id)
-            .eq("org_id", org_id)
-            .execute(),
-            "speaker_update",
+    async def _write(values: dict) -> dict | None:
+        return first(
+            await db(
+                lambda: supabase.table("contacts")
+                .update(values)
+                .eq("id", contact_id)
+                .eq("org_id", org_id)
+                .execute(),
+                "speaker_update",
+            )
         )
-    )
+
+    try:
+        updated = await _write(patch)
+    except APIError as exc:
+        # contacts.logistics_notes arrives in migration 009. On a database that
+        # hasn't run it, PostgREST rejects the whole UPDATE for one unknown
+        # column — drop it and save the rest rather than lose the organizer's
+        # other edits to a pending migration.
+        if "logistics_notes" not in patch or "logistics_notes" not in str(exc):
+            raise
+        logger.warning("speakers: logistics_notes column missing — saving other fields")
+        patch.pop("logistics_notes")
+        if len(patch) == 1:  # only updated_at left — nothing real to write
+            raise HTTPException(
+                status_code=503,
+                detail="Travel & logistics isn't available yet on this database.",
+            ) from exc
+        updated = await _write(patch)
+
     if not updated:
         raise HTTPException(status_code=404, detail="Speaker not found")
     updated["name"] = speaker_crm.full_name(

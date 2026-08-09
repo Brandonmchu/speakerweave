@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, KeyRound, Plus, Settings, Trash2, X } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  Code2,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Plus,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import {
@@ -18,6 +29,12 @@ import {
   type TaxonomyKind,
   type TaxonomyRow,
 } from '@/lib/adminApi'
+import {
+  embedIframeSnippet,
+  embedScriptSnippet,
+  publicProgramUrl,
+  type EmbedWidget,
+} from '@/lib/programApi'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
 import { Button } from '@/ui/button'
@@ -32,6 +49,7 @@ import {
 import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
+import { NativeSelect } from '@/ui/native-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { toast } from '@/ui/use-toast'
@@ -150,6 +168,7 @@ export function SettingsPage() {
       ) : (
         <div className="mt-6 max-w-3xl space-y-6">
           <EventCard event={event} />
+          <EmbedSection event={event} />
           <TaxonomySection
             eventId={event.id}
             kind="tracks"
@@ -187,6 +206,179 @@ export function SettingsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Embed & share                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** One shareable public URL: the link itself, a copy button, and an open-in-tab. */
+function PublicLinkRow({
+  label,
+  url,
+  testId,
+}: {
+  label: string
+  url: string
+  testId: string
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-28 shrink-0 text-sm text-muted-foreground">{label}</span>
+      <code
+        data-testid={testId}
+        className="min-w-0 flex-1 truncate rounded-md border border-border bg-background/60 px-3 py-2 font-mono text-xs text-foreground"
+      >
+        {url}
+      </code>
+      <CopyButton value={url} label={`Copy ${label.toLowerCase()} link`} />
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open ${label.toLowerCase()}`}
+        title={`Open ${label.toLowerCase()}`}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      >
+        <ExternalLink className="h-4 w-4" />
+      </a>
+    </div>
+  )
+}
+
+/** A copyable code block: the snippet plus a Copy → "Copied" button. */
+function SnippetBlock({
+  title,
+  hint,
+  snippet,
+  testId,
+}: {
+  title: string
+  hint: string
+  snippet: string
+  testId: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      // jsdom and plain-http origins have no clipboard API — fall through to
+      // the toast so the organizer can still select the snippet by hand.
+      await navigator.clipboard.writeText(snippet)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: "Couldn't copy",
+        description: 'Select the snippet and copy it manually.',
+      })
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="min-w-[92px] shrink-0"
+          data-testid={`copy-${testId}`}
+          onClick={copy}
+        >
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <pre
+        data-testid={testId}
+        className="overflow-x-auto rounded-md border border-border bg-background/60 px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground"
+      >
+        {snippet}
+      </pre>
+    </div>
+  )
+}
+
+/**
+ * The organizer's window onto the public, embeddable programme (EMB-15): the
+ * two shareable page links, plus paste-ready snippets for putting either widget
+ * on the event's own site. The /e/ pages are served with `frame-ancestors *`
+ * precisely so these embeds work cross-origin.
+ */
+function EmbedSection({ event }: { event: EventSummary }) {
+  const [widget, setWidget] = useState<EmbedWidget>('schedule')
+
+  if (!event.slug) return null
+
+  const scriptSnippet = embedScriptSnippet(event.slug, widget)
+  const iframeSnippet = embedIframeSnippet(event.slug, widget)
+
+  return (
+    <section className="rounded-lg border border-border bg-card shadow-soft">
+      <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+        <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+          <Code2 className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Embed &amp; share</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Your live schedule and speaker pages — share the links, or drop either one
+            straight into your event website.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5 px-5 py-5">
+        <div className="space-y-2">
+          <PublicLinkRow
+            label="Schedule"
+            url={publicProgramUrl(event.slug, 'schedule')}
+            testId="public-url-schedule"
+          />
+          <PublicLinkRow
+            label="Speakers"
+            url={publicProgramUrl(event.slug, 'speakers')}
+            testId="public-url-speakers"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="embed-widget">Widget to embed</Label>
+          <div className="sm:w-56">
+            <NativeSelect
+              id="embed-widget"
+              aria-label="Widget to embed"
+              className="h-9"
+              value={widget}
+              onValueChange={(value) => setWidget(value as EmbedWidget)}
+              options={[
+                { value: 'schedule', label: 'Schedule' },
+                { value: 'speakers', label: 'Speakers' },
+              ]}
+            />
+          </div>
+        </div>
+
+        <SnippetBlock
+          title="Script embed (recommended)"
+          hint="Auto-resizes to fit the programme — no scrollbars, no fixed height to maintain."
+          snippet={scriptSnippet}
+          testId="embed-snippet-script"
+        />
+        <SnippetBlock
+          title="Plain iframe"
+          hint="No JavaScript needed. Fixed height — change 600px to suit your page."
+          snippet={iframeSnippet}
+          testId="embed-snippet-iframe"
+        />
+      </div>
+    </section>
   )
 }
 

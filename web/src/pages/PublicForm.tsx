@@ -10,12 +10,15 @@ import {
   Copy,
   Lock,
   Mail,
+  UserPlus,
+  X,
 } from 'lucide-react'
 
 import {
   getPublicForm,
   requestManageLink,
   submitPublicForm,
+  type CoSpeakerInput,
   type FormFieldOption,
   type PublicFormField,
   type SubmissionInput,
@@ -53,6 +56,29 @@ function isBlank(value: AnswerValue | undefined): boolean {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// --- co-speakers ----------------------------------------------------------
+// A talk is often co-presented, and the CFP is where that gets said — otherwise
+// the co-presenter only exists in the abstract's prose and an organizer has to
+// re-key them by hand. Each row becomes a contact on the event and a 'speaker'
+// participant on the session; the submitter stays the primary. Three is the
+// ceiling the backend enforces too.
+const MAX_CO_SPEAKERS = 3
+
+type CoSpeaker = CoSpeakerInput
+
+function emptyCoSpeaker(): CoSpeaker {
+  return { first_name: '', last_name: '', email: '' }
+}
+
+function coSpeakerIsBlank(row: CoSpeaker): boolean {
+  return !row.first_name.trim() && !row.last_name.trim() && !row.email.trim()
+}
+
+/** The rows worth sending: a half-typed row the speaker abandoned is not one. */
+function filledCoSpeakers(rows: CoSpeaker[]): CoSpeaker[] {
+  return rows.filter((row) => !coSpeakerIsBlank(row))
+}
+
 // --- draft persistence ----------------------------------------------------
 // A CFP proposal is a lot of typing. We autosave the in-progress form to
 // localStorage keyed by slug so a refresh, a closed tab, or a "let me finish
@@ -64,6 +90,22 @@ interface FormDraft {
   email: string
   title: string
   answers: Answers
+  coSpeakers: CoSpeaker[]
+}
+
+/** Co-speaker rows out of localStorage — anything else on disk is ignored. */
+function readStoredCoSpeakers(raw: unknown): CoSpeaker[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .slice(0, MAX_CO_SPEAKERS)
+    .map((entry) => {
+      const row = (entry ?? {}) as Partial<CoSpeaker>
+      return {
+        first_name: typeof row.first_name === 'string' ? row.first_name : '',
+        last_name: typeof row.last_name === 'string' ? row.last_name : '',
+        email: typeof row.email === 'string' ? row.email : '',
+      }
+    })
 }
 
 function draftStorageKey(slug: string): string {
@@ -81,6 +123,7 @@ function readStoredDraft(key: string): FormDraft | null {
       email: typeof parsed.email === 'string' ? parsed.email : '',
       title: typeof parsed.title === 'string' ? parsed.title : '',
       answers: parsed.answers && typeof parsed.answers === 'object' ? (parsed.answers as Answers) : {},
+      coSpeakers: readStoredCoSpeakers(parsed.coSpeakers),
     }
   } catch {
     return null
@@ -90,6 +133,7 @@ function readStoredDraft(key: string): FormDraft | null {
 function draftHasContent(draft: FormDraft | null): boolean {
   if (!draft) return false
   if (draft.firstName || draft.lastName || draft.email || draft.title) return true
+  if (filledCoSpeakers(draft.coSpeakers ?? []).length > 0) return true
   return Object.values(draft.answers).some((value) =>
     typeof value === 'boolean' ? value : String(value ?? '').trim() !== ''
   )
@@ -146,6 +190,7 @@ export function PublicForm() {
   const [email, setEmail] = useState(initialDraft?.email ?? '')
   const [title, setTitle] = useState(initialDraft?.title ?? '')
   const [answers, setAnswers] = useState<Answers>(initialDraft?.answers ?? {})
+  const [coSpeakers, setCoSpeakers] = useState<CoSpeaker[]>(initialDraft?.coSpeakers ?? [])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [receipt, setReceipt] = useState<SubmissionReceipt | null>(null)
   const [draftRestored, setDraftRestored] = useState(() => draftHasContent(initialDraft))
@@ -157,7 +202,7 @@ export function PublicForm() {
   // drop the key once the form is empty. Stops the moment a submit succeeds.
   useEffect(() => {
     if (receipt) return
-    const draft: FormDraft = { firstName, lastName, email, title, answers }
+    const draft: FormDraft = { firstName, lastName, email, title, answers, coSpeakers }
     try {
       if (draftHasContent(draft)) {
         window.localStorage.setItem(draftKey, JSON.stringify(draft))
@@ -169,7 +214,7 @@ export function PublicForm() {
     } catch {
       // Private-mode Safari and friends — autosave is a nicety, not load-bearing.
     }
-  }, [firstName, lastName, email, title, answers, draftKey, receipt])
+  }, [firstName, lastName, email, title, answers, coSpeakers, draftKey, receipt])
 
   function clearDraft() {
     try {
@@ -182,9 +227,36 @@ export function PublicForm() {
     setEmail('')
     setTitle('')
     setAnswers({})
+    setCoSpeakers([])
     setErrors({})
     setDraftRestored(false)
     setDraftSaved(false)
+  }
+
+  function addCoSpeaker() {
+    setCoSpeakers((prev) => (prev.length >= MAX_CO_SPEAKERS ? prev : [...prev, emptyCoSpeaker()]))
+  }
+
+  function removeCoSpeaker(index: number) {
+    setCoSpeakers((prev) => prev.filter((_, i) => i !== index))
+    // Row indexes shift on removal, so stale per-row errors would land on the
+    // wrong row. Drop them all; the next submit recomputes them.
+    setErrors((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key]) => !key.startsWith('co_speaker_'))
+      )
+      return next
+    })
+  }
+
+  function setCoSpeakerField(index: number, key: keyof CoSpeaker, value: string) {
+    setCoSpeakers((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)))
+    setErrors((prev) => {
+      const errorKey = `co_speaker_${index}_${key}`
+      if (!prev[errorKey]) return prev
+      const { [errorKey]: _removed, ...rest } = prev
+      return rest
+    })
   }
 
   // Conditional logic, re-resolved on every keystroke that changes an answer.
@@ -231,6 +303,21 @@ export function PublicForm() {
     if (!lastName.trim()) next.last_name = 'Required'
     if (!email.trim()) next.email = 'Required'
     else if (!EMAIL_RE.test(email.trim())) next.email = 'Enter a valid email address'
+
+    // A co-speaker is identified by email — a row with a name but no address
+    // can't become a contact, so it's an error rather than a silent drop. The
+    // backend re-checks all of this; the browser is not a trusted validator.
+    const seenEmails = new Set<string>([email.trim().toLowerCase()])
+    coSpeakers.forEach((row, index) => {
+      if (coSpeakerIsBlank(row)) return
+      const key = `co_speaker_${index}_email`
+      const address = row.email.trim().toLowerCase()
+      if (!address) next[key] = 'Required — a co-speaker is identified by email'
+      else if (!EMAIL_RE.test(address)) next[key] = 'Enter a valid email address'
+      else if (seenEmails.has(address)) next[key] = 'This email is already on this proposal'
+      else seenEmails.add(address)
+    })
+
     if (!title.trim()) next.title = 'Required'
 
     for (const field of visibleFields) {
@@ -264,6 +351,11 @@ export function PublicForm() {
       // rule has since hidden are dropped here, exactly as the server drops
       // them in validate_submission.
       answers: visibleAnswers(answers, ruleStates),
+      co_speakers: filledCoSpeakers(coSpeakers).map((row) => ({
+        first_name: row.first_name.trim(),
+        last_name: row.last_name.trim(),
+        email: row.email.trim(),
+      })),
     })
   }
 
@@ -453,6 +545,85 @@ export function PublicForm() {
               onChange={(e) => setEmail(e.target.value)}
             />
           </Field>
+        </section>
+
+        <section className="space-y-4">
+          <SectionHeading title="Co-speakers" />
+          <p className="-mt-1 text-sm text-muted-foreground">
+            Presenting with someone? Add them here and they&rsquo;ll be listed on the session.
+            Optional — up to {MAX_CO_SPEAKERS}.
+          </p>
+
+          {coSpeakers.map((row, index) => (
+            <div
+              key={index}
+              data-testid={`co-speaker-row-${index}`}
+              className="space-y-4 rounded-lg border border-border bg-muted/30 p-4"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-foreground">Co-speaker {index + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => removeCoSpeaker(index)}
+                  data-testid={`remove-co-speaker-${index}`}
+                  aria-label={`Remove co-speaker ${index + 1}`}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id={`co_speaker_${index}_first_name`} label="First name">
+                  <Input
+                    id={`co_speaker_${index}_first_name`}
+                    value={row.first_name}
+                    autoComplete="off"
+                    onChange={(e) => setCoSpeakerField(index, 'first_name', e.target.value)}
+                  />
+                </Field>
+                <Field id={`co_speaker_${index}_last_name`} label="Last name">
+                  <Input
+                    id={`co_speaker_${index}_last_name`}
+                    value={row.last_name}
+                    autoComplete="off"
+                    onChange={(e) => setCoSpeakerField(index, 'last_name', e.target.value)}
+                  />
+                </Field>
+              </div>
+              <Field
+                id={`co_speaker_${index}_email`}
+                label="Email"
+                error={errors[`co_speaker_${index}_email`]}
+              >
+                <Input
+                  id={`co_speaker_${index}_email`}
+                  type="email"
+                  value={row.email}
+                  autoComplete="off"
+                  placeholder="cospeaker@example.com"
+                  aria-invalid={errors[`co_speaker_${index}_email`] ? true : undefined}
+                  onChange={(e) => setCoSpeakerField(index, 'email', e.target.value)}
+                />
+              </Field>
+            </div>
+          ))}
+
+          {coSpeakers.length < MAX_CO_SPEAKERS ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={addCoSpeaker}
+              data-testid="add-co-speaker"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add a co-speaker
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              That&rsquo;s the maximum of {MAX_CO_SPEAKERS} co-speakers.
+            </p>
+          )}
         </section>
 
         <section className="space-y-5">

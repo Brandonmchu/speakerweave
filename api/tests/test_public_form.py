@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
+from tests.conftest import OTHER_EVENT_ID, OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
 
 FORM_ID = "66666666-6666-6666-6666-666666666601"
 SLUG = "call-for-speakers"
@@ -420,6 +420,260 @@ def test_a_track_from_another_org_is_never_selected(client, public_db):
     assert response.status_code == 201
     assert public_db.rows("sessions")[0].get("track_id") is None
     assert public_db.rows("session_tracks") == []
+
+
+# ── co-speakers (multi-speaker sessions from the public CFP) ───────────────
+# A talk can be co-presented, and the form is where that gets said. Each
+# co-speaker becomes a contact on this event and a non-primary 'speaker'
+# participant on the session; the submitter stays the primary.
+
+
+def co_speaker(email: str, first: str = "Grace", last: str = "Hopper") -> dict:
+    return {"email": email, "first_name": first, "last_name": last}
+
+
+def participants_of(db, session_id: str) -> list[dict]:
+    return [p for p in db.rows("session_participants") if p["session_id"] == session_id]
+
+
+def test_co_speakers_become_contacts_and_participants(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[
+                co_speaker("grace@example.com"),
+                co_speaker("alan@example.com", "Alan", "Turing"),
+            ],
+        ),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+
+    # Each co-speaker is a real contact on THIS event, in THIS org.
+    by_email = {c["email"]: c for c in public_db.rows("contacts")}
+    assert set(by_email) == {"ada@example.com", "grace@example.com", "alan@example.com"}
+    for email in ("grace@example.com", "alan@example.com"):
+        assert by_email[email]["org_id"] == TEST_ORG_ID
+        assert by_email[email]["event_id"] == TEST_EVENT_ID
+    assert by_email["alan@example.com"]["first_name"] == "Alan"
+
+    # The submitter is written twice (primary 'speaker' + 'submitter' of
+    # record) so speaker-first consumers never drop them when co-speakers
+    # exist; each co-speaker is a non-primary 'speaker'.
+    parts = participants_of(public_db, session["id"])
+    assert len(parts) == 4
+    primary = [p for p in parts if p["is_primary"]]
+    assert len(primary) == 1
+    assert primary[0]["role"] == "speaker"
+    assert primary[0]["contact_id"] == session["submitter_contact_id"]
+    submitter_rows = [p for p in parts if p["role"] == "submitter"]
+    assert len(submitter_rows) == 1
+    assert submitter_rows[0]["contact_id"] == session["submitter_contact_id"]
+
+    co_parts = [p for p in parts if p["role"] == "speaker" and not p["is_primary"]]
+    assert {p["contact_id"] for p in co_parts} == {
+        by_email["grace@example.com"]["id"],
+        by_email["alan@example.com"]["id"],
+    }
+    assert all(p["org_id"] == TEST_ORG_ID for p in parts)
+
+
+def test_a_submission_without_co_speakers_is_unchanged(client, public_db):
+    """Solo path: the submitter is the primary speaker AND the submitter of record."""
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions", json=submission(answers={F_ABSTRACT: "A tour."})
+    )
+
+    assert response.status_code == 201
+    parts = participants_of(public_db, public_db.rows("sessions")[0]["id"])
+    assert len(parts) == 2
+    roles = {p["role"]: p for p in parts}
+    assert set(roles) == {"speaker", "submitter"}
+    assert roles["speaker"]["is_primary"] is True
+    assert roles["submitter"]["is_primary"] is False
+    assert roles["speaker"]["contact_id"] == roles["submitter"]["contact_id"]
+
+
+def test_more_than_three_co_speakers_is_rejected(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker(f"co{i}@example.com") for i in range(4)],
+        ),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "You can add up to 3 co-speakers."
+    # Rejected before anything was written.
+    assert public_db.rows("sessions") == []
+    assert public_db.rows("contacts") == []
+
+
+def test_a_co_speaker_cannot_be_the_submitter(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("Ada@Example.com", "Ada", "Lovelace")],
+        ),
+    )
+
+    assert response.status_code == 400
+    assert "different email" in response.json()["detail"]
+    assert public_db.rows("sessions") == []
+    assert public_db.rows("session_participants") == []
+
+
+def test_the_same_co_speaker_twice_is_rejected(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("grace@example.com"), co_speaker("GRACE@example.com")],
+        ),
+    )
+
+    assert response.status_code == 400
+    assert "more than once" in response.json()["detail"]
+    assert public_db.rows("sessions") == []
+
+
+def test_a_co_speaker_with_a_bad_email_is_rejected(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[{"email": "not-an-email", "first_name": "Nope"}],
+        ),
+    )
+
+    assert response.status_code == 422
+    assert public_db.rows("sessions") == []
+
+
+def test_an_existing_co_speaker_contact_is_reused_not_duplicated(client, public_db):
+    """Someone the organizer already imported keeps their record — and their
+    organizer-curated name is never clobbered by what a submitter typed."""
+    public_db.seed(
+        "contacts",
+        {
+            "id": "contact-grace",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "email": "grace@example.com",
+            "first_name": "Grace",
+            "last_name": "Hopper",
+        },
+    )
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("grace@example.com", "Gracie", "H")],
+        ),
+    )
+
+    assert response.status_code == 201
+    graces = [c for c in public_db.rows("contacts") if c["email"] == "grace@example.com"]
+    assert len(graces) == 1
+    assert graces[0]["id"] == "contact-grace"
+    assert graces[0]["last_name"] == "Hopper"  # not overwritten with "H"
+    parts = participants_of(public_db, public_db.rows("sessions")[0]["id"])
+    co_parts = [p for p in parts if p["role"] == "speaker" and not p["is_primary"]]
+    assert {p["contact_id"] for p in co_parts} == {"contact-grace"}
+
+
+def test_a_co_speaker_contact_from_another_event_is_not_reused(client, public_db):
+    """Contacts are per-event: the same human at a different event is a
+    different row, and a co-speaker must land on THIS event."""
+    public_db.seed(
+        "contacts",
+        {
+            "id": "contact-grace-elsewhere",
+            "org_id": TEST_ORG_ID,
+            "event_id": OTHER_EVENT_ID,
+            "email": "grace@example.com",
+            "first_name": "Grace",
+            "last_name": "Hopper",
+        },
+    )
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("grace@example.com")],
+        ),
+    )
+
+    assert response.status_code == 201
+    parts = participants_of(public_db, public_db.rows("sessions")[0]["id"])
+    co_contact_id = next(p["contact_id"] for p in parts if not p["is_primary"])
+    assert co_contact_id != "contact-grace-elsewhere"
+    created = next(c for c in public_db.rows("contacts") if c["id"] == co_contact_id)
+    assert created["event_id"] == TEST_EVENT_ID
+
+
+def test_a_co_speaker_contact_from_another_org_is_not_reused(client, public_db):
+    public_db.seed(
+        "contacts",
+        {
+            "id": "contact-grace-foreign",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "email": "grace@example.com",
+            "first_name": "Grace",
+            "last_name": "Hopper",
+        },
+    )
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("grace@example.com")],
+        ),
+    )
+
+    assert response.status_code == 201
+    parts = participants_of(public_db, public_db.rows("sessions")[0]["id"])
+    co_contact_id = next(p["contact_id"] for p in parts if not p["is_primary"])
+    assert co_contact_id != "contact-grace-foreign"
+    assert next(c for c in public_db.rows("contacts") if c["id"] == co_contact_id)[
+        "org_id"
+    ] == TEST_ORG_ID
+
+
+def test_co_speakers_reach_the_organizer_session_detail(client, auth_headers, public_db):
+    """The end of the wire: what the CFP collected is what the organizer's
+    submission drawer renders as the session's participants."""
+    client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour."},
+            co_speakers=[co_speaker("grace@example.com")],
+        ),
+    )
+    session_id = public_db.rows("sessions")[0]["id"]
+
+    detail = client.get(f"/api/sessions/{session_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    participants = detail.json()["participants"]
+
+    # Primary first; the submitter appears as the primary speaker AND as the
+    # submitter of record, with the co-speaker as a non-primary speaker.
+    assert participants[0]["email"] == "ada@example.com"
+    assert participants[0]["role"] == "speaker"
+    assert participants[0]["is_primary"] is True
+    assert sorted(p["role"] for p in participants) == ["speaker", "speaker", "submitter"]
+    grace = next(p for p in participants if p["email"] == "grace@example.com")
+    assert grace["role"] == "speaker"
+    assert grace["is_primary"] is False
+    assert grace["first_name"] == "Grace"
 
 
 # ── GET response sanitization (defense in depth) ───────────────────────────

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   ArrowDownWideNarrow,
+  BellRing,
+  CalendarClock,
   Check,
   ClipboardCheck,
   Layers,
@@ -21,16 +23,21 @@ import { listEvents } from '@/lib/adminApi'
 import {
   addEvaluator,
   assignEvaluationSessions,
+  assignReviewerToSubmission,
   createEvaluationPlan,
   deleteEvaluator,
   getEvaluationPlan,
   getEvaluationSummary,
+  getPlanAssignments,
   getReviewerLinks,
   listEvaluationPlans,
   openEvaluationPlan,
+  remindLaggingReviewers,
+  unassignReviewerFromSubmission,
   updateEvaluationDecision,
   updateEvaluationPlan,
   updateEvaluator,
+  type AssignableSubmission,
   type EvaluationAssignMode,
   type EvaluationCriterion,
   type EvaluationPlan,
@@ -39,6 +46,7 @@ import {
   type EvaluationSessionSummary,
   type EvaluationTrack,
   type Evaluator,
+  type ReviewerAssignmentStatus,
 } from '@/lib/evaluationApi'
 import { CopyButton } from '@/pages/Forms'
 import { cn } from '@/lib/utils'
@@ -74,6 +82,99 @@ const STATUS_BADGE: Record<
 function PlanStatusBadge({ status }: { status: EvaluationPlanStatus }) {
   const meta = STATUS_BADGE[status]
   return <Badge variant={meta.variant}>{meta.label}</Badge>
+}
+
+/* ── review window ─────────────────────────────────────────────────────────
+ * A plan says when reviewing opens and when it closes, and the server refuses
+ * reviews outside that. Dates are formatted in UTC — the API stores the day the
+ * organizer picked as midnight/end-of-day UTC, so anything else would show the
+ * neighbouring day to half the world. */
+
+function formatWindowDate(value?: string | null): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
+function reviewWindowLabel(window: {
+  opens_at?: string | null
+  closes_at?: string | null
+}): string | null {
+  const opens = formatWindowDate(window.opens_at)
+  const closes = formatWindowDate(window.closes_at)
+  if (opens && closes) return `Reviews open ${opens} – ${closes}`
+  if (opens) return `Reviews open ${opens}`
+  if (closes) return `Reviews close ${closes}`
+  return null
+}
+
+/** An ISO instant as the yyyy-mm-dd a native date input wants. */
+function toDateInputValue(value?: string | null): string {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().slice(0, 10)
+}
+
+function ReviewWindowNote({ plan }: { plan: EvaluationPlan }) {
+  const label = reviewWindowLabel(plan)
+  if (!label) return null
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+      <CalendarClock className="h-3.5 w-3.5 text-primary" />
+      {label}
+    </span>
+  )
+}
+
+/** Reviews open/close date pair, shared by the create dialog and the editor. */
+function ReviewWindowFields({
+  idPrefix,
+  opensAt,
+  closesAt,
+  onOpensAtChange,
+  onClosesAtChange,
+}: {
+  idPrefix: string
+  opensAt: string
+  closesAt: string
+  onOpensAtChange: (value: string) => void
+  onClosesAtChange: (value: string) => void
+}) {
+  const label = reviewWindowLabel({ opens_at: opensAt || null, closes_at: closesAt || null })
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="flex items-center gap-2">
+        <CalendarClock className="h-4 w-4 text-primary" />
+        <span className="text-sm font-medium text-foreground">Review window</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Reviewers can only score between these dates. Leave a date empty for no limit.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Reviews open" htmlFor={`${idPrefix}-opens-at`}>
+          <Input
+            id={`${idPrefix}-opens-at`}
+            type="date"
+            value={opensAt}
+            onChange={(event) => onOpensAtChange(event.target.value)}
+          />
+        </Field>
+        <Field label="Reviews close" htmlFor={`${idPrefix}-closes-at`}>
+          <Input
+            id={`${idPrefix}-closes-at`}
+            type="date"
+            value={closesAt}
+            onChange={(event) => onClosesAtChange(event.target.value)}
+          />
+        </Field>
+      </div>
+      <p className="text-xs font-medium text-primary">
+        {label ?? 'No window set — reviewers can score at any time.'}
+      </p>
+    </div>
+  )
 }
 
 const TRACK_FALLBACK_COLOR = '#4962E2'
@@ -267,6 +368,12 @@ export function Evaluation() {
                     <span>{plan.evaluator_count ?? 0} reviewers</span>
                     <span>{plan.review_count ?? 0}/{plan.assignment_count ?? 0} started</span>
                   </div>
+                  {reviewWindowLabel(plan) && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <CalendarClock className="h-3 w-3 shrink-0 text-primary" />
+                      <span className="truncate">{reviewWindowLabel(plan)}</span>
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
@@ -319,9 +426,18 @@ function CreatePlanDialog({
   const [instructions, setInstructions] = useState('')
   const [scale, setScale] = useState<EvaluationScale>('1_5')
   const [anonymized, setAnonymized] = useState(false)
+  const [opensAt, setOpensAt] = useState('')
+  const [closesAt, setClosesAt] = useState('')
   const create = useMutation({
     mutationFn: () =>
-      createEvaluationPlan(eventId, { name: name.trim(), instructions, scale, anonymized }),
+      createEvaluationPlan(eventId, {
+        name: name.trim(),
+        instructions,
+        scale,
+        anonymized,
+        opens_at: opensAt || null,
+        closes_at: closesAt || null,
+      }),
     onSuccess: (plan) => {
       onCreated(plan)
       onOpenChange(false)
@@ -366,6 +482,13 @@ function CreatePlanDialog({
               ]}
             />
           </Field>
+          <ReviewWindowFields
+            idPrefix="new-plan"
+            opensAt={opensAt}
+            closesAt={closesAt}
+            onOpensAtChange={setOpensAt}
+            onClosesAtChange={setClosesAt}
+          />
           <label className="flex items-start gap-3 rounded-md border border-border p-3">
             <Checkbox checked={anonymized} onCheckedChange={(value) => setAnonymized(value === true)} />
             <span>
@@ -443,6 +566,9 @@ function PlanWorkspace({
             {detail.assignments.total} assignments · {detail.evaluators.length} reviewers ·{' '}
             {plan.scale === '1_10' ? '10-point' : '5-point'} scale
           </p>
+          <div className="mt-1">
+            <ReviewWindowNote plan={plan} />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -478,6 +604,7 @@ function PlanWorkspace({
         <div className="border-b border-border px-5 sm:px-6">
           <TabsList variant="underline">
             <TabsTrigger value="setup">Plan setup</TabsTrigger>
+            <TabsTrigger value="assignments">Assignments</TabsTrigger>
             <TabsTrigger value="summary">Summary & decisions</TabsTrigger>
           </TabsList>
         </div>
@@ -489,6 +616,9 @@ function PlanWorkspace({
             tracks={tracks}
             onRefresh={onRefresh}
           />
+        </TabsContent>
+        <TabsContent value="assignments" className="m-0">
+          <AssignmentsPanel plan={plan} onRefresh={onRefresh} />
         </TabsContent>
         <TabsContent value="summary" className="m-0">
           <SummaryPanel
@@ -514,17 +644,29 @@ function PlanEditor({
   const [instructions, setInstructions] = useState(plan.instructions ?? '')
   const [anonymized, setAnonymized] = useState(plan.anonymized)
   const [criteria, setCriteria] = useState<EvaluationCriterion[]>(plan.criteria)
+  const [opensAt, setOpensAt] = useState(toDateInputValue(plan.opens_at))
+  const [closesAt, setClosesAt] = useState(toDateInputValue(plan.closes_at))
 
   useEffect(() => {
     setName(plan.name)
     setInstructions(plan.instructions ?? '')
     setAnonymized(plan.anonymized)
     setCriteria(plan.criteria)
+    setOpensAt(toDateInputValue(plan.opens_at))
+    setClosesAt(toDateInputValue(plan.closes_at))
   }, [plan])
 
   const save = useMutation({
     mutationFn: () =>
-      updateEvaluationPlan(plan.id, { name: name.trim(), instructions, anonymized, criteria }),
+      updateEvaluationPlan(plan.id, {
+        name: name.trim(),
+        instructions,
+        anonymized,
+        criteria,
+        // An emptied date field clears the bound rather than leaving it stale.
+        opens_at: opensAt || null,
+        closes_at: closesAt || null,
+      }),
     onSuccess: async () => {
       await onRefresh()
       toast({ title: 'Plan settings saved' })
@@ -565,6 +707,13 @@ function PlanEditor({
               placeholder="Describe what a strong submission looks like."
             />
           </Field>
+          <ReviewWindowFields
+            idPrefix="plan"
+            opensAt={opensAt}
+            closesAt={closesAt}
+            onOpensAtChange={setOpensAt}
+            onClosesAtChange={setClosesAt}
+          />
           <label className="flex items-start gap-3 rounded-md border border-border p-3">
             <Checkbox checked={anonymized} onCheckedChange={(value) => setAnonymized(value === true)} />
             <span>
@@ -676,6 +825,35 @@ function EvaluatorEditor({
     },
   })
 
+  // Who is actually behind: at least one assignment without a submitted review.
+  // The reminder goes to exactly these people, never the whole committee.
+  const laggards = evaluators.filter(
+    (evaluator) => (evaluator.assignment_count ?? 0) > (evaluator.complete_count ?? 0)
+  )
+  const remind = useMutation({
+    mutationFn: () => remindLaggingReviewers(plan.id),
+    onSuccess: (result) => {
+      if (result.reminded > 0) {
+        toast({
+          title: `Reminded ${result.reminded} ${result.reminded === 1 ? 'reviewer' : 'reviewers'}`,
+          description: result.evaluators.join(', '),
+        })
+      } else if (result.skipped > 0) {
+        toast({
+          title: 'Already reminded today',
+          description: `${result.already_reminded.join(', ')} already got a nudge today.`,
+        })
+      } else {
+        toast({
+          title: 'Everyone is up to date',
+          description: 'No reviewer has an unfinished review.',
+        })
+      }
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not send reminders', description: error.message }),
+  })
+
   return (
     <section className="border-t border-border px-5 py-6 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -685,15 +863,35 @@ function EvaluatorEditor({
             Add reviewers, assign every eligible submission, then open the plan to queue private links.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={evaluators.length === 0}
-          onClick={() => setLinksOpen(true)}
-        >
-          <Link2 />
-          Reviewer links
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {evaluators.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={laggards.length === 0 || remind.isPending}
+              title={
+                laggards.length === 0
+                  ? 'Every reviewer has finished'
+                  : 'Email only the reviewers with unfinished reviews'
+              }
+              onClick={() => remind.mutate()}
+            >
+              <BellRing />
+              {remind.isPending
+                ? 'Reminding…'
+                : `Remind incomplete reviewers (${laggards.length})`}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={evaluators.length === 0}
+            onClick={() => setLinksOpen(true)}
+          >
+            <Link2 />
+            Reviewer links
+          </Button>
+        </div>
       </div>
       <ReviewerLinksDialog planId={plan.id} open={linksOpen} onOpenChange={setLinksOpen} />
       <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(150px,0.7fr)_minmax(220px,1fr)_auto]">
@@ -884,6 +1082,223 @@ function EvaluatorTracksCell({
         {draft.length === 0 && <AllTracksHint />}
       </div>
     </div>
+  )
+}
+
+/* ── per-submission assignment ─────────────────────────────────────────────
+ * "Assign sessions" and "Assign by track" are bulk strokes. A program chair
+ * also needs the deliberate single pairing — this reviewer reads THIS talk —
+ * and needs to see, per submission, exactly who is on it. */
+
+const REVIEW_STATUS_DOT: Record<ReviewerAssignmentStatus, string> = {
+  pending: 'bg-muted-foreground/40',
+  in_progress: 'bg-warning',
+  reviewed: 'bg-success',
+}
+
+const REVIEW_STATUS_LABEL: Record<ReviewerAssignmentStatus, string> = {
+  pending: 'not started',
+  in_progress: 'in progress',
+  reviewed: 'review complete',
+}
+
+function AssignmentsPanel({
+  plan,
+  onRefresh,
+}: {
+  plan: EvaluationPlan
+  onRefresh: () => Promise<void>
+}) {
+  const queryClient = useQueryClient()
+  const boardQuery = useQuery({
+    queryKey: ['evaluation-assignments', plan.id],
+    queryFn: () => getPlanAssignments(plan.id),
+  })
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['evaluation-assignments', plan.id] }),
+      onRefresh(),
+    ])
+  }
+  const assign = useMutation({
+    mutationFn: (input: { evaluator_id: string; session_id: string }) =>
+      assignReviewerToSubmission(plan.id, input),
+    onSuccess: async (assignment) => {
+      await refresh()
+      toast({
+        title: 'Reviewer assigned',
+        description: `${assignment.evaluator_name || assignment.evaluator_email} → ${
+          assignment.session_title ?? 'submission'
+        }`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not assign', description: error.message }),
+  })
+  const unassign = useMutation({
+    mutationFn: (assignmentId: string) => unassignReviewerFromSubmission(plan.id, assignmentId),
+    onSuccess: async () => {
+      await refresh()
+      toast({ title: 'Reviewer unassigned' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not unassign', description: error.message }),
+  })
+
+  if (boardQuery.isPending) {
+    return (
+      <div className="space-y-3 px-5 py-6 sm:px-6">
+        {[0, 1, 2].map((item) => (
+          <Skeleton key={item} className="h-14" />
+        ))}
+      </div>
+    )
+  }
+  if (boardQuery.error) {
+    return (
+      <PageMessage
+        icon={<AlertCircle className="h-6 w-6 text-destructive" />}
+        title="Couldn't load assignments"
+        description={boardQuery.error.message}
+        action={<Button onClick={() => boardQuery.refetch()}>Try again</Button>}
+      />
+    )
+  }
+
+  const board = boardQuery.data
+  const busy = assign.isPending || unassign.isPending
+
+  return (
+    <section className="px-5 py-6 sm:px-6">
+      <div>
+        <h3 className="text-base font-semibold text-foreground">Who reviews what</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Assign one reviewer to one submission — on top of, or instead of, the bulk assignment
+          buttons above.
+        </p>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-md border border-border">
+        {board.evaluators.length === 0 ? (
+          <div className="px-5 py-10 text-center">
+            <Users className="mx-auto h-6 w-6 text-muted-foreground" />
+            <p className="mt-2 text-sm font-medium text-foreground">No reviewers yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add reviewers under Plan setup before assigning submissions.
+            </p>
+          </div>
+        ) : board.sessions.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            No submissions are waiting for review yet.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Submission</TableHead>
+                <TableHead>Reviewers</TableHead>
+                <TableHead className="w-[230px]">Add a reviewer</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {board.sessions.map((session) => (
+                <SubmissionAssignmentRow
+                  key={session.session_id}
+                  session={session}
+                  evaluators={board.evaluators}
+                  busy={busy}
+                  onAssign={(evaluatorId) =>
+                    assign.mutate({ evaluator_id: evaluatorId, session_id: session.session_id })
+                  }
+                  onUnassign={(assignmentId) => unassign.mutate(assignmentId)}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function SubmissionAssignmentRow({
+  session,
+  evaluators,
+  busy,
+  onAssign,
+  onUnassign,
+}: {
+  session: AssignableSubmission
+  evaluators: Array<{ id: string; name: string; email: string | null }>
+  busy: boolean
+  onAssign: (evaluatorId: string) => void
+  onUnassign: (assignmentId: string) => void
+}) {
+  const assigned = new Set(session.assignments.map((entry) => entry.evaluator_id))
+  const available = evaluators.filter((evaluator) => !assigned.has(evaluator.id))
+
+  return (
+    <TableRow>
+      <TableCell>
+        <p className="font-medium text-foreground">{session.title}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {session.friendly_id && <span className="font-mono">{session.friendly_id}</span>}
+          <TrackChips tracks={session.tracks} />
+        </div>
+      </TableCell>
+      <TableCell>
+        {session.assignments.length === 0 ? (
+          <span className="text-xs text-muted-foreground">Nobody assigned</span>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {session.assignments.map((entry) => {
+              const label = entry.name || entry.email || 'Reviewer'
+              return (
+                <span
+                  key={entry.assignment_id}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card py-0.5 pl-2 pr-1 text-xs font-medium text-foreground"
+                  title={`${label} — ${REVIEW_STATUS_LABEL[entry.review_status]}`}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'h-1.5 w-1.5 shrink-0 rounded-full',
+                      REVIEW_STATUS_DOT[entry.review_status]
+                    )}
+                  />
+                  <span className="truncate">{label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Unassign ${label} from ${session.title}`}
+                    disabled={busy}
+                    onClick={() => onUnassign(entry.assignment_id)}
+                    className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )
+            })}
+          </div>
+        )}
+      </TableCell>
+      <TableCell>
+        <NativeSelect
+          aria-label={`Assign a reviewer to ${session.title}`}
+          // Stays on the placeholder: picking a name is the action, not a state.
+          value=""
+          placeholder={available.length === 0 ? 'All reviewers assigned' : 'Add reviewer…'}
+          disabled={busy || available.length === 0}
+          options={available.map((evaluator) => ({
+            value: evaluator.id,
+            label: evaluator.name || evaluator.email || 'Reviewer',
+          }))}
+          onValueChange={(value) => {
+            if (value) onAssign(value)
+          }}
+        />
+      </TableCell>
+    </TableRow>
   )
 }
 

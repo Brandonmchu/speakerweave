@@ -30,6 +30,7 @@ import {
 import { stripUnsafeHtml } from '@/lib/sanitize'
 import { cn } from '@/lib/utils'
 import { Input } from '@/ui/input'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
 import {
@@ -41,7 +42,8 @@ import {
 } from '@/ui/dialog'
 import { Avatar, ProgramShell, useEmbedHeight } from '@/pages/publicProgramShared'
 
-const ALL_TRACKS = '__all__'
+/** Sentinel for "no filter" — shared by the track chips and the facet selects. */
+const ANY = '__all__'
 
 function htmlToText(html: string): string {
   return html
@@ -96,7 +98,9 @@ export function PublicSchedule() {
   const eventLocation = query.data?.event.location ?? null
 
   const [activeDate, setActiveDate] = useState('')
-  const [track, setTrack] = useState<string>(ALL_TRACKS)
+  const [track, setTrack] = useState<string>(ANY)
+  const [format, setFormat] = useState<string>(ANY)
+  const [room, setRoom] = useState<string>(ANY)
   const [search, setSearch] = useState('')
   const [mine, setMine] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -112,18 +116,38 @@ export function PublicSchedule() {
 
   const activeDay = days.find((d) => d.date === activeDate) ?? days[0]
 
-  // Track chips are built from whatever tracks actually appear in the program.
-  const tracks = useMemo(() => {
-    const seen = new Map<string, string | null>()
+  // Every facet is built from whatever actually appears in the published
+  // program — an event with one room never sees a room filter (EMB-03).
+  const { tracks, formats, rooms } = useMemo(() => {
+    const trackSeen = new Map<string, string | null>()
+    const formatSeen = new Set<string>()
+    const roomSeen = new Set<string>()
     for (const day of days) {
       for (const session of day.sessions) {
-        if (session.track?.name && !seen.has(session.track.name)) {
-          seen.set(session.track.name, session.track.color)
+        if (session.track?.name && !trackSeen.has(session.track.name)) {
+          trackSeen.set(session.track.name, session.track.color)
         }
+        if (session.format) formatSeen.add(session.format)
+        if (session.room) roomSeen.add(session.room)
       }
     }
-    return [...seen.entries()].map(([name, color]) => ({ name, color }))
+    const alpha = (a: string, b: string) => a.localeCompare(b)
+    return {
+      tracks: [...trackSeen.entries()].map(([name, color]) => ({ name, color })),
+      formats: [...formatSeen].sort(alpha),
+      rooms: [...roomSeen].sort(alpha),
+    }
   }, [days])
+
+  // Track, format and room compose: a session must clear all three (and then
+  // the search, and then the day tab) to show.
+  const matchesFacets = useCallback(
+    (session: ProgramSession) =>
+      (track === ANY || session.track?.name === track) &&
+      (format === ANY || session.format === format) &&
+      (room === ANY || session.room === room),
+    [track, format, room]
+  )
 
   const q = search.trim().toLowerCase()
   const searching = q.length > 0
@@ -131,13 +155,10 @@ export function PublicSchedule() {
   // inactive tab still surfaces. The default view is the active day's tab.
   const crossDay = searching || mine
 
-  // The active day's sessions (track-filtered) — the default, non-search view.
+  // The active day's sessions (facet-filtered) — the default, non-search view.
   const dayResults = useMemo(
-    () =>
-      (activeDay?.sessions ?? []).filter(
-        (s) => track === ALL_TRACKS || s.track?.name === track
-      ),
-    [activeDay, track]
+    () => (activeDay?.sessions ?? []).filter(matchesFacets),
+    [activeDay, matchesFacets]
   )
 
   // A flat, cross-day result set for the search and/or my-schedule views. Each
@@ -147,7 +168,7 @@ export function PublicSchedule() {
     const out: { session: ProgramSession; date: string }[] = []
     for (const day of days) {
       for (const session of day.sessions) {
-        if (track !== ALL_TRACKS && session.track?.name !== track) continue
+        if (!matchesFacets(session)) continue
         if (mine && !(session.id && starred.has(session.id))) continue
         if (searching) {
           const haystack = [
@@ -165,9 +186,16 @@ export function PublicSchedule() {
       }
     }
     return out
-  }, [days, track, q, mine, searching, starred, crossDay])
+  }, [days, matchesFacets, q, mine, searching, starred, crossDay])
 
   const starredCount = starred.size
+  const filtersActive = track !== ANY || format !== ANY || room !== ANY || searching
+  const clearFilters = () => {
+    setTrack(ANY)
+    setFormat(ANY)
+    setRoom(ANY)
+    setSearch('')
+  }
 
   const exportMine = () => {
     const inputs = days
@@ -238,8 +266,8 @@ export function PublicSchedule() {
                 <TrackChip
                   label="All tracks"
                   color={null}
-                  active={track === ALL_TRACKS}
-                  onClick={() => setTrack(ALL_TRACKS)}
+                  active={track === ANY}
+                  onClick={() => setTrack(ANY)}
                 />
                 {tracks.map((t) => (
                   <TrackChip
@@ -254,17 +282,77 @@ export function PublicSchedule() {
             ) : (
               <span />
             )}
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search sessions or speakers"
-                className="pl-9"
-                aria-label="Search sessions"
-              />
+            <div className="w-full sm:w-64">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search sessions or speakers"
+                  className="pl-9"
+                  aria-label="Search sessions"
+                />
+              </div>
+              {/* The count is cross-day: search spans every tab (EMB-02). */}
+              {searching && (
+                <p
+                  role="status"
+                  data-testid="search-result-count"
+                  className="mt-1.5 text-xs font-medium text-muted-foreground"
+                >
+                  {flatResults.length === 1
+                    ? '1 session matches'
+                    : `${flatResults.length} sessions match`}
+                </p>
+              )}
             </div>
           </div>
+
+          {/* Format + room facets, composed with the track chips (EMB-03).
+              Native <select>s so a keyboard — or a browser agent — can drive
+              them; only rendered for facets the programme actually uses. */}
+          {(formats.length > 0 || rooms.length > 0 || filtersActive) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {formats.length > 0 && (
+                <div className="w-[10.5rem]">
+                  <NativeSelect
+                    aria-label="Filter by format"
+                    className="h-8 text-xs"
+                    value={format}
+                    onValueChange={setFormat}
+                    options={[
+                      { value: ANY, label: 'All formats' },
+                      ...formats.map((name) => ({ value: name, label: name })),
+                    ]}
+                  />
+                </div>
+              )}
+              {rooms.length > 0 && (
+                <div className="w-[10.5rem]">
+                  <NativeSelect
+                    aria-label="Filter by room"
+                    className="h-8 text-xs"
+                    value={room}
+                    onValueChange={setRoom}
+                    options={[
+                      { value: ANY, label: 'All rooms' },
+                      ...rooms.map((name) => ({ value: name, label: name })),
+                    ]}
+                  />
+                </div>
+              )}
+              {filtersActive && (
+                <button
+                  type="button"
+                  data-testid="clear-filters"
+                  onClick={clearFilters}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Personal schedule: a device-local, no-login selection (EMB-10/11). */}
           <div className="flex flex-wrap items-center gap-2">
@@ -316,7 +404,7 @@ export function PublicSchedule() {
               description={
                 emptyWhenMine
                   ? 'Star sessions to build your personal schedule.'
-                  : 'Try a different track or clear your search.'
+                  : 'Try a different track, format or room — or clear your search.'
               }
             />
           ) : (
@@ -346,7 +434,7 @@ export function PublicSchedule() {
         ) : dayResults.length === 0 ? (
           <EmptyState
             title="No sessions match"
-            description="Try a different track or clear your search."
+            description="Try a different track, format or room — or clear your search."
           />
         ) : (
           <ol className="space-y-3">

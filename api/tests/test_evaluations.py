@@ -20,27 +20,38 @@ TRACK_A = "track-platform"
 TRACK_B = "track-ai"
 
 
-def _seed_plan(fake_db, *, status: str = "draft", anonymized: bool = False) -> None:
-    fake_db.seed(
-        "evaluation_plans",
-        {
-            "id": PLAN_ID,
-            "org_id": TEST_ORG_ID,
-            "event_id": TEST_EVENT_ID,
-            "name": "Program committee",
-            "instructions": "Judge the proposal, not the fame.",
-            "anonymized": anonymized,
-            "scale": "1_5",
-            "criteria": [
-                {"name": "Relevance", "weight": 40},
-                {"name": "Originality", "weight": 30},
-                {"name": "Speaker", "weight": 20},
-                {"name": "Clarity", "weight": 10},
-            ],
-            "status": status,
-            "session_filter": {},
-        },
-    )
+def _seed_plan(
+    fake_db,
+    *,
+    status: str = "draft",
+    anonymized: bool = False,
+    opens_at: str | None = None,
+    closes_at: str | None = None,
+) -> None:
+    record = {
+        "id": PLAN_ID,
+        "org_id": TEST_ORG_ID,
+        "event_id": TEST_EVENT_ID,
+        "name": "Program committee",
+        "instructions": "Judge the proposal, not the fame.",
+        "anonymized": anonymized,
+        "scale": "1_5",
+        "criteria": [
+            {"name": "Relevance", "weight": 40},
+            {"name": "Originality", "weight": 30},
+            {"name": "Speaker", "weight": 20},
+            {"name": "Clarity", "weight": 10},
+        ],
+        "status": status,
+        "session_filter": {},
+    }
+    # Left OUT entirely when unset — a plan seeded before migration 008 has no
+    # such keys at all, which is the shape the window logic must tolerate.
+    if opens_at is not None:
+        record["opens_at"] = opens_at
+    if closes_at is not None:
+        record["closes_at"] = closes_at
+    fake_db.seed("evaluation_plans", record)
 
 
 @pytest.fixture
@@ -676,3 +687,602 @@ def test_reviewer_can_only_read_and_score_their_assignments(evaluation_client):
     assert saved.status_code == 200
     assert saved.json()["review"]["overall"] == 4.0
     assert fake_db.rows("reviews")[0]["assignment_id"] == "assignment-owned"
+
+
+# ── review window (migration 008, ABS-01) ──────────────────────────────────
+# A plan carries the dates reviewing is open between. Both bounds are optional
+# and a missing bound is no bound, so nothing seeded before 008 changes.
+
+SCORE_PAYLOAD = {
+    "scores": {"Relevance": 5, "Originality": 4, "Speaker": 3, "Clarity": 2},
+    "comment": "Strong fit.",
+    "is_draft": False,
+}
+
+
+def _seed_owned_assignment(fake_db) -> None:
+    fake_db.seed(
+        "evaluators",
+        {"id": OWNER_ID, "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "email": "owner@test.dev"},
+    )
+    fake_db.seed(
+        "sessions",
+        {
+            "id": "session-a",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Owned assignment",
+            "status": "pending",
+        },
+    )
+    fake_db.seed(
+        "assignments",
+        {
+            "id": "assignment-owned",
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "evaluator_id": OWNER_ID,
+            "session_id": "session-a",
+        },
+    )
+
+
+def test_a_plan_with_no_window_accepts_reviews(evaluation_client):
+    """The state every seeded/pre-008 plan is in: no dates, no restriction."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    _seed_owned_assignment(fake_db)
+
+    saved = client.put("/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD)
+
+    assert saved.status_code == 200
+    assert saved.json()["review"]["overall"] == 4.0
+
+
+def test_a_review_inside_the_window_is_accepted(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(
+        fake_db,
+        status="open",
+        opens_at="2020-01-01T00:00:00+00:00",
+        closes_at="2099-12-31T23:59:59+00:00",
+    )
+    _seed_owned_assignment(fake_db)
+
+    assert client.put("/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD).status_code == 200
+
+
+def test_a_review_after_the_window_closed_is_403(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(
+        fake_db,
+        status="open",
+        opens_at="2020-01-01T00:00:00+00:00",
+        closes_at="2020-01-10T23:59:59+00:00",
+    )
+    _seed_owned_assignment(fake_db)
+
+    blocked = client.put("/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD)
+
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"] == "The review window closed Jan 10, 2020."
+    # nothing was written — a closed window is not a partial save
+    assert fake_db.rows("reviews") == []
+
+
+def test_a_review_before_the_window_opens_is_403(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", opens_at="2099-01-01T00:00:00+00:00")
+    _seed_owned_assignment(fake_db)
+
+    blocked = client.put("/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD)
+
+    assert blocked.status_code == 403
+    assert "review window opens" in blocked.json()["detail"]
+    assert fake_db.rows("reviews") == []
+
+
+def test_the_window_also_governs_drafts(evaluation_client):
+    """A deadline that only stops final submissions isn't a deadline."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", closes_at="2020-01-10T23:59:59+00:00")
+    _seed_owned_assignment(fake_db)
+
+    draft = client.put(
+        "/public/review/submissions/assignment-owned",
+        json={"scores": {"Relevance": 4}, "is_draft": True},
+    )
+    assert draft.status_code == 403
+
+
+def test_plan_create_stores_the_window_and_the_detail_reads_it_back(evaluation_client):
+    client, _fake_db, _reviewer = evaluation_client
+
+    created = client.post(
+        f"/api/events/{TEST_EVENT_ID}/evaluation-plans",
+        json={"name": "Committee", "opens_at": "2026-10-01", "closes_at": "2026-10-10"},
+    )
+
+    assert created.status_code == 201
+    plan = created.json()["plan"]
+    # a bare date opens at midnight and closes at the END of the day it names
+    assert plan["opens_at"].startswith("2026-10-01T00:00:00")
+    assert plan["closes_at"].startswith("2026-10-10T23:59:59")
+
+    detail = client.get(f"/api/evaluation-plans/{plan['id']}").json()
+    assert detail["plan"]["opens_at"] == plan["opens_at"]
+    assert detail["plan"]["closes_at"] == plan["closes_at"]
+
+    listed = client.get(f"/api/events/{TEST_EVENT_ID}/evaluation-plans").json()["plans"]
+    assert listed[0]["closes_at"] == plan["closes_at"]
+
+
+def test_plan_patch_moves_and_clears_the_window(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, opens_at="2026-10-01T00:00:00+00:00", closes_at="2026-10-10T23:59:59+00:00")
+
+    moved = client.patch(f"/api/evaluation-plans/{PLAN_ID}", json={"closes_at": "2026-10-20"})
+    assert moved.status_code == 200
+    assert moved.json()["plan"]["closes_at"].startswith("2026-10-20T23:59:59")
+
+    cleared = client.patch(f"/api/evaluation-plans/{PLAN_ID}", json={"opens_at": None, "closes_at": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["plan"]["opens_at"] is None
+    assert cleared.json()["plan"]["closes_at"] is None
+
+
+def test_a_window_that_closes_before_it_opens_is_rejected(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, opens_at="2026-10-01T00:00:00+00:00")
+
+    # checked against the bound already stored, not just the two in one payload
+    rejected = client.patch(f"/api/evaluation-plans/{PLAN_ID}", json={"closes_at": "2026-09-01"})
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "The review window closes before it opens"
+
+    both_at_once = client.post(
+        f"/api/events/{TEST_EVENT_ID}/evaluation-plans",
+        json={"name": "Backwards", "opens_at": "2026-10-10", "closes_at": "2026-10-01"},
+    )
+    assert both_at_once.status_code == 400
+
+
+def test_an_unparseable_window_value_is_a_400(evaluation_client):
+    client, _fake_db, _reviewer = evaluation_client
+    rejected = client.post(
+        f"/api/events/{TEST_EVENT_ID}/evaluation-plans",
+        json={"name": "Committee", "closes_at": "next tuesday"},
+    )
+    assert rejected.status_code == 400
+
+
+def test_plans_still_save_when_migration_008_is_missing(evaluation_client, monkeypatch):
+    """A database still on 007 drops the dates rather than failing the save."""
+    client, fake_db, _reviewer = evaluation_client
+    import services.evaluations as evaluation_service
+
+    monkeypatch.setattr(evaluation_service, "_window_columns_present", True)
+    original_table = fake_db.table
+
+    def table(name: str):
+        query = original_table(name)
+        if name == "evaluation_plans":
+            for operation in ("insert", "update"):
+                inner = getattr(query, operation)
+
+                def guarded(payload, _inner=inner):
+                    if any(field in payload for field in ("opens_at", "closes_at")):
+                        raise RuntimeError(
+                            "{'code': 'PGRST204', 'message': \"Could not find the "
+                            "'opens_at' column of 'evaluation_plans' in the schema cache\"}"
+                        )
+                    return _inner(payload)
+
+                setattr(query, operation, guarded)
+        return query
+
+    monkeypatch.setattr(fake_db, "table", table)
+
+    created = client.post(
+        f"/api/events/{TEST_EVENT_ID}/evaluation-plans",
+        json={"name": "Committee", "opens_at": "2026-10-01", "closes_at": "2026-10-10"},
+    )
+
+    assert created.status_code == 201
+    plan = created.json()["plan"]
+    assert plan["name"] == "Committee"
+    # the keys are always present in the response, just empty
+    assert (plan["opens_at"], plan["closes_at"]) == (None, None)
+    assert "opens_at" not in fake_db.rows("evaluation_plans")[0]
+
+    # …and the next write skips the doomed attempt entirely
+    patched = client.patch(f"/api/evaluation-plans/{plan['id']}", json={"closes_at": "2026-10-20"})
+    assert patched.status_code == 200
+    assert patched.json()["plan"]["closes_at"] is None
+
+
+# ── per-submission assignment (ABS-05) ─────────────────────────────────────
+
+
+def _seed_pair(fake_db) -> None:
+    fake_db.seed(
+        "evaluators",
+        {
+            "id": OWNER_ID,
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "ada@test.dev",
+            "name": "Ada Lovelace",
+        },
+        {
+            "id": OTHER_EVALUATOR_ID,
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "grace@test.dev",
+            "name": "Grace Hopper",
+        },
+        {
+            "id": "evaluator-foreign",
+            "org_id": OTHER_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "foreign@test.dev",
+            "name": "Not ours",
+        },
+    )
+    fake_db.seed(
+        "sessions",
+        {
+            "id": "session-a",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "A talk",
+            "friendly_id": "SESS-1",
+            "status": "pending",
+        },
+        {
+            "id": "session-b",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "B talk",
+            "friendly_id": "SESS-2",
+            "status": "accept_queue",
+        },
+        {
+            "id": "session-foreign",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Another org's talk",
+            "status": "pending",
+        },
+    )
+
+
+def test_a_single_reviewer_can_be_assigned_to_a_single_submission(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    _seed_pair(fake_db)
+
+    created = client.post(
+        f"/api/plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": OWNER_ID, "session_id": "session-b"},
+    )
+
+    assert created.status_code == 201
+    assignment = created.json()["assignment"]
+    assert assignment["evaluator_id"] == OWNER_ID
+    assert assignment["session_id"] == "session-b"
+    assert assignment["evaluator_name"] == "Ada Lovelace"
+    assert assignment["session_title"] == "B talk"
+    assert len(fake_db.rows("assignments")) == 1
+
+    # the long-form path is the same endpoint
+    twin = client.post(
+        f"/api/evaluation-plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": OTHER_EVALUATOR_ID, "session_id": "session-b"},
+    )
+    assert twin.status_code == 201
+    assert len(fake_db.rows("assignments")) == 2
+
+
+def test_assigning_the_same_pair_twice_is_a_409(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    _seed_pair(fake_db)
+    body = {"evaluator_id": OWNER_ID, "session_id": "session-a"}
+
+    assert client.post(f"/api/plans/{PLAN_ID}/assignments", json=body).status_code == 201
+    duplicate = client.post(f"/api/plans/{PLAN_ID}/assignments", json=body)
+
+    assert duplicate.status_code == 409
+    assert "already assigned" in duplicate.json()["detail"]
+    assert len(fake_db.rows("assignments")) == 1
+
+
+def test_single_assignment_never_crosses_an_org(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    _seed_pair(fake_db)
+    fake_db.seed(
+        "evaluation_plans",
+        {
+            "id": "foreign-plan",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Theirs",
+            "criteria": [{"name": "Relevance", "weight": 100}],
+            "status": "draft",
+            "session_filter": {},
+        },
+    )
+
+    foreign_evaluator = client.post(
+        f"/api/plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": "evaluator-foreign", "session_id": "session-a"},
+    )
+    foreign_session = client.post(
+        f"/api/plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": OWNER_ID, "session_id": "session-foreign"},
+    )
+    foreign_plan = client.post(
+        "/api/plans/foreign-plan/assignments",
+        json={"evaluator_id": OWNER_ID, "session_id": "session-a"},
+    )
+    unknown_session = client.post(
+        f"/api/plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": OWNER_ID, "session_id": "session-nope"},
+    )
+
+    assert foreign_evaluator.status_code == 404
+    assert foreign_session.status_code == 404
+    assert foreign_plan.status_code == 404
+    assert unknown_session.status_code == 404
+    assert fake_db.rows("assignments") == []
+
+
+def test_unassigning_drops_the_pairing_and_its_review(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    _seed_pair(fake_db)
+    created = client.post(
+        f"/api/plans/{PLAN_ID}/assignments",
+        json={"evaluator_id": OWNER_ID, "session_id": "session-a"},
+    ).json()["assignment"]
+    fake_db.seed(
+        "reviews",
+        {
+            "id": "review-1",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": created["id"],
+            "scores": {},
+            "is_draft": True,
+        },
+    )
+
+    removed = client.delete(f"/api/plans/{PLAN_ID}/assignments/{created['id']}")
+
+    assert removed.status_code == 204
+    assert fake_db.rows("assignments") == []
+    # The review's removal is Postgres' job: reviews.assignment_id is
+    # ON DELETE CASCADE (001_init.sql), so one scoped assignment delete drops
+    # the pairing and its review atomically. The fake store has no FK engine,
+    # so the review row lingering HERE is expected — what matters is that the
+    # service issues exactly one delete, against the assignment.
+    assert [r["id"] for r in fake_db.rows("reviews")] == ["review-1"]
+
+
+def test_unassigning_is_org_scoped(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    fake_db.seed(
+        "assignments",
+        {
+            "id": "assignment-foreign",
+            "org_id": OTHER_ORG_ID,
+            "plan_id": PLAN_ID,
+            "evaluator_id": "evaluator-foreign",
+            "session_id": "session-foreign",
+        },
+    )
+
+    denied = client.delete(f"/api/plans/{PLAN_ID}/assignments/assignment-foreign")
+
+    assert denied.status_code == 404
+    assert len(fake_db.rows("assignments")) == 1
+
+
+def test_the_assignment_board_lists_candidates_with_their_reviewers(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db)
+    _seed_pair(fake_db)
+    fake_db.seed(
+        "sessions",
+        {
+            "id": "session-accepted",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Already decided",
+            "status": "accepted",
+        },
+    )
+    fake_db.seed(
+        "assignments",
+        {
+            "id": "assignment-1",
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "evaluator_id": OWNER_ID,
+            "session_id": "session-a",
+        },
+    )
+    fake_db.seed(
+        "reviews",
+        {
+            "id": "review-1",
+            "org_id": TEST_ORG_ID,
+            "assignment_id": "assignment-1",
+            "scores": {},
+            "is_draft": True,
+        },
+    )
+
+    board = client.get(f"/api/plans/{PLAN_ID}/assignments").json()
+
+    assert [row["id"] for row in board["evaluators"]] == [OWNER_ID, OTHER_EVALUATOR_ID]
+    titles = [row["title"] for row in board["sessions"]]
+    # reviewable submissions only; another org's talk is never a candidate
+    assert titles == ["A talk", "B talk"]
+    first_row = board["sessions"][0]
+    assert first_row["assignments"] == [
+        {
+            "assignment_id": "assignment-1",
+            "evaluator_id": OWNER_ID,
+            "name": "Ada Lovelace",
+            "email": "ada@test.dev",
+            "review_status": "in_progress",
+        }
+    ]
+    assert board["sessions"][1]["assignments"] == []
+
+
+def test_the_assignment_board_is_org_scoped(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    fake_db.seed(
+        "evaluation_plans",
+        {
+            "id": "foreign-plan",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Theirs",
+            "criteria": [{"name": "Relevance", "weight": 100}],
+            "status": "draft",
+            "session_filter": {},
+        },
+    )
+    assert client.get("/api/plans/foreign-plan/assignments").status_code == 404
+
+
+# ── targeted laggard reminders (ABS-09) ────────────────────────────────────
+
+
+def _seed_reminder_fixture(fake_db) -> None:
+    """Three reviewers: one finished, one half-done, one who never started."""
+    _seed_plan(fake_db, status="open", closes_at="2099-10-10T23:59:59+00:00")
+    fake_db.seed(
+        "evaluators",
+        {
+            "id": "evaluator-done",
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "done@test.dev",
+            "name": "Finished Fran",
+        },
+        {
+            "id": "evaluator-draft",
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "draft@test.dev",
+            "name": "Drafting Dana",
+        },
+        {
+            "id": "evaluator-idle",
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "idle@test.dev",
+            "name": "Idle Ida",
+        },
+    )
+    fake_db.seed(
+        "assignments",
+        {"id": "a-done", "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "evaluator_id": "evaluator-done", "session_id": "session-a"},
+        {"id": "a-draft", "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "evaluator_id": "evaluator-draft", "session_id": "session-a"},
+        {"id": "a-idle", "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "evaluator_id": "evaluator-idle", "session_id": "session-a"},
+    )
+    fake_db.seed(
+        "reviews",
+        {"id": "r-done", "org_id": TEST_ORG_ID, "assignment_id": "a-done", "scores": {}, "is_draft": False},
+        {"id": "r-draft", "org_id": TEST_ORG_ID, "assignment_id": "a-draft", "scores": {}, "is_draft": True},
+    )
+
+
+def test_remind_laggards_emails_only_the_reviewers_with_work_left(evaluation_client, monkeypatch):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_reminder_fixture(fake_db)
+    monkeypatch.setenv("FRONTEND_URL", "https://dais.test")
+
+    response = client.post(f"/api/plans/{PLAN_ID}/remind-laggards")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reminded"] == 2
+    # the reviewer who submitted is left alone; a draft still counts as unfinished
+    assert sorted(body["evaluators"]) == ["Drafting Dana", "Idle Ida"]
+    queued = fake_db.rows("email_outbox")
+    assert len(queued) == 2
+    assert {row["payload"]["to"] for row in queued} == {"draft@test.dev", "idle@test.dev"}
+    assert all(row["template_key"] == "evaluation_reminder" for row in queued)
+    assert all(row["status"] == "queued" for row in queued)
+    assert all(row["dedupe_key"].startswith("eval-laggard:") for row in queued)
+    assert all("https://dais.test/review/" in row["payload"]["reviewer_link"] for row in queued)
+    # the deadline the reminder is about rides along
+    assert all("Oct 10, 2099" in row["payload"]["body_html"] for row in queued)
+
+
+def test_remind_laggards_does_not_storm_on_a_second_click(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_reminder_fixture(fake_db)
+
+    first_click = client.post(f"/api/plans/{PLAN_ID}/remind-laggards").json()
+    second_click = client.post(f"/api/plans/{PLAN_ID}/remind-laggards").json()
+
+    assert first_click["reminded"] == 2
+    assert second_click["reminded"] == 0
+    assert second_click["skipped"] == 2
+    assert sorted(second_click["already_reminded"]) == ["Drafting Dana", "Idle Ida"]
+    assert len(fake_db.rows("email_outbox")) == 2
+
+
+def test_remind_laggards_with_nobody_behind_queues_nothing(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    fake_db.seed(
+        "evaluators",
+        {"id": "evaluator-done", "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "email": "done@test.dev", "name": "Fran"},
+    )
+    fake_db.seed(
+        "assignments",
+        {"id": "a-done", "org_id": TEST_ORG_ID, "plan_id": PLAN_ID, "evaluator_id": "evaluator-done", "session_id": "session-a"},
+    )
+    fake_db.seed(
+        "reviews",
+        {"id": "r-done", "org_id": TEST_ORG_ID, "assignment_id": "a-done", "scores": {}, "is_draft": False},
+    )
+
+    body = client.post(f"/api/plans/{PLAN_ID}/remind-laggards").json()
+
+    assert body == {
+        "reminded": 0,
+        "evaluators": [],
+        "skipped": 0,
+        "already_reminded": [],
+        "incomplete_reviewers": 0,
+        "outstanding": 0,
+    }
+    assert fake_db.rows("email_outbox") == []
+
+
+def test_remind_laggards_is_org_scoped(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    fake_db.seed(
+        "evaluation_plans",
+        {
+            "id": "foreign-plan",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Theirs",
+            "criteria": [{"name": "Relevance", "weight": 100}],
+            "status": "open",
+            "session_filter": {},
+        },
+    )
+    assert client.post("/api/plans/foreign-plan/remind-laggards").status_code == 404
+    assert fake_db.rows("email_outbox") == []
