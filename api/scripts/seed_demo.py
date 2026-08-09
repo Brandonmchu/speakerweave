@@ -557,10 +557,13 @@ def build_tasks() -> list[dict]:
 # contact_idx -> [(task_idx, status)].  Statuses: todo/submitted/approved/denied/done.
 # approved+done count as finished; a contact with a portal visit AND zero
 # outstanding assignments reads as onboarding-complete on the dashboard.
+# NOTE: the ONBOARDED contacts must have ALL 6 canonical tasks finished — the
+# accept flow auto-provisions every canonical task, and a single leftover to-do
+# would drop them out of "onboarded". So they list all of tasks 1..6.
 _TASK_ASSIGNMENTS = {
-    1: [(1, "done"), (2, "approved"), (3, "done"), (4, "approved")],   # portal ✓ -> ONBOARDED
-    4: [(1, "done"), (3, "done"), (5, "done")],                        # portal ✓ -> ONBOARDED
-    10: [(1, "approved"), (4, "approved")],                            # portal ✓ -> ONBOARDED
+    1: [(1, "done"), (2, "approved"), (3, "done"), (4, "approved"), (5, "done"), (6, "approved")],   # portal ✓ -> ONBOARDED
+    4: [(1, "done"), (2, "done"), (3, "done"), (4, "done"), (5, "done"), (6, "done")],               # portal ✓ -> ONBOARDED
+    10: [(1, "approved"), (2, "approved"), (3, "approved"), (4, "approved"), (5, "approved"), (6, "approved")],  # portal ✓ -> ONBOARDED
     2: [(1, "done"), (2, "todo"), (3, "todo"), (4, "submitted")],      # portal ✓, 3 outstanding
     3: [(1, "submitted"), (3, "todo")],                                # portal ✓, 2 outstanding
     6: [(1, "done"), (2, "todo")],                                     # portal ✓, 1 outstanding
