@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 MAX_ANSWER_KEYS = 100
 MAX_ANSWER_STR_LEN = 10000
 
+# Only a choice question can name a track. Matching every free-text answer
+# against the track list would turn an abstract that mentions "Platform" into a
+# track assignment.
+TRACK_ANSWER_FIELD_TYPES = {"dropdown", "multi_select"}
+
 
 class SubmissionRequest(BaseModel):
     email: EmailStr
@@ -78,6 +83,67 @@ def _clean_answers(raw: dict[str, Any], field_ids: set[str]) -> dict[str, Any]:
         if key in field_ids:
             cleaned[key] = value
     return cleaned
+
+
+def _choice_values(value: Any) -> list[str]:
+    """A choice answer as a list. A multi_select posts its picks as one
+    comma-separated string (the answer map is scalar-only by design)."""
+    if value is None or isinstance(value, bool):
+        return []
+    text = str(value).strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+async def _tracks_from_answers(
+    org_id: str, event_id: str, fields: list[dict], answers: dict[str, Any]
+) -> list[str]:
+    """Track ids this submission selected, in the order the speaker chose them.
+
+    A talk is submitted to one or more tracks: a choice answer that matches a
+    track's name (or carries its id outright) selects it, and a multi_select
+    can select several at once. The first is the session's PRIMARY track and
+    goes on `sessions.track_id` exactly as a single-track submission always
+    did; the rest join it in `session_tracks`. No match = no track, which is
+    also what happened before this existed.
+    """
+    answered = [
+        field
+        for field in fields
+        if field.get("type") in TRACK_ANSWER_FIELD_TYPES and answers.get(field["id"]) is not None
+    ]
+    if not answered:
+        return []
+
+    tracks = rows(
+        await db(
+            lambda: supabase.table("tracks")
+            .select("id, name")
+            .eq("event_id", event_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "public_submission_tracks",
+        )
+    )
+    if not tracks:
+        return []
+    by_key: dict[str, str] = {}
+    for track in tracks:
+        by_key.setdefault(str(track["id"]).casefold(), track["id"])
+        name = str(track.get("name") or "").strip().casefold()
+        if name:
+            by_key.setdefault(name, track["id"])
+
+    # `fields` is already in page/order order, so "first" is the first choice
+    # on the form, not whatever order the browser serialized.
+    chosen: list[str] = []
+    for field in answered:
+        for value in _choice_values(answers.get(field["id"])):
+            track_id = by_key.get(value.casefold())
+            if track_id and track_id not in chosen:
+                chosen.append(track_id)
+    return chosen
 
 
 async def _get_form_by_slug(slug: str) -> dict:
@@ -267,6 +333,8 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     if friendly_id_raw is None:
         raise HTTPException(status_code=500, detail="Could not allocate submission id")
 
+    track_ids = await _tracks_from_answers(org_id, event_id, fields, answers)
+
     session_payload = {
         "org_id": org_id,
         "event_id": event_id,
@@ -280,6 +348,11 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
         "submitter_contact_id": contact["id"],
         "submitted_at": datetime.now(timezone.utc).isoformat(),
     }
+    if track_ids:
+        # The primary track keeps living on the session, so every reader that
+        # already knows about track_id (schedule, program, v1, dashboard) sees
+        # this submission exactly as it would have seen a single-track one.
+        session_payload["track_id"] = track_ids[0]
     session = first(
         await db(
             lambda: supabase.table("sessions")
@@ -305,5 +378,25 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
         .execute(),
         "public_session_participant_create",
     )
+
+    if track_ids:
+        # Best-effort by design: the submission is already accepted and its
+        # primary track is already on the row, so a failure here costs the
+        # extra track memberships, not the speaker's talk.
+        memberships = [
+            {"org_id": org_id, "session_id": session["id"], "track_id": track_id}
+            for track_id in track_ids
+        ]
+        try:
+            await db(
+                lambda: supabase.table("session_tracks")
+                .upsert(memberships, on_conflict="session_id,track_id")
+                .execute(),
+                "public_session_tracks_create",
+            )
+        except APIError:
+            logger.warning(
+                "public: could not persist session tracks session_id=%s", session["id"]
+            )
 
     return {"id": session["id"], "friendly_id": session.get("friendly_id")}

@@ -3,14 +3,15 @@
  *
  * The panel is where a reviewer actually reads a submission, so what's covered
  * here is that the answers arrive rendered (labels in form order, a checkbox as
- * Yes/No), that participants show their roles, and that a decision button
- * PATCHes the status and moves the badge before the round trip returns.
+ * Yes/No), that participants show their roles, and that the minimum review
+ * decision flow confirms and POSTs optional speaker feedback.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { decideSubmission } from '@/lib/api'
 import { Inbox } from '@/pages/Inbox'
 
 const EVENT = { id: 'event-1', name: 'DaisConf', slug: 'daisconf' }
@@ -44,7 +45,8 @@ const DETAIL = {
   ],
 }
 
-let patches: Array<{ url: string; body: unknown }> = []
+let writes: Array<{ url: string; method: string; body: unknown }> = []
+let currentStatus = SUBMISSION.status
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -66,22 +68,45 @@ function renderInbox() {
 
 describe('Inbox detail panel', () => {
   beforeEach(() => {
-    patches = []
+    writes = []
+    currentStatus = SUBMISSION.status
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input)
+        if (init?.method === 'POST' && url.endsWith('/decision')) {
+          const body = JSON.parse(String(init.body ?? '{}'))
+          writes.push({ url, method: 'POST', body })
+          currentStatus =
+            body.decision === 'approve'
+              ? 'accepted'
+              : body.decision === 'maybe'
+                ? 'accept_queue'
+                : 'declined'
+          return jsonResponse({
+            session: { ...SUBMISSION, status: currentStatus },
+            onboarding: { tasks_assigned: body.decision === 'approve' ? 6 : 0 },
+            emailed: Boolean(body.email_speaker && body.feedback),
+          })
+        }
         if (init?.method === 'PATCH') {
           const body = JSON.parse(String(init.body ?? '{}'))
-          patches.push({ url, body })
-          return jsonResponse({ session: { ...SUBMISSION, ...body } })
+          writes.push({ url, method: 'PATCH', body })
+          currentStatus = body.status
+          return jsonResponse({ session: { ...SUBMISSION, status: currentStatus } })
         }
         if (url.endsWith('/api/events')) return jsonResponse({ events: [EVENT] })
         if (url.includes('/submissions')) {
-          return jsonResponse({ event: EVENT, submissions: [SUBMISSION], count: 1 })
+          return jsonResponse({
+            event: EVENT,
+            submissions: [{ ...SUBMISSION, status: currentStatus }],
+            count: 1,
+          })
         }
-        if (url.includes('/api/sessions/')) return jsonResponse(DETAIL)
+        if (url.includes('/api/sessions/')) {
+          return jsonResponse({ ...DETAIL, session: { ...SUBMISSION, status: currentStatus } })
+        }
         return jsonResponse({}, 404)
       })
     )
@@ -111,17 +136,49 @@ describe('Inbox detail panel', () => {
     // Participants with their role.
     expect(screen.getByText('speaker')).toBeInTheDocument()
     expect(screen.getByText('Primary')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Maybe' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument()
   })
 
-  it('patches the status from a decision button', async () => {
+  it('confirms a decision, sends speaker feedback, and updates the status', async () => {
     renderInbox()
     fireEvent.click(await screen.findByText('Analytical Engines'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
 
-    await waitFor(() => expect(patches).toHaveLength(1))
-    expect(patches[0].url).toContain('/api/sessions/session-1')
-    expect(patches[0].body).toEqual({ status: 'accepted' })
+    expect(screen.getByText('Confirm approve', { selector: 'p' })).toBeInTheDocument()
+    const emailCheckbox = screen.getByRole('checkbox', {
+      name: 'Email this decision to the speaker',
+    })
+    expect(emailCheckbox).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Message to speaker (optional)'), {
+      target: { value: 'Please send the final abstract by Friday.' },
+    })
+    fireEvent.click(emailCheckbox)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm approve' }))
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]).toEqual({
+      url: '/api/sessions/session-1/decision',
+      method: 'POST',
+      body: {
+        decision: 'approve',
+        feedback: 'Please send the final abstract by Friday.',
+        email_speaker: true,
+      },
+    })
     // Optimistic: the badge moves without waiting for a refetch.
     expect(await screen.findAllByText('Accepted')).not.toHaveLength(0)
+  })
+
+  it('decideSubmission posts to the encoded decision URL', async () => {
+    await decideSubmission('session/with space', { decision: 'maybe' })
+
+    expect(writes[0]).toEqual({
+      url: '/api/sessions/session%2Fwith%20space/decision',
+      method: 'POST',
+      body: { decision: 'maybe' },
+    })
   })
 })

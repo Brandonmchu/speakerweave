@@ -51,6 +51,8 @@ class PlanPatchRequest(BaseModel):
 class EvaluatorCreateRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=320)
     name: str = Field(default="", max_length=200)
+    # Tracks this reviewer covers. Omitted/empty = every track.
+    track_ids: list[str] | None = Field(default=None, max_length=100)
 
     @field_validator("email")
     @classmethod
@@ -61,10 +63,16 @@ class EvaluatorCreateRequest(BaseModel):
         return value
 
 
+class EvaluatorPatchRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    track_ids: list[str] | None = Field(default=None, max_length=100)
+
+
 class AssignRequest(BaseModel):
     session_ids: list[str] | None = None
     evaluator_ids: list[str] | None = None
-    mode: Literal["all_to_all"]
+    # by_track pairs each reviewer with the sessions whose tracks they cover.
+    mode: Literal["all_to_all", "by_track"] = "all_to_all"
 
 
 @router.post("/events/{event_id}/evaluation-plans", status_code=201)
@@ -122,7 +130,27 @@ async def create_evaluator(
     auth: tuple = Depends(get_current_user_and_org),
 ):
     _user_id, org_id = auth
-    evaluator = await evaluations.add_evaluator(org_id, plan_id, payload.email, payload.name)
+    evaluator = await evaluations.add_evaluator(
+        org_id, plan_id, payload.email, payload.name, payload.track_ids
+    )
+    return {"evaluator": evaluator}
+
+
+@router.patch("/evaluation-plans/{plan_id}/evaluators/{evaluator_id}")
+async def patch_evaluator(
+    plan_id: str,
+    evaluator_id: str,
+    payload: EvaluatorPatchRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Rename a reviewer, or change which tracks they review."""
+    _user_id, org_id = auth
+    patch = payload.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    if patch.get("track_ids") is None and "track_ids" in patch:
+        patch["track_ids"] = []
+    evaluator = await evaluations.update_evaluator(org_id, plan_id, evaluator_id, patch)
     return {"evaluator": evaluator}
 
 
@@ -144,9 +172,10 @@ async def assign_sessions(
     auth: tuple = Depends(get_current_user_and_org),
 ):
     _user_id, org_id = auth
-    return await evaluations.assign_all_to_all(
+    return await evaluations.assign_sessions(
         org_id,
         plan_id,
+        mode=payload.mode,
         session_ids=payload.session_ids,
         evaluator_ids=payload.evaluator_ids,
     )

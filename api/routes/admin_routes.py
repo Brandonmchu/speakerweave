@@ -5,13 +5,17 @@ leak, not a bug you notice in testing.
 
 from __future__ import annotations
 
+import html as html_module
 import logging
 from datetime import datetime, time, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from auth import get_current_user_and_org, verify_org_access
+from services import mailer
+from services.comms import DEFAULT_TEMPLATES, render_template
 from services.forms import load_form_layout
 from services.invites import (
     InviteTargetNotFound,
@@ -19,6 +23,7 @@ from services.invites import (
     cancel_session_invites,
     send_session_invites,
 )
+from services.onboarding import provision_speaker_onboarding
 from services.org_scope import fetch_scoped
 from services.slugs import slugify, unique_slug
 from services.supabase_helpers import db, first, rows
@@ -52,6 +57,12 @@ DEFAULT_FORMATS = (
 
 class SessionPatchRequest(BaseModel):
     status: str
+
+
+class SessionDecisionRequest(BaseModel):
+    decision: Literal["approve", "maybe", "deny"]
+    feedback: str | None = Field(default=None, max_length=10_000)
+    email_speaker: bool = False
 
 
 class EventCreateRequest(BaseModel):
@@ -437,6 +448,235 @@ async def update_session(
     if not updated:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session": updated}
+
+
+_DECISION_STATUSES = {
+    "approve": "accepted",
+    "maybe": "accept_queue",
+    "deny": "declined",
+}
+
+_MAYBE_TEMPLATE = {
+    "key": "maybe",
+    "subject": "A question about {{session_title}} for {{event_name}}",
+    "body_html": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>Thank you for submitting <strong>{{session_title}}</strong> to {{event_name}}. "
+        "We're still considering it and have a note for you below.</p>"
+    ),
+}
+
+
+def _fallback_decision_template(template_key: str) -> dict[str, str]:
+    if template_key == "maybe":
+        return _MAYBE_TEMPLATE
+    return next(template for template in DEFAULT_TEMPLATES if template["key"] == template_key)
+
+
+async def _decision_recipients(session: dict, org_id: str) -> list[dict]:
+    """The submitter plus session speakers, once each and scoped at every hop."""
+    participants = rows(
+        await db(
+            lambda: supabase.table("session_participants")
+            .select("contact_id, role")
+            .eq("org_id", org_id)
+            .eq("session_id", session["id"])
+            .in_("role", ["speaker", "submitter"])
+            .execute(),
+            "decision_participants_lookup",
+        )
+    )
+    contact_ids: list[str] = []
+    if session.get("submitter_contact_id"):
+        contact_ids.append(str(session["submitter_contact_id"]))
+    contact_ids.extend(
+        str(participant["contact_id"])
+        for participant in participants
+        if participant.get("contact_id")
+    )
+    contact_ids = list(dict.fromkeys(contact_ids))
+    if not contact_ids:
+        return []
+
+    contacts = rows(
+        await db(
+            lambda: supabase.table("contacts")
+            .select("id, email, first_name, last_name")
+            .eq("org_id", org_id)
+            .eq("event_id", session["event_id"])
+            .in_("id", contact_ids)
+            .execute(),
+            "decision_contacts_lookup",
+        )
+    )
+    by_id = {str(contact["id"]): contact for contact in contacts if contact.get("id")}
+    return [by_id[contact_id] for contact_id in contact_ids if by_id.get(contact_id, {}).get("email")]
+
+
+async def _send_decision_feedback(
+    session: dict,
+    org_id: str,
+    decision: Literal["approve", "maybe", "deny"],
+    feedback: str,
+) -> bool:
+    """Render, deliver, and record decision mail for this one submission."""
+    event = first(
+        await db(
+            lambda: supabase.table("events")
+            .select("id, name")
+            .eq("id", session["event_id"])
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "decision_event_lookup",
+        )
+    )
+    if not event:
+        return False
+
+    recipients = await _decision_recipients(session, org_id)
+    if not recipients:
+        return False
+
+    template_key = {"approve": "accept", "maybe": "maybe", "deny": "decline"}[decision]
+    template = first(
+        await db(
+            lambda: supabase.table("email_templates")
+            .select("key, subject, body_html")
+            .eq("org_id", org_id)
+            .eq("event_id", session["event_id"])
+            .eq("key", template_key)
+            .limit(1)
+            .execute(),
+            "decision_template_lookup",
+        )
+    ) or _fallback_decision_template(template_key)
+
+    feedback_html = html_module.escape(feedback).replace("\n", "<br>")
+    sent = 0
+    for recipient in recipients:
+        first_name = str(recipient.get("first_name") or "")
+        last_name = str(recipient.get("last_name") or "")
+        context = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "full_name": " ".join(part for part in (first_name, last_name) if part).strip(),
+            "email": str(recipient.get("email") or ""),
+            "event_name": str(event.get("name") or ""),
+            "session_title": str(session.get("title") or ""),
+        }
+        subject = render_template(str(template.get("subject") or ""), context)
+        body_html = render_template(str(template.get("body_html") or ""), context)
+        body_html += (
+            '<div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">'
+            '<p style="margin:0 0 6px;font-weight:600">Message from the event team</p>'
+            f'<p style="margin:0;white-space:normal">{feedback_html}</p></div>'
+        )
+
+        now = datetime.now(timezone.utc).isoformat()
+        delivery: dict | None = None
+        error: str | None = None
+        status = "sent"
+        try:
+            delivery = await mailer.send_email(
+                to=str(recipient["email"]),
+                subject=subject,
+                html=body_html,
+            )
+            sent += 1
+        except Exception as exc:  # one speaker's mailbox must not block the rest
+            logger.exception(
+                "decision email failed session=%s contact=%s",
+                session["id"],
+                recipient.get("id"),
+            )
+            status = "failed"
+            error = str(exc)
+
+        outbox_payload: dict = {
+            "to": recipient.get("email"),
+            "subject": subject,
+            "body_html": body_html,
+            "context": context,
+            "feedback": feedback,
+            "decision": decision,
+        }
+        if delivery is not None:
+            outbox_payload["delivery"] = delivery
+        outbox_record = {
+            "org_id": org_id,
+            "event_id": session["event_id"],
+            "contact_id": recipient["id"],
+            "template_key": template_key,
+            "payload": outbox_payload,
+            "attempts": 1,
+            "last_error": error,
+            "status": status,
+            "sent_at": now if status == "sent" else None,
+            "created_at": now,
+        }
+        await db(
+            lambda outbox_record=outbox_record: supabase.table("email_outbox")
+            .insert(outbox_record)
+            .execute(),
+            "decision_outbox_insert",
+        )
+    return sent > 0
+
+
+@router.post("/sessions/{session_id}/decision")
+async def decide_submission(
+    session_id: str,
+    payload: SessionDecisionRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Make the minimum review decision and provision accepted speakers."""
+    _user_id, org_id = auth
+    existing = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("*")
+            .eq("id", session_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "session_decision_lookup",
+        )
+    )
+    verify_org_access(existing, org_id, "Session")
+
+    status = _DECISION_STATUSES[payload.decision]
+    updated = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .update({"status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .eq("id", session_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "session_decision_update",
+        )
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    tasks_assigned = 0
+    if payload.decision == "approve":
+        tasks_assigned = await provision_speaker_onboarding(
+            org_id,
+            str(existing["event_id"]),
+            session_id,
+        )
+
+    feedback = (payload.feedback or "").strip()
+    emailed = False
+    if payload.email_speaker and feedback:
+        emailed = await _send_decision_feedback(updated, org_id, payload.decision, feedback)
+
+    return {
+        "session": updated,
+        "onboarding": {"tasks_assigned": tasks_assigned},
+        "emailed": emailed,
+    }
 
 
 @router.post("/sessions/{session_id}/send-invites")

@@ -5,13 +5,16 @@ import {
   ArrowDownWideNarrow,
   Check,
   ClipboardCheck,
+  Layers,
   Link2,
   ListChecks,
   Mail,
   Plus,
   Send,
+  Tags,
   Trash2,
   Users,
+  X,
 } from 'lucide-react'
 
 import { listEvents } from '@/lib/adminApi'
@@ -27,11 +30,15 @@ import {
   openEvaluationPlan,
   updateEvaluationDecision,
   updateEvaluationPlan,
+  updateEvaluator,
+  type EvaluationAssignMode,
   type EvaluationCriterion,
   type EvaluationPlan,
   type EvaluationPlanStatus,
   type EvaluationScale,
   type EvaluationSessionSummary,
+  type EvaluationTrack,
+  type Evaluator,
 } from '@/lib/evaluationApi'
 import { CopyButton } from '@/pages/Forms'
 import { cn } from '@/lib/utils'
@@ -67,6 +74,86 @@ const STATUS_BADGE: Record<
 function PlanStatusBadge({ status }: { status: EvaluationPlanStatus }) {
   const meta = STATUS_BADGE[status]
   return <Badge variant={meta.variant}>{meta.label}</Badge>
+}
+
+const TRACK_FALLBACK_COLOR = '#4962E2'
+
+function TrackDot({ color }: { color?: string | null }) {
+  return (
+    <span
+      aria-hidden
+      className="h-2 w-2 shrink-0 rounded-full"
+      style={{ backgroundColor: color || TRACK_FALLBACK_COLOR }}
+    />
+  )
+}
+
+/** A talk sits in one or more tracks; a reviewer covers one or more. Both read
+ * as the same chip so the two lists are comparable at a glance. */
+function TrackChips({ tracks, empty }: { tracks?: EvaluationTrack[] | null; empty?: ReactNode }) {
+  if (!tracks || tracks.length === 0) return <>{empty ?? null}</>
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {tracks.map((track) => (
+        <span
+          key={track.id}
+          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-border bg-card px-2 py-0.5 text-xs font-medium text-foreground"
+        >
+          <TrackDot color={track.color} />
+          <span className="truncate">{track.name || 'Untitled track'}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function AllTracksHint() {
+  return <span className="text-xs text-muted-foreground">All tracks</span>
+}
+
+/** Multi-select over the event's tracks. Nothing selected = reviews all. */
+function TrackPicker({
+  tracks,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  tracks: EvaluationTrack[]
+  value: string[]
+  onChange: (next: string[]) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {tracks.map((track) => {
+        const selected = value.includes(track.id)
+        return (
+          <button
+            key={track.id}
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() =>
+              onChange(
+                selected ? value.filter((id) => id !== track.id) : [...value, track.id]
+              )
+            }
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+              selected
+                ? 'border-primary bg-primary-subtle text-primary'
+                : 'border-border bg-card text-muted-foreground hover:bg-accent'
+            )}
+          >
+            <TrackDot color={track.color} />
+            {track.name || 'Untitled track'}
+            {selected && <Check className="h-3 w-3" />}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export function Evaluation() {
@@ -312,13 +399,18 @@ function PlanWorkspace({
 }) {
   const queryClient = useQueryClient()
   const { plan } = detail
+  const tracks = detail.tracks ?? []
   const [tab, setTab] = useState('setup')
   const assign = useMutation({
-    mutationFn: () => assignEvaluationSessions(plan.id),
-    onSuccess: async (result) => {
+    mutationFn: (mode: EvaluationAssignMode) => assignEvaluationSessions(plan.id, { mode }),
+    onSuccess: async (result, mode) => {
       await onRefresh()
       toast({
-        title: result.created ? 'Sessions assigned' : 'Assignments already up to date',
+        title: result.created
+          ? mode === 'by_track'
+            ? 'Sessions assigned by track'
+            : 'Sessions assigned'
+          : 'Assignments already up to date',
         description: `${result.total} assignments across ${result.session_count} sessions.`,
       })
     },
@@ -355,12 +447,23 @@ function PlanWorkspace({
         <div className="flex flex-wrap gap-2">
           <Button
             variant="secondary"
-            onClick={() => assign.mutate()}
+            onClick={() => assign.mutate('all_to_all')}
             disabled={assign.isPending || detail.evaluators.length === 0}
           >
             <ListChecks />
             {assign.isPending ? 'Assigning…' : 'Assign sessions'}
           </Button>
+          {tracks.length > 0 && (
+            <Button
+              variant="secondary"
+              onClick={() => assign.mutate('by_track')}
+              disabled={assign.isPending || detail.evaluators.length === 0}
+              title="Give each reviewer only the submissions in the tracks they cover"
+            >
+              <Layers />
+              Assign by track
+            </Button>
+          )}
           <Button
             onClick={() => openPlan.mutate()}
             disabled={openPlan.isPending || detail.evaluators.length === 0}
@@ -380,7 +483,12 @@ function PlanWorkspace({
         </div>
         <TabsContent value="setup" className="m-0">
           <PlanEditor plan={plan} onRefresh={onRefresh} />
-          <EvaluatorEditor plan={plan} evaluators={detail.evaluators} onRefresh={onRefresh} />
+          <EvaluatorEditor
+            plan={plan}
+            evaluators={detail.evaluators}
+            tracks={tracks}
+            onRefresh={onRefresh}
+          />
         </TabsContent>
         <TabsContent value="summary" className="m-0">
           <SummaryPanel
@@ -532,20 +640,30 @@ function PlanEditor({
 function EvaluatorEditor({
   plan,
   evaluators,
+  tracks,
   onRefresh,
 }: {
   plan: EvaluationPlan
   evaluators: Awaited<ReturnType<typeof getEvaluationPlan>>['evaluators']
+  tracks: EvaluationTrack[]
   onRefresh: () => Promise<void>
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [trackIds, setTrackIds] = useState<string[]>([])
   const [linksOpen, setLinksOpen] = useState(false)
   const add = useMutation({
-    mutationFn: () => addEvaluator(plan.id, { name: name.trim(), email: email.trim() }),
+    mutationFn: () =>
+      addEvaluator(plan.id, {
+        name: name.trim(),
+        email: email.trim(),
+        // [] is meaningful: "reviews every track"
+        track_ids: trackIds,
+      }),
     onSuccess: async () => {
       setName('')
       setEmail('')
+      setTrackIds([])
       await onRefresh()
       toast({ title: 'Reviewer added' })
     },
@@ -606,6 +724,17 @@ function EvaluatorEditor({
           Add reviewer
         </Button>
       </div>
+      {tracks.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <Label>Tracks reviewed</Label>
+          <TrackPicker tracks={tracks} value={trackIds} onChange={setTrackIds} />
+          <p className="text-xs text-muted-foreground">
+            {trackIds.length === 0
+              ? 'No selection — this reviewer can review every track.'
+              : `Assign by track will only give them ${trackIds.length === 1 ? 'this track' : 'these tracks'}.`}
+          </p>
+        </div>
+      )}
       {add.error && <div className="mt-3"><InlineError>{add.error.message}</InlineError></div>}
 
       <div className="mt-5 overflow-hidden rounded-md border border-border">
@@ -620,6 +749,7 @@ function EvaluatorEditor({
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Reviewer</TableHead>
+                {tracks.length > 0 && <TableHead className="w-[300px]">Tracks</TableHead>}
                 <TableHead className="w-[130px]">Progress</TableHead>
                 <TableHead className="w-[150px]">Invite</TableHead>
                 <TableHead className="w-[44px]"><span className="sr-only">Remove</span></TableHead>
@@ -632,6 +762,16 @@ function EvaluatorEditor({
                     <p className="font-medium text-foreground">{evaluator.name || evaluator.email}</p>
                     {evaluator.name && <p className="text-xs text-muted-foreground">{evaluator.email}</p>}
                   </TableCell>
+                  {tracks.length > 0 && (
+                    <TableCell>
+                      <EvaluatorTracksCell
+                        planId={plan.id}
+                        evaluator={evaluator}
+                        tracks={tracks}
+                        onRefresh={onRefresh}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="text-sm tabular-nums text-muted-foreground">
                     {evaluator.complete_count ?? 0}/{evaluator.assignment_count ?? 0} complete
                   </TableCell>
@@ -660,6 +800,90 @@ function EvaluatorEditor({
         )}
       </div>
     </section>
+  )
+}
+
+function EvaluatorTracksCell({
+  planId,
+  evaluator,
+  tracks,
+  onRefresh,
+}: {
+  planId: string
+  evaluator: Evaluator
+  tracks: EvaluationTrack[]
+  onRefresh: () => Promise<void>
+}) {
+  const covered = useMemo(() => evaluator.track_ids ?? [], [evaluator.track_ids])
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<string[]>(covered)
+
+  useEffect(() => {
+    if (!editing) setDraft(covered)
+  }, [covered, editing])
+
+  const save = useMutation({
+    mutationFn: () => updateEvaluator(planId, evaluator.id, { track_ids: draft }),
+    onSuccess: async () => {
+      setEditing(false)
+      await onRefresh()
+      toast({ title: 'Reviewer tracks updated' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not save tracks', description: error.message }),
+  })
+
+  const label = evaluator.name || evaluator.email
+
+  if (!editing) {
+    return (
+      <div className="flex items-start justify-between gap-2">
+        <TrackChips
+          tracks={
+            evaluator.tracks ?? tracks.filter((track) => covered.includes(track.id))
+          }
+          empty={<AllTracksHint />}
+        />
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Edit tracks for ${label}`}
+          onClick={() => setEditing(true)}
+        >
+          <Tags />
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <TrackPicker
+        tracks={tracks}
+        value={draft}
+        onChange={setDraft}
+        disabled={save.isPending}
+      />
+      <div className="flex items-center gap-2">
+        <Button size="xs" disabled={save.isPending} onClick={() => save.mutate()}>
+          <Check />
+          {save.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={save.isPending}
+          onClick={() => {
+            setDraft(covered)
+            setEditing(false)
+          }}
+        >
+          <X />
+          Cancel
+        </Button>
+        {draft.length === 0 && <AllTracksHint />}
+      </div>
+    </div>
   )
 }
 
@@ -786,9 +1010,10 @@ function SummaryPanel({ plan, onDecision }: { plan: EvaluationPlan; onDecision: 
                     <TableRow key={session.session_id}>
                       <TableCell>
                         <p className="font-medium text-foreground">{session.title}</p>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           {session.friendly_id && <span className="font-mono">{session.friendly_id}</span>}
                           {session.abstained_count > 0 && <span>{session.abstained_count} abstained</span>}
+                          <TrackChips tracks={session.tracks} />
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold">

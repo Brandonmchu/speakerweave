@@ -24,6 +24,7 @@ import {
 
 import {
   apiGet,
+  decideSubmission,
   getSessionDetail,
   unwrapList,
   updateSessionStatus,
@@ -32,6 +33,8 @@ import {
   type SessionDetail,
   type SessionParticipant,
   type Submission,
+  type SubmissionDecision,
+  type SubmissionDecisionResult,
   type SubmissionStatus,
 } from '@/lib/api'
 import { looseEquals, type AnswerValue } from '@/lib/rules'
@@ -53,6 +56,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
+import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
 
 type TabKey = 'all' | SubmissionStatus
@@ -91,21 +95,23 @@ const STATUS_ACTIONS: SubmissionStatus[] = [
   'declined',
 ]
 
-/**
- * The same decisions as buttons, in the order a reviewer works through them:
- * queue first (reversible), final call second. Accept and Decline are the two
- * that send email downstream, so they read as the emphatic ones.
- */
+/** The event runner's minimum review workflow, mapped onto the DB statuses. */
 const DECISIONS: Array<{
-  status: SubmissionStatus
+  decision: SubmissionDecision
+  targetStatus: SubmissionStatus
   label: string
   variant: 'default' | 'secondary' | 'destructive'
 }> = [
-  { status: 'accept_queue', label: 'Accept queue', variant: 'secondary' },
-  { status: 'accepted', label: 'Accept', variant: 'default' },
-  { status: 'decline_queue', label: 'Decline queue', variant: 'secondary' },
-  { status: 'declined', label: 'Decline', variant: 'destructive' },
+  { decision: 'approve', targetStatus: 'accepted', label: 'Approve', variant: 'default' },
+  { decision: 'maybe', targetStatus: 'accept_queue', label: 'Maybe', variant: 'secondary' },
+  { decision: 'deny', targetStatus: 'declined', label: 'Deny', variant: 'destructive' },
 ]
+
+const DECISION_STATUS: Record<SubmissionDecision, SubmissionStatus> = {
+  approve: 'accepted',
+  maybe: 'accept_queue',
+  deny: 'declined',
+}
 
 function statusLabel(status: SubmissionStatus): string {
   return STATUS_META[status]?.label ?? status
@@ -230,6 +236,9 @@ export function Inbox() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [pendingDecision, setPendingDecision] = useState<SubmissionDecision | null>(null)
+  const [speakerMessage, setSpeakerMessage] = useState('')
+  const [emailDecision, setEmailDecision] = useState(false)
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -334,10 +343,80 @@ export function Inbox() {
     },
   })
 
+  const resetDecisionForm = () => {
+    setPendingDecision(null)
+    setSpeakerMessage('')
+    setEmailDecision(false)
+  }
+
+  const submitDecision = useMutation({
+    mutationFn: ({
+      id,
+      decision,
+      feedback,
+      emailSpeaker,
+    }: {
+      id: string
+      decision: SubmissionDecision
+      feedback: string
+      emailSpeaker: boolean
+    }) =>
+      decideSubmission(id, {
+        decision,
+        feedback: feedback || undefined,
+        email_speaker: emailSpeaker,
+      }),
+    onMutate: async ({ id, decision }) => {
+      const status = DECISION_STATUS[decision]
+      await queryClient.cancelQueries({ queryKey: submissionsKey })
+      const previousList = queryClient.getQueryData<Submission[]>(submissionsKey)
+      queryClient.setQueryData<Submission[]>(submissionsKey, (current) =>
+        current?.map((row) => (row.id === id ? { ...row, status } : row))
+      )
+
+      const detailKey = ['session', id]
+      const previousDetail = queryClient.getQueryData<SessionDetail>(detailKey)
+      if (previousDetail) {
+        queryClient.setQueryData<SessionDetail>(detailKey, {
+          ...previousDetail,
+          session: { ...previousDetail.session, status },
+        })
+      }
+      return { previousList, previousDetail }
+    },
+    onSuccess: (data: SubmissionDecisionResult, variables) => {
+      if (variables.decision === 'approve') {
+        toast({
+          title: `Accepted — ${data.onboarding.tasks_assigned} onboarding tasks assigned to the speaker`,
+        })
+      } else {
+        toast({
+          title: variables.decision === 'maybe' ? 'Marked as maybe' : 'Submission denied',
+          description: data.emailed ? 'The speaker was emailed with your message.' : undefined,
+        })
+      }
+      resetDecisionForm()
+    },
+    onError: (error: Error, variables, context) => {
+      if (context?.previousList) queryClient.setQueryData(submissionsKey, context.previousList)
+      if (context?.previousDetail) {
+        queryClient.setQueryData(['session', variables.id], context.previousDetail)
+      }
+      toast({ variant: 'destructive', title: 'Decision failed', description: error.message })
+    },
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: submissionsKey })
+      queryClient.invalidateQueries({ queryKey: ['session', variables.id] })
+    },
+  })
+
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && submissionsQuery.isPending)
   const error = eventsQuery.error ?? submissionsQuery.error
 
   const detailSession = detailQuery.data?.session ?? openSubmission
+  const pendingDecisionMeta = pendingDecision
+    ? DECISIONS.find((action) => action.decision === pendingDecision)
+    : null
 
   const showToolbar = Boolean(event) && !error && !isLoading
 
@@ -748,7 +827,10 @@ export function Inbox() {
       <Dialog
         open={Boolean(openId)}
         onOpenChange={(open) => {
-          if (!open) setOpenId(null)
+          if (!open) {
+            setOpenId(null)
+            resetDecisionForm()
+          }
         }}
       >
         {/* A right-edge sheet: the list stays visible behind it, so triaging
@@ -800,18 +882,125 @@ export function Inbox() {
                   Decision
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-2">
-                  {DECISIONS.map(({ status, label, variant }) => (
+                  {DECISIONS.map(({ decision, targetStatus, label, variant }) => (
                     <Button
-                      key={status}
+                      key={decision}
                       size="sm"
                       variant={variant}
-                      disabled={detailSession.status === status || updateStatus.isPending}
-                      onClick={() => updateStatus.mutate({ id: detailSession.id, status })}
+                      disabled={
+                        detailSession.status === targetStatus ||
+                        updateStatus.isPending ||
+                        submitDecision.isPending
+                      }
+                      aria-pressed={pendingDecision === decision}
+                      onClick={() => {
+                        setPendingDecision(decision)
+                        setSpeakerMessage('')
+                        setEmailDecision(false)
+                      }}
                     >
                       {label}
                     </Button>
                   ))}
                 </div>
+
+                {pendingDecision && pendingDecisionMeta && (
+                  <form
+                    className="mt-3 rounded-lg border border-border bg-muted/40 p-4"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      submitDecision.mutate({
+                        id: detailSession.id,
+                        decision: pendingDecision,
+                        feedback: speakerMessage.trim(),
+                        emailSpeaker: emailDecision && Boolean(speakerMessage.trim()),
+                      })
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Confirm {pendingDecisionMeta.label.toLowerCase()}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          This moves the submission to {statusLabel(pendingDecisionMeta.targetStatus)}.
+                        </p>
+                      </div>
+                      <StatusBadge status={pendingDecisionMeta.targetStatus} />
+                    </div>
+
+                    <div className="mt-3 space-y-1.5">
+                      <label
+                        htmlFor="decision-message"
+                        className="text-xs font-medium text-foreground"
+                      >
+                        Message to speaker (optional)
+                      </label>
+                      <Textarea
+                        id="decision-message"
+                        value={speakerMessage}
+                        onChange={(event) => {
+                          const message = event.target.value
+                          setSpeakerMessage(message)
+                          if (!message.trim()) setEmailDecision(false)
+                        }}
+                        placeholder="Add context, requested changes, or a personal note."
+                        className="min-h-[88px] bg-card text-sm"
+                        disabled={submitDecision.isPending}
+                      />
+                    </div>
+
+                    <div className="mt-3 flex items-start gap-2.5">
+                      <Checkbox
+                        id="email-decision"
+                        checked={emailDecision}
+                        disabled={!speakerMessage.trim() || submitDecision.isPending}
+                        onCheckedChange={(checked) => setEmailDecision(checked === true)}
+                        aria-describedby="email-decision-help"
+                      />
+                      <div>
+                        <label
+                          htmlFor="email-decision"
+                          className={cn(
+                            'block text-sm font-medium',
+                            speakerMessage.trim()
+                              ? 'cursor-pointer text-foreground'
+                              : 'text-muted-foreground'
+                          )}
+                        >
+                          Email this decision to the speaker
+                        </label>
+                        <p id="email-decision-help" className="mt-0.5 text-xs text-muted-foreground">
+                          {speakerMessage.trim()
+                            ? 'The submitter and any linked speakers receive your message.'
+                            : 'Add a message above to enable email.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={submitDecision.isPending}
+                        onClick={resetDecisionForm}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant={pendingDecisionMeta.variant}
+                        disabled={submitDecision.isPending}
+                      >
+                        {submitDecision.isPending
+                          ? 'Saving decision…'
+                          : `Confirm ${pendingDecisionMeta.label.toLowerCase()}`}
+                      </Button>
+                    </div>
+                  </form>
+                )}
               </div>
             </>
           ) : (

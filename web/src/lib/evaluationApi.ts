@@ -43,11 +43,21 @@ export interface EvaluationPlanPatch {
   status?: EvaluationPlanStatus
 }
 
+/** A talk belongs to one or more tracks; a reviewer covers one or more. */
+export interface EvaluationTrack {
+  id: string
+  name: string | null
+  color: string | null
+}
+
 export interface Evaluator {
   id: string
   plan_id: string
   email: string
   name: string
+  /** Tracks this reviewer covers. Empty = every track. */
+  track_ids?: string[]
+  tracks?: EvaluationTrack[]
   invited_at?: string | null
   last_active_at?: string | null
   assignment_count?: number
@@ -55,19 +65,29 @@ export interface Evaluator {
   complete_count?: number
 }
 
+export interface AssignedSessionSummary {
+  session_id: string
+  title?: string | null
+  friendly_id?: string | null
+  status?: string | null
+  /** The primary track — still the one on sessions.track_id. */
+  track_id?: string | null
+  tracks?: EvaluationTrack[]
+  assignment_count: number
+  review_count: number
+}
+
 export interface AssignmentSummary {
   total: number
   reviewed: number
   complete: number
-  by_session: Array<{
-    session_id: string
-    assignment_count: number
-    review_count: number
-  }>
+  by_session: AssignedSessionSummary[]
 }
 
 export interface EvaluationPlanDetail {
   plan: EvaluationPlan
+  /** The event's tracks, for the reviewer coverage picker. */
+  tracks?: EvaluationTrack[]
   evaluators: Evaluator[]
   assignments: AssignmentSummary
 }
@@ -84,6 +104,7 @@ export interface EvaluationSessionSummary {
   title: string
   friendly_id?: string | null
   status?: string | null
+  tracks?: EvaluationTrack[]
   avg_overall: number | null
   review_count: number
   completed_count: number
@@ -131,11 +152,23 @@ export function updateEvaluationPlan(
 
 export function addEvaluator(
   planId: string,
-  input: { email: string; name: string }
+  input: { email: string; name: string; track_ids?: string[] }
 ): Promise<Evaluator> {
   return apiPost<{ evaluator: Evaluator }>(
     `/api/evaluation-plans/${planId}/evaluators`,
     input
+  ).then((response) => response.evaluator)
+}
+
+/** Rename a reviewer, or change which tracks they review ([] = every track). */
+export function updateEvaluator(
+  planId: string,
+  evaluatorId: string,
+  patch: { name?: string; track_ids?: string[] }
+): Promise<Evaluator> {
+  return apiPatch<{ evaluator: Evaluator }>(
+    `/api/evaluation-plans/${planId}/evaluators/${evaluatorId}`,
+    patch
   ).then((response) => response.evaluator)
 }
 
@@ -145,13 +178,22 @@ export function deleteEvaluator(planId: string, evaluatorId: string): Promise<vo
   })
 }
 
+/** `all_to_all` pairs everyone with everything; `by_track` pairs a reviewer
+ * only with the sessions whose tracks they cover. */
+export type EvaluationAssignMode = 'all_to_all' | 'by_track'
+
 export function assignEvaluationSessions(
   planId: string,
-  input: { session_ids?: string[]; evaluator_ids?: string[] } = {}
+  input: {
+    session_ids?: string[]
+    evaluator_ids?: string[]
+    mode?: EvaluationAssignMode
+  } = {}
 ): Promise<AssignmentResult> {
+  const { mode = 'all_to_all', ...selection } = input
   return apiPost<AssignmentResult>(`/api/evaluation-plans/${planId}/assign`, {
-    ...input,
-    mode: 'all_to_all',
+    ...selection,
+    mode,
   })
 }
 

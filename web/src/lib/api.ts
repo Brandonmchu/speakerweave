@@ -236,6 +236,20 @@ export interface Submission {
   submitter?: SubmitterSummary | null
 }
 
+export type SubmissionDecision = 'approve' | 'maybe' | 'deny'
+
+export interface SubmissionDecisionInput {
+  decision: SubmissionDecision
+  feedback?: string
+  email_speaker?: boolean
+}
+
+export interface SubmissionDecisionResult {
+  session: Submission
+  onboarding: { tasks_assigned: number }
+  emailed: boolean
+}
+
 export type FormFieldType =
   | 'text'
   | 'textarea'
@@ -428,6 +442,14 @@ export async function updateSessionStatus(id: string, status: SubmissionStatus):
   )
   const session = (wire as { session?: Submission })?.session
   return session ?? (wire as Submission)
+}
+
+/** POST the minimum review decision and receive any acceptance provisioning count. */
+export function decideSubmission(
+  id: string,
+  input: SubmissionDecisionInput
+): Promise<SubmissionDecisionResult> {
+  return apiPost<SubmissionDecisionResult>(`/api/sessions/${encodeURIComponent(id)}/decision`, input)
 }
 
 export function submitPublicForm(slug: string, input: SubmissionInput): Promise<SubmissionReceipt> {

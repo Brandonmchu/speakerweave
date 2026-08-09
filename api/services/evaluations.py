@@ -26,10 +26,124 @@ DEFAULT_CRITERIA = [
     {"name": "Clarity", "weight": 10},
 ]
 REVIEWABLE_STATUSES = {"pending", "accept_queue"}
+ASSIGNMENT_MODES = ("all_to_all", "by_track")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── multi-track helpers (migration 004) ────────────────────────────────────
+# A session's tracks live in `session_tracks`; `sessions.track_id` remains the
+# PRIMARY track (the first one selected) and is still written by every writer,
+# so nothing that reads track_id had to change.
+
+
+def _track_sort_key(track: dict) -> tuple[int, str]:
+    return (
+        track["order"] if isinstance(track.get("order"), int) else 0,
+        str(track.get("name") or "").casefold(),
+    )
+
+
+def _public_track(track: dict) -> dict:
+    return {"id": track["id"], "name": track.get("name"), "color": track.get("color")}
+
+
+def normalize_track_ids(raw: Any) -> list[str]:
+    """A tolerant read of `evaluators.track_ids` (uuid[], possibly absent).
+
+    Empty means "reviews every track" — the state every evaluator created
+    before migration 004 is in.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        # A driver that hands back the raw Postgres array literal.
+        raw = raw.strip("{}").split(",") if raw.strip("{}") else []
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    seen: list[str] = []
+    for item in raw:
+        value = str(item).strip().strip('"')
+        if value and value not in seen:
+            seen.append(value)
+    return seen
+
+
+async def list_event_tracks(org_id: str, event_id: str) -> list[dict]:
+    """The event's tracks as {id, name, color}, in the organizer's own order."""
+    found = rows(
+        await db(
+            lambda: supabase.table("tracks")
+            .select("id, name, color, order")
+            .eq("event_id", event_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_event_tracks",
+        )
+    )
+    return [_public_track(track) for track in sorted(found, key=_track_sort_key)]
+
+
+async def tracks_for_sessions(org_id: str, sessions: list[dict]) -> dict[str, list[dict]]:
+    """{session_id: [{id, name, color}]} for a batch of session rows.
+
+    Two queries for any number of sessions — the membership rows, then the
+    track rows — so callers never fan out per session. The session's own
+    `track_id` is unioned in (and sorted first) so a row written before the 004
+    backfill, or by a writer that only sets the primary column, still reports
+    its track.
+    """
+    session_ids = [str(session["id"]) for session in sessions if session.get("id")]
+    if not session_ids:
+        return {}
+
+    memberships = rows(
+        await db(
+            lambda: supabase.table("session_tracks")
+            .select("session_id, track_id")
+            .in_("session_id", session_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_session_tracks",
+        )
+    )
+    ids_by_session: dict[str, list[str]] = {session_id: [] for session_id in session_ids}
+    for row in memberships:
+        session_id, track_id = str(row.get("session_id")), row.get("track_id")
+        if session_id in ids_by_session and track_id and track_id not in ids_by_session[session_id]:
+            ids_by_session[session_id].append(str(track_id))
+    primary_by_session: dict[str, str | None] = {}
+    for session in sessions:
+        session_id = str(session.get("id"))
+        primary = session.get("track_id")
+        primary_by_session[session_id] = str(primary) if primary else None
+        if primary and session_id in ids_by_session and str(primary) not in ids_by_session[session_id]:
+            ids_by_session[session_id].append(str(primary))
+
+    track_ids = sorted({track_id for ids in ids_by_session.values() for track_id in ids})
+    tracks: list[dict] = []
+    if track_ids:
+        tracks = rows(
+            await db(
+                lambda: supabase.table("tracks")
+                .select("id, name, color, order")
+                .in_("id", track_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "evaluation_tracks_by_id",
+            )
+        )
+    by_id = {str(track["id"]): track for track in tracks}
+
+    resolved: dict[str, list[dict]] = {}
+    for session_id, ids in ids_by_session.items():
+        found = [by_id[track_id] for track_id in ids if track_id in by_id]
+        primary = primary_by_session.get(session_id)
+        found.sort(key=lambda track: (str(track["id"]) != primary, *_track_sort_key(track)))
+        resolved[session_id] = [_public_track(track) for track in found]
+    return resolved
 
 
 def normalize_criteria(criteria: list[dict] | None) -> list[dict]:
@@ -262,13 +376,39 @@ async def get_plan_detail(org_id: str, plan_id: str) -> dict:
         )
     review_by_assignment = {row["assignment_id"]: row for row in reviews}
 
+    # The event's tracks, plus the tracks each assigned session actually
+    # carries — both batched, so the detail response stays two extra queries
+    # regardless of how many sessions the plan covers.
+    event_tracks = await list_event_tracks(org_id, plan["event_id"])
+    track_by_id = {track["id"]: track for track in event_tracks}
+    assigned_session_ids = sorted({row["session_id"] for row in assignments})
+    assigned_sessions: list[dict] = []
+    if assigned_session_ids:
+        assigned_sessions = rows(
+            await db(
+                lambda: supabase.table("sessions")
+                .select("id, title, friendly_id, status, track_id")
+                .in_("id", assigned_session_ids)
+                .eq("event_id", plan["event_id"])
+                .eq("org_id", org_id)
+                .execute(),
+                "evaluation_detail_sessions",
+            )
+        )
+    session_tracks = await tracks_for_sessions(org_id, assigned_sessions)
+    session_by_id = {row["id"]: row for row in assigned_sessions}
+
     evaluator_summary: list[dict] = []
     for evaluator in evaluators:
         mine = [row for row in assignments if row["evaluator_id"] == evaluator["id"]]
         mine_reviews = [review_by_assignment[row["id"]] for row in mine if row["id"] in review_by_assignment]
+        covered = normalize_track_ids(evaluator.get("track_ids"))
         evaluator_summary.append(
             {
                 **evaluator,
+                # empty = reviews every track
+                "track_ids": covered,
+                "tracks": [track_by_id[track_id] for track_id in covered if track_id in track_by_id],
                 "assignment_count": len(mine),
                 "review_count": len(mine_reviews),
                 "complete_count": sum(not bool(row.get("is_draft")) for row in mine_reviews),
@@ -278,8 +418,20 @@ async def get_plan_detail(org_id: str, plan_id: str) -> dict:
     by_session: dict[str, dict] = {}
     for assignment in assignments:
         session_id = assignment["session_id"]
+        session = session_by_id.get(session_id) or {}
         entry = by_session.setdefault(
-            session_id, {"session_id": session_id, "assignment_count": 0, "review_count": 0}
+            session_id,
+            {
+                "session_id": session_id,
+                "title": session.get("title"),
+                "friendly_id": session.get("friendly_id"),
+                "status": session.get("status"),
+                # primary track stays available under its original name
+                "track_id": session.get("track_id"),
+                "tracks": session_tracks.get(session_id, []),
+                "assignment_count": 0,
+                "review_count": 0,
+            },
         )
         entry["assignment_count"] += 1
         if assignment["id"] in review_by_assignment:
@@ -287,6 +439,7 @@ async def get_plan_detail(org_id: str, plan_id: str) -> dict:
 
     return {
         "plan": plan,
+        "tracks": event_tracks,
         "evaluators": evaluator_summary,
         "assignments": {
             "total": len(assignments),
@@ -320,9 +473,37 @@ async def update_plan(org_id: str, plan_id: str, patch: dict) -> dict:
     return updated
 
 
-async def add_evaluator(org_id: str, plan_id: str, email_address: str, name: str) -> dict:
-    await fetch_plan(plan_id, org_id)
+async def _validate_track_ids(org_id: str, event_id: str, track_ids: Any) -> list[str]:
+    """Track ids an evaluator may cover: this event's tracks, in its own order.
+
+    Empty means "every track", which is what an evaluator with no selection
+    has always meant. An id from another event (or another org) is a 400 rather
+    than a silently dropped filter — a reviewer scoped to nothing would look
+    scoped to everything.
+    """
+    wanted = normalize_track_ids(track_ids)
+    if not wanted:
+        return []
+    available = await list_event_tracks(org_id, event_id)
+    known = {track["id"] for track in available}
+    unknown = [track_id for track_id in wanted if track_id not in known]
+    if unknown:
+        raise HTTPException(status_code=400, detail="One or more tracks were not found")
+    return [track["id"] for track in available if track["id"] in set(wanted)]
+
+
+async def add_evaluator(
+    org_id: str,
+    plan_id: str,
+    email_address: str,
+    name: str,
+    track_ids: Any = None,
+) -> dict:
+    plan = await fetch_plan(plan_id, org_id)
     normalized_email = email_address.strip().lower()
+    covered = (
+        None if track_ids is None else await _validate_track_ids(org_id, plan["event_id"], track_ids)
+    )
     existing = first(
         await db(
             lambda: supabase.table("evaluators")
@@ -336,7 +517,11 @@ async def add_evaluator(org_id: str, plan_id: str, email_address: str, name: str
         )
     )
     if existing:
-        return existing
+        # Re-adding an existing reviewer stays a no-op unless the caller sent a
+        # track selection, in which case it is an edit.
+        if covered is None:
+            return existing
+        return await update_evaluator(org_id, plan_id, existing["id"], {"track_ids": covered})
     evaluator = first(
         await db(
             lambda: supabase.table("evaluators")
@@ -346,6 +531,7 @@ async def add_evaluator(org_id: str, plan_id: str, email_address: str, name: str
                     "plan_id": plan_id,
                     "email": normalized_email,
                     "name": name.strip(),
+                    "track_ids": covered or [],
                 }
             )
             .execute(),
@@ -355,6 +541,49 @@ async def add_evaluator(org_id: str, plan_id: str, email_address: str, name: str
     if not evaluator:
         raise HTTPException(status_code=500, detail="Could not add evaluator")
     return evaluator
+
+
+async def update_evaluator(org_id: str, plan_id: str, evaluator_id: str, patch: dict) -> dict:
+    """Rename a reviewer or change the tracks they cover."""
+    plan = await fetch_plan(plan_id, org_id)
+    existing = first(
+        await db(
+            lambda: supabase.table("evaluators")
+            .select("*")
+            .eq("id", evaluator_id)
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "evaluation_evaluator_patch_lookup",
+        )
+    )
+    verify_org_access(existing, org_id, "Evaluator")
+
+    values: dict[str, Any] = {}
+    if "name" in patch:
+        values["name"] = str(patch["name"] or "").strip()
+    if "track_ids" in patch:
+        values["track_ids"] = await _validate_track_ids(
+            org_id, plan["event_id"], patch["track_ids"]
+        )
+    if not values:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    updated = first(
+        await db(
+            lambda: supabase.table("evaluators")
+            .update(values)
+            .eq("id", evaluator_id)
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_evaluator_update",
+        )
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Evaluator not found")
+    return updated
 
 
 async def delete_evaluator(org_id: str, plan_id: str, evaluator_id: str) -> None:
@@ -413,6 +642,29 @@ async def assign_all_to_all(
     session_ids: list[str] | None,
     evaluator_ids: list[str] | None,
 ) -> dict:
+    """Every candidate reviewer × every candidate session (the original mode)."""
+    return await assign_sessions(
+        org_id, plan_id, mode="all_to_all", session_ids=session_ids, evaluator_ids=evaluator_ids
+    )
+
+
+async def assign_sessions(
+    org_id: str,
+    plan_id: str,
+    *,
+    mode: str = "all_to_all",
+    session_ids: list[str] | None = None,
+    evaluator_ids: list[str] | None = None,
+) -> dict:
+    """Create the missing (evaluator, session) assignments for a plan.
+
+    `all_to_all` pairs everyone with everything. `by_track` pairs a reviewer
+    only with sessions whose track set intersects the tracks they cover, where
+    a reviewer with no tracks selected covers all of them. Both dedupe against
+    what already exists, so re-running is a no-op.
+    """
+    if mode not in ASSIGNMENT_MODES:
+        raise HTTPException(status_code=400, detail=f"Unknown assignment mode: {mode}")
     plan = await fetch_plan(plan_id, org_id)
     evaluator_query = (
         supabase.table("evaluators")
@@ -456,6 +708,25 @@ async def assign_all_to_all(
         )
     )
     existing_keys = {(row["evaluator_id"], row["session_id"]) for row in existing}
+
+    track_ids_by_session: dict[str, set[str]] = {}
+    if mode == "by_track":
+        track_ids_by_session = {
+            session_id: {track["id"] for track in tracks}
+            for session_id, tracks in (await tracks_for_sessions(org_id, sessions)).items()
+        }
+
+    def _pairs(evaluator: dict, session: dict) -> bool:
+        if (evaluator["id"], session["id"]) in existing_keys:
+            return False
+        if mode != "by_track":
+            return True
+        covered = set(normalize_track_ids(evaluator.get("track_ids")))
+        if not covered:
+            # No selection = reviews every track.
+            return True
+        return bool(covered & track_ids_by_session.get(session["id"], set()))
+
     desired = [
         {
             "org_id": org_id,
@@ -465,7 +736,7 @@ async def assign_all_to_all(
         }
         for evaluator in evaluators
         for session in sessions
-        if (evaluator["id"], session["id"]) not in existing_keys
+        if _pairs(evaluator, session)
     ]
     created: list[dict] = []
     if desired:
@@ -646,7 +917,7 @@ async def get_summary(org_id: str, plan_id: str) -> dict:
         sessions = rows(
             await db(
                 lambda: supabase.table("sessions")
-                .select("id, title, friendly_id, status")
+                .select("id, title, friendly_id, status, track_id")
                 .in_("id", session_ids)
                 .eq("event_id", plan["event_id"])
                 .eq("org_id", org_id)
@@ -656,6 +927,7 @@ async def get_summary(org_id: str, plan_id: str) -> dict:
         )
 
     session_by_id = {row["id"]: row for row in sessions}
+    session_tracks = await tracks_for_sessions(org_id, sessions)
     score_lists: dict[str, list[float]] = {session_id: [] for session_id in session_ids}
     completed_counts: dict[str, int] = {session_id: 0 for session_id in session_ids}
     abstained_counts: dict[str, int] = {session_id: 0 for session_id in session_ids}
@@ -684,6 +956,7 @@ async def get_summary(org_id: str, plan_id: str) -> dict:
                 "title": session.get("title") or "Untitled",
                 "friendly_id": session.get("friendly_id"),
                 "status": session.get("status"),
+                "tracks": session_tracks.get(session_id, []),
                 "avg_overall": round(sum(scores) / len(scores), 2) if scores else None,
                 "review_count": len(scores),
                 "completed_count": completed_counts[session_id],

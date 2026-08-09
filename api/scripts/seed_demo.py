@@ -19,11 +19,13 @@ Uses the service-role Supabase client directly (see supabase_client.py).
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 
 # Run as a module (`-m scripts.seed_demo`) from the api/ directory so the
 # project root is importable.
+from services.onboarding import CANONICAL_TASKS, provision_speaker_onboarding
 from supabase_client import supabase
 
 # ── fixed identifiers of the pre-existing demo event and its taxonomy ────────
@@ -528,35 +530,24 @@ def build_portal() -> dict:
     }
 
 
-# (task index, kind, name, description, required, due_ahead_days)
-_TASK_SPEC = [
-    (1, "todo", "Upload your headshot",
-     "A high-resolution square photo we can use in the program and on the website.", True, 10),
-    (2, "todo", "Confirm your A/V needs",
-     "Let us know about adapters, audio, or anything special your session requires.", True, 12),
-    (3, "todo", "Sign the speaker agreement",
-     "Our standard recording and code-of-conduct agreement — takes two minutes.", True, 7),
-    (4, "file_request", "Upload your slides",
-     "Final slide deck as a PDF. Due the day before your session.", True, 20),
-    (5, "todo", "Complete your speaker profile",
-     "Fill in your bio, pronouns, and social links so attendees can find you.", False, 14),
-    (6, "file_request", "Upload your session recording consent",
-     "Signed consent form so we can publish your session recording afterwards.", False, 18),
-]
+# One source of truth with acceptance provisioning. Deadlines stay demo-only:
+# they make the onboarding dashboard useful without changing canonical policy.
+_TASK_DUE_DAYS = (10, 12, 14, 16, 18, 20)
 
 
 def build_tasks() -> list[dict]:
     rows: list[dict] = []
-    for i, kind, name, desc, required, due in _TASK_SPEC:
+    for i, (task, due) in enumerate(zip(CANONICAL_TASKS, _TASK_DUE_DAYS), start=1):
         rows.append({
             "id": _task_id(i),
             "org_id": ORG,
             "event_id": EVENT,
             "portal_id": PORTAL_ID,
-            "kind": kind,
-            "name": name,
-            "description": desc,
-            "required": required,
+            "kind": task["kind"],
+            "name": task["name"],
+            "description": task["description"],
+            "link_url": task["link_url"],
+            "required": True,
             "due_at": _ahead(days=due),
             "order": i,
         })
@@ -809,7 +800,7 @@ def build_outbox() -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════════
 _ALL_CONTACT_IDS = [_contact_id(i) for i in range(1, len(_CONTACT_SPEC) + 1)]
 _ALL_SESSION_IDS = [_session_id(i) for i in range(1, len(_SESSION_SPEC) + 1)]
-_ALL_TASK_IDS = [_task_id(i) for i in range(1, len(_TASK_SPEC) + 1)]
+_ALL_TASK_IDS = [_task_id(i) for i in range(1, len(CANONICAL_TASKS) + 1)]
 _ALL_TEMPLATE_IDS = [_template_id(i) for i in range(1, 4)]
 _ALL_OUTBOX_IDS = [_outbox_id(i) for i in range(1, len(_OUTBOX) + 1)]
 
@@ -819,29 +810,37 @@ def reset() -> None:
     its rooms/tracks/formats/fields/CFP form, or any non-demo rows."""
     t = supabase.table
 
-    # evaluation: reviews -> assignments -> evaluators -> plan
-    t("reviews").delete().eq("org_id", ORG).in_("assignment_id",
-        [_assignment_id(i) for i in range(1, len(_EVAL_SESSION_KEYS) * 3 + 1)]).execute()
-    t("assignments").delete().eq("org_id", ORG).eq("plan_id", PLAN_ID).execute()
-    t("evaluators").delete().eq("org_id", ORG).eq("plan_id", PLAN_ID).execute()
-    t("evaluation_plans").delete().eq("org_id", ORG).eq("id", PLAN_ID).execute()
+    # org_dev is exclusively the demo org, so a clean reset clears ALL of its
+    # rows (including anything created by live demo usage — decisions,
+    # invites, portal edits, extra submissions) by org_id, in FK-safe order
+    # (children before parents). Structural rows are preserved because they
+    # live in the tables we deliberately DON'T touch below (events, rooms,
+    # tracks, formats, levels, tags, fields, forms, form_fields,
+    # question_rules, routing_rules).
+    for table in (
+        "reviews",             # -> assignments
+        "assignments",         # -> plan, session
+        "evaluators",          # -> plan
+        "evaluation_plans",
+        "task_assignments",    # -> tasks, contacts
+        "calendar_invites",    # -> sessions, contacts
+        "files",               # -> contacts, sessions, task_assignments
+        "magic_link_tokens",   # -> contacts
+        "email_outbox",        # -> contacts
+        "tasks",               # -> sessions, portals
+        "portals",
+        "session_participants",  # -> sessions, contacts
+        "session_tracks",        # -> sessions, tracks (migration 004)
+    ):
+        t(table).delete().eq("org_id", ORG).execute()
 
-    # portal: task_assignments -> tasks -> portals
-    t("task_assignments").delete().eq("org_id", ORG).in_("task_id", _ALL_TASK_IDS).execute()
-    t("tasks").delete().eq("org_id", ORG).in_("id", _ALL_TASK_IDS).execute()
-    t("portals").delete().eq("org_id", ORG).eq("id", PORTAL_ID).execute()
-
-    # sessions: participants -> tags -> sessions  (session_tags has no org_id)
-    t("session_participants").delete().eq("org_id", ORG).in_("session_id", _ALL_SESSION_IDS).execute()
+    # session_tags has no org_id column — scope by the seeded session ids.
     t("session_tags").delete().in_("session_id", _ALL_SESSION_IDS).execute()
-    t("sessions").delete().eq("org_id", ORG).in_("id", _ALL_SESSION_IDS).execute()
 
-    # comms
-    t("email_outbox").delete().eq("org_id", ORG).in_("id", _ALL_OUTBOX_IDS).execute()
-    t("email_templates").delete().eq("org_id", ORG).in_("id", _ALL_TEMPLATE_IDS).execute()
-
-    # people (only the fixed demo contacts)
-    t("contacts").delete().eq("org_id", ORG).in_("id", _ALL_CONTACT_IDS).execute()
+    # parents last
+    t("sessions").delete().eq("org_id", ORG).execute()
+    t("email_templates").delete().eq("org_id", ORG).execute()
+    t("contacts").delete().eq("org_id", ORG).execute()
     print("reset: demo rows deleted")
 
 
@@ -850,6 +849,19 @@ def _insert(table: str, rows: list[dict]) -> int:
         return 0
     supabase.table(table).insert(rows).execute()
     return len(rows)
+
+
+async def _provision_accepted_speakers() -> int:
+    """Fill missing canonical assignments without disturbing seeded progress."""
+    created = 0
+    for index, spec in enumerate(_SESSION_SPEC, start=1):
+        if spec["status"] == "accepted":
+            created += await provision_speaker_onboarding(
+                ORG,
+                EVENT,
+                _session_id(index),
+            )
+    return created
 
 
 def seed() -> dict:
@@ -863,6 +875,7 @@ def seed() -> dict:
     counts["portals"] = _insert("portals", [build_portal()])
     counts["tasks"] = _insert("tasks", build_tasks())
     counts["task_assignments"] = _insert("task_assignments", build_task_assignments())
+    counts["task_assignments"] += asyncio.run(_provision_accepted_speakers())
     counts["evaluation_plans"] = _insert("evaluation_plans", [build_plan()])
     counts["evaluators"] = _insert("evaluators", build_evaluators())
     assignments, reviews = build_assignments_and_reviews()

@@ -17,6 +17,9 @@ SLUG = "call-for-speakers"
 F_ABSTRACT = "55555555-5555-5555-5555-555555555501"
 F_SPOKEN = "55555555-5555-5555-5555-555555555507"
 F_PRIOR = "55555555-5555-5555-5555-555555555506"
+F_TRACK = "55555555-5555-5555-5555-555555555508"
+TRACK_PLATFORM = "77777777-7777-7777-7777-777777777701"
+TRACK_AI = "77777777-7777-7777-7777-777777777702"
 
 SHOW_PRIOR = {
     "when": [{"field": F_SPOKEN, "op": "eq", "value": True}],
@@ -126,6 +129,56 @@ def add_rule(db, logic: dict, target: str = F_PRIOR) -> None:
             "form_id": FORM_ID,
             "target_field_id": target,
             "logic": logic,
+        },
+    )
+
+
+def add_track_question(db, field_type: str = "dropdown") -> None:
+    """The CFP's track question — a choice field whose options are the event's
+    track names. Added per-test so the baseline form shape stays untouched."""
+    db.seed(
+        "fields",
+        {
+            "id": F_TRACK,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Track",
+            "field_type": field_type,
+            "options": {"choices": ["Platform", "AI"]},
+            "required": False,
+        },
+    )
+    db.seed(
+        "form_fields",
+        {
+            "id": "ff4",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_TRACK,
+            "page": 1,
+            "order": 3,
+            "required": False,
+        },
+    )
+
+
+def add_tracks(db) -> None:
+    db.seed(
+        "tracks",
+        {
+            "id": TRACK_PLATFORM,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Platform",
+            "color": "#4962E2",
+            "order": 0,
+        },
+        {
+            "id": TRACK_AI,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "AI",
+            "color": "#0F766E",
+            "order": 1,
         },
     )
 
@@ -265,6 +318,108 @@ def test_field_library_required_flag_still_counts(client, public_db):
     response = client.post(f"/public/forms/{SLUG}/submissions", json=submission(answers={}))
     assert response.status_code == 400
     assert response.json()["detail"] == '"Abstract" is required'
+
+
+# ── multi-track submissions (migration 004) ────────────────────────────────
+
+
+def test_a_multi_select_track_answer_persists_every_track(client, public_db):
+    """A talk submitted to two tracks: both land in session_tracks, and the
+    first stays on sessions.track_id as the primary track."""
+    add_track_question(public_db, field_type="multi_select")
+    add_tracks(public_db)
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_TRACK: "Platform, AI"}),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+    assert session["track_id"] == TRACK_PLATFORM
+    memberships = public_db.rows("session_tracks")
+    assert {row["track_id"] for row in memberships} == {TRACK_PLATFORM, TRACK_AI}
+    assert all(row["session_id"] == session["id"] for row in memberships)
+    assert all(row["org_id"] == TEST_ORG_ID for row in memberships)
+
+
+def test_a_single_track_answer_behaves_like_one_track(client, public_db):
+    add_track_question(public_db)
+    add_tracks(public_db)
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_TRACK: "AI"}),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+    assert session["track_id"] == TRACK_AI
+    assert [row["track_id"] for row in public_db.rows("session_tracks")] == [TRACK_AI]
+
+
+def test_a_track_answer_can_carry_the_track_id_itself(client, public_db):
+    """A dropdown built from ids (or a routing rule) selects the same track."""
+    add_track_question(public_db)
+    add_tracks(public_db)
+
+    client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_TRACK: TRACK_AI}),
+    )
+
+    assert public_db.rows("sessions")[0]["track_id"] == TRACK_AI
+
+
+def test_a_submission_without_a_track_answer_is_unchanged(client, public_db):
+    add_track_question(public_db)
+    add_tracks(public_db)
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0].get("track_id") is None
+    assert public_db.rows("session_tracks") == []
+
+
+def test_only_a_choice_answer_can_name_a_track(client, public_db):
+    """An abstract that happens to say "Platform" is not a track selection."""
+    add_tracks(public_db)
+
+    client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "Platform"}),
+    )
+
+    assert public_db.rows("sessions")[0].get("track_id") is None
+    assert public_db.rows("session_tracks") == []
+
+
+def test_a_track_from_another_org_is_never_selected(client, public_db):
+    add_track_question(public_db)
+    public_db.seed(
+        "tracks",
+        {
+            "id": "track-foreign",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Platform",
+            "color": "#000000",
+            "order": 0,
+        },
+    )
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_TRACK: "Platform"}),
+    )
+
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0].get("track_id") is None
+    assert public_db.rows("session_tracks") == []
 
 
 # ── GET response sanitization (defense in depth) ───────────────────────────

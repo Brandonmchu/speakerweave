@@ -33,6 +33,7 @@ PATCH_TARGET_MODULES = (
     "services.api_keys",
     "services.forms",
     "services.magic_links",
+    "services.onboarding",
     "services.org_scope",
     "services.portal",
     "services.slugs",
