@@ -198,7 +198,21 @@ async def _my_sessions(org_id: str, contact_id: str) -> list[dict]:
     return result
 
 
+def _version_out(file_row: dict, *, is_current: bool) -> dict:
+    return {
+        "file_id": file_row.get("id"),
+        "version": int(file_row.get("version") or 1),
+        "filename": file_row.get("filename"),
+        "url": _public_url_for(file_row.get("bucket_path")),
+        "created_at": file_row.get("created_at"),
+        "is_current": is_current,
+    }
+
+
 async def _my_tasks(org_id: str, contact_id: str) -> list[dict]:
+    """The speaker's onboarding tasks, each carrying its full version history and
+    the organizer/speaker comment thread — so the portal shows feedback and prior
+    uploads without extra round trips."""
     assignments = rows(
         await db(
             lambda: supabase.table("task_assignments")
@@ -213,7 +227,7 @@ async def _my_tasks(org_id: str, contact_id: str) -> list[dict]:
         return []
 
     task_ids = sorted({a["task_id"] for a in assignments if a.get("task_id")})
-    file_ids = sorted({a["file_id"] for a in assignments if a.get("file_id")})
+    assignment_ids = sorted({a["id"] for a in assignments if a.get("id")})
 
     tasks_by_id: dict[str, dict] = {}
     if task_ids:
@@ -229,31 +243,77 @@ async def _my_tasks(org_id: str, contact_id: str) -> list[dict]:
         ):
             tasks_by_id[task["id"]] = task
 
-    files_by_id: dict[str, dict] = {}
-    if file_ids:
+    # All files for these assignments (every version), grouped per assignment.
+    files_by_assignment: dict[str, list[dict]] = {}
+    comments_by_assignment: dict[str, list[dict]] = {}
+    if assignment_ids:
         for file_row in rows(
             await db(
                 lambda: supabase.table("files")
-                .select("id, filename, bucket_path")
+                .select("id, task_assignment_id, filename, bucket_path, version, created_at")
                 .eq("org_id", org_id)
-                .in_("id", file_ids)
+                .in_("task_assignment_id", assignment_ids)
                 .execute(),
                 "portal_me_files",
             )
         ):
-            files_by_id[file_row["id"]] = file_row
+            files_by_assignment.setdefault(file_row.get("task_assignment_id"), []).append(file_row)
+        # Comments are best-effort: if migration 007 hasn't been applied yet the
+        # table is absent — the portal should still render (just without threads)
+        # rather than 500 the whole page.
+        try:
+            for comment in rows(
+                await db(
+                    lambda: supabase.table("content_comments")
+                    .select("id, task_assignment_id, author_role, author_label, body, created_at")
+                    .eq("org_id", org_id)
+                    .in_("task_assignment_id", assignment_ids)
+                    .execute(),
+                    "portal_me_comments",
+                )
+            ):
+                comments_by_assignment.setdefault(comment.get("task_assignment_id"), []).append(comment)
+        except Exception:  # pragma: no cover - only hit when the table is missing
+            logger.warning("portal: content_comments unavailable; rendering without threads", exc_info=True)
 
     result: list[dict] = []
     for assignment in assignments:
         task = tasks_by_id.get(assignment.get("task_id"))
         if not task:
             continue
-        file_row = files_by_id.get(assignment.get("file_id"))
+
+        file_rows = files_by_assignment.get(assignment["id"], [])
+        ordered = sorted(
+            file_rows,
+            key=lambda f: (int(f.get("version") or 1), str(f.get("created_at") or "")),
+            reverse=True,
+        )
+        current_id = assignment.get("file_id")
+        if current_id not in {f.get("id") for f in ordered} and ordered:
+            current_id = ordered[0].get("id")
+        versions = [_version_out(f, is_current=f.get("id") == current_id) for f in ordered]
+        current = next((v for v in versions if v["is_current"]), None)
         file_out = (
-            {"filename": file_row.get("filename"), "url": _public_url_for(file_row.get("bucket_path"))}
-            if file_row
+            {"filename": current["filename"], "url": current["url"], "version": current["version"]}
+            if current
             else None
         )
+
+        comments = sorted(
+            comments_by_assignment.get(assignment["id"], []),
+            key=lambda c: str(c.get("created_at") or ""),
+        )
+        comments_out = [
+            {
+                "id": c.get("id"),
+                "author_role": c.get("author_role"),
+                "author_label": c.get("author_label"),
+                "body": c.get("body"),
+                "created_at": c.get("created_at"),
+            }
+            for c in comments
+        ]
+
         result.append(
             {
                 "assignment_id": assignment["id"],
@@ -269,6 +329,8 @@ async def _my_tasks(org_id: str, contact_id: str) -> list[dict]:
                     "required": bool(task.get("required")),
                 },
                 "file": file_out,
+                "versions": versions,
+                "comments": comments_out,
             }
         )
 
@@ -460,6 +522,22 @@ async def upload_task_file(
     contact = await load_contact(org_id, contact_id)
     bucket_path, public_url = await store_upload(org_id, contact_id, ext, content, mimetype)
 
+    # Versioning: a re-upload does not overwrite. Each upload is a NEW files row
+    # with an incremented version, so the full history stays recoverable and the
+    # portal/library can show prior versions. The current version is the one the
+    # assignment.file_id points at (updated below).
+    prior = rows(
+        await db(
+            lambda: supabase.table("files")
+            .select("version")
+            .eq("org_id", org_id)
+            .eq("task_assignment_id", assignment_id)
+            .execute(),
+            "portal_file_versions",
+        )
+    )
+    version = 1 + max((int(f.get("version") or 1) for f in prior), default=0)
+
     file_row = first(
         await db(
             lambda: supabase.table("files")
@@ -473,6 +551,7 @@ async def upload_task_file(
                     "filename": filename or f"upload{ext}",
                     "mimetype": mimetype,
                     "size": len(content),
+                    "version": version,
                 }
             )
             .execute(),
@@ -494,7 +573,59 @@ async def upload_task_file(
     return {
         "assignment_id": assignment_id,
         "status": "submitted",
-        "file": {"filename": filename or f"upload{ext}", "url": public_url},
+        "version": version,
+        "file": {"filename": filename or f"upload{ext}", "url": public_url, "version": version},
+    }
+
+
+async def add_comment(org_id: str, contact_id: str, assignment_id: str, body: str) -> dict:
+    """Speaker replies on their own content item (e.g. after organizer feedback).
+
+    Scoped by ``contact_id`` through ``_get_assignment`` — a speaker can only
+    comment on an item that is theirs, so a foreign assignment_id 404s.
+    """
+    text = (body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+    assignment = await _get_assignment(org_id, contact_id, assignment_id)
+    contact = await load_contact(org_id, contact_id)
+    author_label = (
+        " ".join(p for p in (contact.get("first_name"), contact.get("last_name")) if p).strip()
+        or str(contact.get("email") or "Speaker")
+    )
+    task = await _get_task(org_id, assignment["task_id"])
+    event_id = contact.get("event_id")
+
+    comment = first(
+        await db(
+            lambda: supabase.table("content_comments")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "event_id": event_id,
+                    "task_assignment_id": assignment_id,
+                    "contact_id": contact_id,
+                    "author_role": "speaker",
+                    "author_label": author_label,
+                    "body": text,
+                    "created_at": _now_iso(),
+                }
+            )
+            .execute(),
+            "portal_comment_insert",
+        )
+    )
+    if not comment:
+        raise HTTPException(status_code=500, detail="Could not save comment")
+    _ = task  # fetched to enforce the item exists / is this org's
+    return {
+        "comment": {
+            "id": comment.get("id"),
+            "author_role": "speaker",
+            "author_label": author_label,
+            "body": text,
+            "created_at": comment.get("created_at"),
+        }
     }
 
 

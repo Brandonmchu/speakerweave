@@ -8,6 +8,7 @@ import {
   ChevronsUpDown,
   ClipboardList,
   ExternalLink,
+  FileArchive,
   FileText,
   HelpCircle,
   LayoutDashboard,
@@ -59,6 +60,7 @@ const NAV: NavSection[] = [
     label: 'People',
     items: [
       { label: 'Speakers', to: '/speakers', icon: Users },
+      { label: 'Content', to: '/content', icon: FileArchive },
       { label: 'Comms', to: '/comms', icon: Mail },
     ],
   },

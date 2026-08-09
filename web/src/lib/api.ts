@@ -646,3 +646,165 @@ export async function withdrawSubmitterSubmission(
   const submission = (wire as { submission?: SubmitterSubmission })?.submission
   return submission ?? (wire as SubmitterSubmission)
 }
+
+// ── Speaker CRM (organizer) ──────────────────────────────────────────────────
+// The roster list + invite + task authoring live in lib/speakersApi.ts. This is
+// the CRM layer on top: the per-speaker profile drawer, bulk CSV import, and
+// profile edit — every call JWT-authed and org/event scoped by the backend.
+
+/** The identity block of a speaker profile — everything the drawer header shows. */
+export interface SpeakerProfileContact {
+  contact_id: string
+  name: string
+  first_name: string
+  last_name: string
+  email: string | null
+  company_name: string | null
+  title: string | null
+  about: string | null
+  photo_url: string | null
+  pronouns: string | null
+  linkedin_url: string | null
+  twitter_url: string | null
+  phone: string | null
+  last_portal_access_at: string | null
+  invited: boolean
+  session_count: number
+  submission_count: number
+  tasks_total: number
+  tasks_done: number
+  tasks_outstanding: number
+}
+
+export interface SpeakerProfileSubmission {
+  id: string
+  friendly_id?: string | null
+  title: string | null
+  status: SubmissionStatus
+  submitted_at?: string | null
+}
+
+export interface SpeakerProfileSession {
+  id: string
+  friendly_id?: string | null
+  title: string | null
+  status: SubmissionStatus
+  starts_at: string | null
+  ends_at: string | null
+  room: string | null
+  role: string | null
+  is_primary: boolean
+  scheduled: boolean
+}
+
+export interface SpeakerOnboardingItem {
+  assignment_id: string
+  task_id: string
+  name: string | null
+  kind: string | null
+  status: string | null
+  due_at: string | null
+  required: boolean
+  completed_at: string | null
+}
+
+export interface SpeakerCommunication {
+  id: string
+  template_key: string | null
+  subject: string | null
+  status: string | null
+  sent_at: string | null
+  created_at: string | null
+  error: string | null
+}
+
+export interface SpeakerProfile {
+  event: { id: string; name: string | null }
+  speaker: SpeakerProfileContact
+  submissions: SpeakerProfileSubmission[]
+  sessions: SpeakerProfileSession[]
+  onboarding: SpeakerOnboardingItem[]
+  communications: SpeakerCommunication[]
+}
+
+/** GET /api/events/{id}/speakers/{contactId} — the full profile aggregate. */
+export async function getSpeakerProfile(eventId: string, contactId: string): Promise<SpeakerProfile> {
+  const wire = await apiGet<Partial<SpeakerProfile>>(
+    `/api/events/${encodeURIComponent(eventId)}/speakers/${encodeURIComponent(contactId)}`
+  )
+  return {
+    event: wire.event ?? { id: eventId, name: null },
+    speaker: wire.speaker as SpeakerProfileContact,
+    submissions: Array.isArray(wire.submissions) ? wire.submissions : [],
+    sessions: Array.isArray(wire.sessions) ? wire.sessions : [],
+    onboarding: Array.isArray(wire.onboarding) ? wire.onboarding : [],
+    communications: Array.isArray(wire.communications) ? wire.communications : [],
+  }
+}
+
+export interface SpeakerImportRow {
+  first_name?: string
+  last_name?: string
+  email: string
+  company?: string
+  title?: string
+}
+
+export interface SpeakerImportError {
+  line?: number | null
+  email?: string
+  message: string
+}
+
+export interface SpeakerImportResult {
+  created: number
+  updated: number
+  skipped: number
+  errors: SpeakerImportError[]
+  total: number
+}
+
+/**
+ * POST /api/events/{id}/speakers/import — bulk add by upserting on
+ * (event_id, email). Pass raw `csv` text (paste/upload) OR a structured `rows`
+ * list (the manual single-add path). Returns per-bucket counts + row errors.
+ */
+export async function importSpeakers(
+  eventId: string,
+  input: { csv?: string; rows?: SpeakerImportRow[] }
+): Promise<SpeakerImportResult> {
+  const wire = await apiPost<Partial<SpeakerImportResult>>(
+    `/api/events/${encodeURIComponent(eventId)}/speakers/import`,
+    input
+  )
+  return {
+    created: wire.created ?? 0,
+    updated: wire.updated ?? 0,
+    skipped: wire.skipped ?? 0,
+    errors: Array.isArray(wire.errors) ? wire.errors : [],
+    total: wire.total ?? 0,
+  }
+}
+
+export interface SpeakerEditInput {
+  first_name?: string
+  last_name?: string
+  email?: string
+  company_name?: string
+  title?: string
+  about?: string
+}
+
+/** PATCH /api/events/{id}/speakers/{contactId} — edit profile fields. */
+export async function updateSpeaker(
+  eventId: string,
+  contactId: string,
+  input: SpeakerEditInput
+): Promise<SpeakerProfileContact> {
+  const wire = await apiPatch<{ speaker?: SpeakerProfileContact } | SpeakerProfileContact>(
+    `/api/events/${encodeURIComponent(eventId)}/speakers/${encodeURIComponent(contactId)}`,
+    input
+  )
+  const speaker = (wire as { speaker?: SpeakerProfileContact })?.speaker
+  return (speaker ?? wire) as SpeakerProfileContact
+}

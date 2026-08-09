@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from auth import get_current_user_and_org, verify_org_access
-from services import mailer
+from services import mailer, speaker_crm
 from services.comms import DEFAULT_TEMPLATES, render_template
 from services.evaluations import session_review_aggregate, session_review_scores
 from services.forms import load_form_layout
@@ -25,7 +25,7 @@ from services.invites import (
     send_session_invites,
 )
 from services.onboarding import provision_speaker_onboarding
-from services.org_scope import fetch_scoped
+from services.org_scope import fetch_event, fetch_scoped
 from services.slugs import slugify, unique_slug
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
@@ -932,3 +932,442 @@ async def cancel_invites(
         return await cancel_session_invites(session_id, org_id)
     except InviteTargetNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+# ── speaker CRM ──────────────────────────────────────────────────────────────
+# The roster list lives in portal_admin_routes; this is the per-speaker detail,
+# bulk CSV import, and profile edit that turn the roster into a CRM. Everything
+# is org-scoped AND event-scoped: a contact belongs to exactly one event, so a
+# foreign contact_id or one from another event 404s.
+
+# task_assignments.status that count as finished work (mirrors the roster).
+_DONE_STATUSES = frozenset({"approved", "done"})
+
+
+class SpeakerRowInput(BaseModel):
+    first_name: str = Field(default="", max_length=200)
+    last_name: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=320)
+    company: str = Field(default="", max_length=300)
+    title: str = Field(default="", max_length=300)
+
+
+class SpeakerImportRequest(BaseModel):
+    """Bulk add: paste/upload CSV text, or hand a structured list (manual add)."""
+
+    csv: str | None = Field(default=None, max_length=1_000_000)
+    rows: list[SpeakerRowInput] | None = None
+
+
+class SpeakerPatchRequest(BaseModel):
+    first_name: str | None = Field(default=None, max_length=200)
+    last_name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+    company_name: str | None = Field(default=None, max_length=300)
+    title: str | None = Field(default=None, max_length=300)
+    about: str | None = Field(default=None, max_length=50_000)
+
+
+async def _fetch_event_contact(event_id: str, contact_id: str, org_id: str) -> dict:
+    """One contact owned by this org AND on this event, or 404.
+
+    Scoping by event_id as well as org_id is what makes a contact_id from a
+    different event of the same org 404 rather than leak across events.
+    """
+    contact = first(
+        await db(
+            lambda: supabase.table("contacts")
+            .select("*")
+            .eq("id", contact_id)
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .limit(1)
+            .execute(),
+            "speaker_contact_lookup",
+        )
+    )
+    return verify_org_access(contact, org_id, "Speaker")
+
+
+@router.get("/events/{event_id}/speakers/{contact_id}")
+async def get_speaker_profile(
+    event_id: str,
+    contact_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """The full profile drawer: identity, submissions, scheduled sessions,
+    onboarding progress, and the email history for this speaker on this event.
+
+    A flat handful of grouped queries — never one per row — so the drawer opens
+    cheaply even for a speaker on many sessions.
+    """
+    _user_id, org_id = auth
+    event = await fetch_event(event_id, org_id, columns="id, org_id, name")
+    contact = await _fetch_event_contact(event_id, contact_id, org_id)
+
+    # Submissions this speaker filed (their CFP entries).
+    submissions = rows(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, friendly_id, title, status, submitted_at")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("submitter_contact_id", contact_id)
+            .execute(),
+            "speaker_submissions",
+        )
+    )
+    submissions.sort(key=lambda s: str(s.get("submitted_at") or ""), reverse=True)
+
+    # Sessions this speaker is on the program for (participant), scheduled first.
+    participations = rows(
+        await db(
+            lambda: supabase.table("session_participants")
+            .select("session_id, role, is_primary")
+            .eq("org_id", org_id)
+            .eq("contact_id", contact_id)
+            .execute(),
+            "speaker_participations",
+        )
+    )
+    part_by_session: dict[str, dict] = {}
+    for part in participations:
+        session_id = part.get("session_id")
+        if session_id and session_id not in part_by_session:
+            part_by_session[session_id] = part
+    session_ids = sorted(part_by_session)
+
+    session_rows: list[dict] = []
+    if session_ids:
+        session_rows = rows(
+            await db(
+                lambda: supabase.table("sessions")
+                .select("id, friendly_id, title, status, starts_at, ends_at, room_id")
+                .eq("org_id", org_id)
+                .eq("event_id", event_id)
+                .in_("id", session_ids)
+                .execute(),
+                "speaker_sessions",
+            )
+        )
+    room_ids = sorted({s["room_id"] for s in session_rows if s.get("room_id")})
+    rooms_by_id: dict[str, str] = {}
+    if room_ids:
+        rooms_by_id = {
+            r["id"]: r.get("name")
+            for r in rows(
+                await db(
+                    lambda: supabase.table("rooms")
+                    .select("id, name")
+                    .eq("org_id", org_id)
+                    .eq("event_id", event_id)
+                    .in_("id", room_ids)
+                    .execute(),
+                    "speaker_session_rooms",
+                )
+            )
+            if r.get("id")
+        }
+    sessions_out = []
+    for session in session_rows:
+        part = part_by_session.get(session["id"], {})
+        sessions_out.append(
+            {
+                "id": session["id"],
+                "friendly_id": session.get("friendly_id"),
+                "title": session.get("title"),
+                "status": session.get("status"),
+                "starts_at": session.get("starts_at"),
+                "ends_at": session.get("ends_at"),
+                "room": rooms_by_id.get(session.get("room_id")),
+                "role": part.get("role"),
+                "is_primary": bool(part.get("is_primary")),
+                "scheduled": bool(session.get("starts_at")),
+            }
+        )
+    sessions_out.sort(
+        key=lambda s: (not s["scheduled"], str(s.get("starts_at") or ""), str(s.get("title") or ""))
+    )
+
+    # Onboarding: this speaker's task assignments, joined to this event's tasks.
+    assignments = rows(
+        await db(
+            lambda: supabase.table("task_assignments")
+            .select("id, task_id, status, completed_at")
+            .eq("org_id", org_id)
+            .eq("contact_id", contact_id)
+            .execute(),
+            "speaker_assignments",
+        )
+    )
+    task_ids = sorted({a["task_id"] for a in assignments if a.get("task_id")})
+    tasks_by_id: dict[str, dict] = {}
+    if task_ids:
+        tasks_by_id = {
+            t["id"]: t
+            for t in rows(
+                await db(
+                    lambda: supabase.table("tasks")
+                    .select("id, name, kind, due_at, required")
+                    .eq("org_id", org_id)
+                    .eq("event_id", event_id)
+                    .in_("id", task_ids)
+                    .execute(),
+                    "speaker_tasks",
+                )
+            )
+            if t.get("id")
+        }
+    onboarding = []
+    for assignment in assignments:
+        task = tasks_by_id.get(assignment.get("task_id"))
+        if not task:
+            continue  # an assignment to some other event's task is not shown here
+        onboarding.append(
+            {
+                "assignment_id": assignment["id"],
+                "task_id": task["id"],
+                "name": task.get("name"),
+                "kind": task.get("kind"),
+                "status": assignment.get("status"),
+                "due_at": task.get("due_at"),
+                "required": bool(task.get("required")),
+                "completed_at": assignment.get("completed_at"),
+            }
+        )
+    onboarding.sort(key=lambda t: (t["status"] in _DONE_STATUSES, str(t.get("name") or "")))
+    tasks_total = len(onboarding)
+    tasks_done = sum(1 for t in onboarding if t["status"] in _DONE_STATUSES)
+
+    # Communication history: this speaker's outbox rows for this event.
+    outbox = rows(
+        await db(
+            lambda: supabase.table("email_outbox")
+            .select("id, template_key, payload, status, sent_at, created_at, last_error")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("contact_id", contact_id)
+            .order("created_at", desc=True)
+            .execute(),
+            "speaker_communications",
+        )
+    )
+    communications = [
+        {
+            "id": row.get("id"),
+            "template_key": row.get("template_key"),
+            "subject": (row.get("payload") or {}).get("subject"),
+            "status": row.get("status"),
+            "sent_at": row.get("sent_at"),
+            "created_at": row.get("created_at"),
+            "error": row.get("last_error"),
+        }
+        for row in outbox
+    ]
+
+    invited = bool(
+        first(
+            await db(
+                lambda: supabase.table("magic_link_tokens")
+                .select("id")
+                .eq("org_id", org_id)
+                .eq("purpose", "portal")
+                .eq("contact_id", contact_id)
+                .limit(1)
+                .execute(),
+                "speaker_invited_lookup",
+            )
+        )
+    )
+
+    speaker = {
+        "contact_id": contact_id,
+        "name": speaker_crm.full_name(
+            contact.get("first_name"), contact.get("last_name"), contact.get("email")
+        ),
+        "first_name": contact.get("first_name") or "",
+        "last_name": contact.get("last_name") or "",
+        "email": contact.get("email"),
+        "company_name": contact.get("company_name"),
+        "title": contact.get("title"),
+        "about": contact.get("about"),
+        "photo_url": contact.get("photo_url"),
+        "pronouns": contact.get("pronouns"),
+        "linkedin_url": contact.get("linkedin_url"),
+        "twitter_url": contact.get("twitter_url"),
+        "phone": contact.get("phone"),
+        "last_portal_access_at": contact.get("last_portal_access_at"),
+        "invited": invited,
+        "session_count": len(sessions_out),
+        "submission_count": len(submissions),
+        "tasks_total": tasks_total,
+        "tasks_done": tasks_done,
+        "tasks_outstanding": max(tasks_total - tasks_done, 0),
+    }
+    return {
+        "event": {"id": event["id"], "name": event.get("name")},
+        "speaker": speaker,
+        "submissions": submissions,
+        "sessions": sessions_out,
+        "onboarding": onboarding,
+        "communications": communications,
+    }
+
+
+@router.post("/events/{event_id}/speakers/import")
+async def import_speakers(
+    event_id: str,
+    payload: SpeakerImportRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Bulk-add speakers by upserting contacts on ``(event_id, email)``.
+
+    One bad row never aborts the batch: it lands in ``errors`` and the rest
+    import. Returns ``{created, updated, skipped, errors, total}`` so the UI can
+    show an honest summary of what a paste/upload did.
+    """
+    _user_id, org_id = auth
+    await fetch_event(event_id, org_id)
+
+    parse_errors: list[dict] = []
+    if payload.csv is not None and payload.csv.strip():
+        parsed, header_error, parse_errors = speaker_crm.parse_speaker_csv(payload.csv)
+        if header_error:
+            raise HTTPException(status_code=400, detail=header_error)
+    elif payload.rows:
+        parsed = [
+            {
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+                "email": row.email,
+                "company": row.company,
+                "title": row.title,
+                "line": index,
+            }
+            for index, row in enumerate(payload.rows, start=1)
+        ]
+    else:
+        raise HTTPException(status_code=400, detail="Provide CSV text or a list of rows to import.")
+
+    valid, row_errors, duplicate_skips = speaker_crm.collect_import(parsed)
+    # Rows that couldn't even be parsed are errors too — surface them alongside.
+    errors = parse_errors + row_errors
+
+    created = 0
+    updated = 0
+    skipped = duplicate_skips
+    if valid:
+        emails = [row["email"] for row in valid]
+        existing_rows = rows(
+            await db(
+                lambda: supabase.table("contacts")
+                .select("*")
+                .eq("org_id", org_id)
+                .eq("event_id", event_id)
+                .in_("email", emails)
+                .execute(),
+                "speaker_import_existing",
+            )
+        )
+        existing_by_email = {
+            speaker_crm.normalize_email(c.get("email")): c for c in existing_rows if c.get("email")
+        }
+
+        to_insert: list[dict] = []
+        for row in valid:
+            existing = existing_by_email.get(row["email"])
+            if existing:
+                patch = speaker_crm.contact_patch(row, existing)
+                if patch:
+                    await db(
+                        lambda existing=existing, patch=patch: supabase.table("contacts")
+                        .update(patch)
+                        .eq("id", existing["id"])
+                        .eq("org_id", org_id)
+                        .execute(),
+                        "speaker_import_update",
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                to_insert.append(speaker_crm.contact_insert(org_id, event_id, row))
+
+        if to_insert:
+            await db(
+                lambda: supabase.table("contacts").insert(to_insert).execute(),
+                "speaker_import_insert",
+            )
+            created = len(to_insert)
+
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "total": len(parsed) + len(parse_errors),
+    }
+
+
+@router.patch("/events/{event_id}/speakers/{contact_id}")
+async def update_speaker(
+    event_id: str,
+    contact_id: str,
+    payload: SpeakerPatchRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Edit one speaker's profile fields (name/email/company/title/bio)."""
+    _user_id, org_id = auth
+    await fetch_event(event_id, org_id)
+    contact = await _fetch_event_contact(event_id, contact_id, org_id)
+
+    provided = payload.model_dump(exclude_unset=True)
+    patch: dict = {}
+    for key in ("first_name", "last_name", "company_name", "title", "about"):
+        if key in provided:
+            value = provided[key]
+            patch[key] = value.strip() if isinstance(value, str) else value
+
+    if "email" in provided:
+        email = speaker_crm.normalize_email(provided.get("email") or "")
+        if not speaker_crm.looks_like_email(email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address")
+        if email != speaker_crm.normalize_email(contact.get("email") or ""):
+            # (event_id, email) is unique — refuse a collision rather than let the
+            # constraint turn into a 500 the organizer can't read.
+            clash = first(
+                await db(
+                    lambda: supabase.table("contacts")
+                    .select("id")
+                    .eq("org_id", org_id)
+                    .eq("event_id", event_id)
+                    .eq("email", email)
+                    .limit(1)
+                    .execute(),
+                    "speaker_email_clash",
+                )
+            )
+            if clash and clash.get("id") != contact_id:
+                raise HTTPException(status_code=409, detail="Another speaker already uses that email.")
+            patch["email"] = email
+
+    if not patch:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    updated = first(
+        await db(
+            lambda: supabase.table("contacts")
+            .update(patch)
+            .eq("id", contact_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "speaker_update",
+        )
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Speaker not found")
+    updated["name"] = speaker_crm.full_name(
+        updated.get("first_name"), updated.get("last_name"), updated.get("email")
+    )
+    return {"speaker": updated}

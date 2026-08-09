@@ -10,13 +10,21 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  History,
   ImagePlus,
   Loader2,
+  MessageSquare,
   RefreshCw,
+  Send,
   Upload,
 } from 'lucide-react'
 
 import { ApiError } from '@/lib/api'
+import {
+  postPortalComment,
+  type ContentComment,
+  type ContentVersion,
+} from '@/lib/contentApi'
 import {
   completePortalTask,
   fetchPortalMe,
@@ -503,6 +511,15 @@ const TASK_STATUS: Record<string, { label: string; className: string }> = {
   denied: { label: 'Needs changes', className: 'bg-destructive/10 text-destructive-strong' },
 }
 
+// The /me payload now carries version history + a comment thread on each task.
+// PortalTask (lib/portalApi.ts) predates them, so read the extras through this
+// augmentation without widening the shared type.
+type PortalTaskContent = Omit<PortalTask, 'file'> & {
+  versions?: ContentVersion[]
+  comments?: ContentComment[]
+  file: { filename: string; url: string | null; version?: number } | null
+}
+
 function TaskRow({
   task,
   accent,
@@ -511,14 +528,33 @@ function TaskRow({
   onComplete,
   onUpload,
 }: {
-  task: PortalTask
+  task: PortalTaskContent
   accent: string
   completePending: boolean
   uploadPending: boolean
   onComplete: () => void
   onUpload: (file: File) => void
 }) {
+  const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
+  const [showHistory, setShowHistory] = useState(false)
+  const [reply, setReply] = useState('')
+  const versions = task.versions ?? []
+  const priorVersions = versions.filter((v) => !v.is_current)
+  const comments = task.comments ?? []
+  const currentVersion = versions.find((v) => v.is_current)?.version ?? task.file?.version
+
+  const sendComment = useMutation({
+    mutationFn: (body: string) => postPortalComment(task.assignment_id, body),
+    onSuccess: () => {
+      setReply('')
+      queryClient.invalidateQueries({ queryKey: ['portal-me'] })
+      toast({ title: 'Reply sent' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't send reply", description: error.message }),
+  })
+
   const status = task.status
   const isDone = status === 'done' || status === 'approved'
   const meta = TASK_STATUS[status] ?? { label: status, className: 'bg-foreground/5 text-muted-foreground' }
@@ -582,15 +618,60 @@ function TaskRow({
           </div>
 
           {task.file && (
-            <a
-              href={task.file.url ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground hover:bg-accent"
-            >
-              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{task.file.filename}</span>
-            </a>
+            <div className="mt-3 space-y-1.5">
+              <a
+                href={task.file.url ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground hover:bg-accent"
+              >
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{task.file.filename}</span>
+                {currentVersion ? (
+                  <span className="shrink-0 rounded bg-foreground/5 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    v{currentVersion}
+                  </span>
+                ) : null}
+              </a>
+              {priorVersions.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistory((s) => !s)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    <History className="h-3 w-3" />
+                    {showHistory
+                      ? 'Hide previous versions'
+                      : `View ${priorVersions.length} previous version${priorVersions.length === 1 ? '' : 's'}`}
+                  </button>
+                  {showHistory && (
+                    <ul className="mt-1.5 space-y-1 border-l border-border pl-3">
+                      {priorVersions.map((version) => (
+                        <li key={version.file_id} className="flex items-center gap-2 text-xs">
+                          <span className="rounded bg-foreground/5 px-1.5 py-0.5 font-medium text-muted-foreground">
+                            v{version.version}
+                          </span>
+                          {version.url ? (
+                            <a
+                              href={version.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate font-medium"
+                              style={{ color: accent }}
+                            >
+                              {version.filename}
+                            </a>
+                          ) : (
+                            <span className="truncate text-muted-foreground">{version.filename}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* actions */}
@@ -630,6 +711,66 @@ function TaskRow({
               </>
             )}
           </div>
+
+          {/* organizer feedback + speaker replies */}
+          {(comments.length > 0 || task.task.kind === 'file_request') && (
+            <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                <MessageSquare className="h-3.5 w-3.5" />
+                Feedback
+              </p>
+              {comments.length === 0 ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  No feedback yet. Anything the organizer sends will show up here.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {comments.map((comment) => (
+                    <li key={comment.id} className="rounded-md bg-card px-2.5 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-foreground">
+                          {comment.author_label ??
+                            (comment.author_role === 'organizer' ? 'Organizer' : 'You')}
+                        </span>
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                          style={
+                            comment.author_role === 'organizer'
+                              ? { backgroundColor: `${accent}14`, color: accent }
+                              : undefined
+                          }
+                        >
+                          {comment.author_role}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+                        {comment.body}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <Textarea
+                  value={reply}
+                  autoResize
+                  placeholder="Reply to the organizer…"
+                  className="min-h-9 flex-1"
+                  onChange={(e) => setReply(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => sendComment.mutate(reply.trim())}
+                  disabled={!reply.trim() || sendComment.isPending}
+                  className="self-end"
+                >
+                  {sendComment.isPending ? <Loader2 className="animate-spin" /> : <Send />}
+                  Reply
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </li>

@@ -21,6 +21,10 @@ from services import portal
 router = APIRouter(prefix="/public/portal", tags=["public-portal"])
 
 
+class CommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
 class ProfilePatch(BaseModel):
     first_name: str | None = Field(default=None, max_length=120)
     last_name: str | None = Field(default=None, max_length=120)
@@ -74,6 +78,20 @@ async def upload_task_file(
     org_id, contact_id = portal_contact
     content = await file.read()
     return await portal.upload_task_file(org_id, contact_id, assignment_id, file.filename, content)
+
+
+@router.post("/tasks/{assignment_id}/comments")
+@limiter.limit(RATE_PUBLIC_WRITE)
+async def add_task_comment(
+    request: Request,
+    assignment_id: str,
+    payload: CommentRequest,
+    portal_contact: tuple[str, str] = Depends(get_portal_contact),
+):
+    """Speaker replies on their own content item — visible to the organizer in the
+    content library. Scoped to the speaker's own assignment."""
+    org_id, contact_id = portal_contact
+    return await portal.add_comment(org_id, contact_id, assignment_id, payload.body)
 
 
 @router.post("/headshot")

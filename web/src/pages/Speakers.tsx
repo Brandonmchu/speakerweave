@@ -1,16 +1,37 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatDistanceToNow, parseISO } from 'date-fns'
+import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
+  Building2,
+  Calendar,
   CheckCircle2,
+  Clock,
+  Download,
+  FileText,
   Mail,
+  MapPin,
+  MessageSquare,
+  Pencil,
   Plus,
+  Search,
   Send,
+  Upload,
+  UserPlus,
   Users,
 } from 'lucide-react'
 
-import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
+import {
+  apiGet,
+  getSpeakerProfile,
+  importSpeakers,
+  unwrapList,
+  updateSpeaker,
+  type EventSummary,
+  type SpeakerImportResult,
+  type SpeakerProfile,
+  type SubmissionStatus,
+} from '@/lib/api'
 import {
   createSpeakerTask,
   listEventSpeakers,
@@ -18,6 +39,7 @@ import {
   type EventSpeaker,
   type TaskKind,
 } from '@/lib/speakersApi'
+import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -32,11 +54,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
 
+type OnboardingFilter = 'all' | 'onboarded' | 'outstanding'
+type InviteFilter = 'all' | 'invited' | 'uninvited'
+
 export function Speakers() {
   const queryClient = useQueryClient()
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [taskOpen, setTaskOpen] = useState(false)
   const [inviteLink, setInviteLink] = useState<{ name: string; url: string } | null>(null)
+
+  const [search, setSearch] = useState('')
+  const [onboardingFilter, setOnboardingFilter] = useState<OnboardingFilter>('all')
+  const [inviteFilter, setInviteFilter] = useState<InviteFilter>('all')
+  const [openContactId, setOpenContactId] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -53,6 +85,22 @@ export function Speakers() {
 
   const speakers = useMemo(() => speakersQuery.data?.speakers ?? [], [speakersQuery.data])
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return speakers.filter((s) => {
+      if (q) {
+        const company = (s as { company_name?: string | null }).company_name ?? ''
+        const hay = `${s.name} ${s.email ?? ''} ${company}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      if (onboardingFilter === 'onboarded' && s.tasks_outstanding > 0) return false
+      if (onboardingFilter === 'outstanding' && s.tasks_outstanding === 0) return false
+      if (inviteFilter === 'invited' && !s.invited) return false
+      if (inviteFilter === 'uninvited' && s.invited) return false
+      return true
+    })
+  }, [speakers, search, onboardingFilter, inviteFilter])
+
   const invite = useMutation({
     mutationFn: (contactId: string) => sendPortalInvite(contactId),
     onSuccess: (data, contactId) => {
@@ -66,17 +114,25 @@ export function Speakers() {
       toast({ variant: 'destructive', title: "Couldn't send invite", description: error.message }),
   })
 
+  const refreshRoster = () => queryClient.invalidateQueries({ queryKey: speakersKey })
+
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && speakersQuery.isPending)
   const error = eventsQuery.error ?? speakersQuery.error
 
-  const allSelected = speakers.length > 0 && speakers.every((s) => selected.has(s.contact_id))
-  const someSelected = speakers.some((s) => selected.has(s.contact_id))
+  const allSelected = filtered.length > 0 && filtered.every((s) => selected.has(s.contact_id))
+  const someSelected = filtered.some((s) => selected.has(s.contact_id))
   const headerChecked: boolean | 'indeterminate' = allSelected ? true : someSelected ? 'indeterminate' : false
 
   const toggleAll = () =>
     setSelected((prev) => {
-      if (speakers.every((s) => prev.has(s.contact_id))) return new Set()
-      return new Set(speakers.map((s) => s.contact_id))
+      if (filtered.every((s) => prev.has(s.contact_id))) {
+        const next = new Set(prev)
+        filtered.forEach((s) => next.delete(s.contact_id))
+        return next
+      }
+      const next = new Set(prev)
+      filtered.forEach((s) => next.add(s.contact_id))
+      return next
     })
 
   const toggleOne = (id: string) =>
@@ -86,6 +142,13 @@ export function Speakers() {
       else next.add(id)
       return next
     })
+
+  const onExport = () => {
+    if (!event) return
+    const csv = speakersToCsv(filtered)
+    downloadCsv(`${event.slug || 'speakers'}-roster.csv`, csv)
+    toast({ title: 'Roster exported', description: `${filtered.length} speaker${filtered.length === 1 ? '' : 's'} downloaded.` })
+  }
 
   return (
     <div className="px-4 py-6 md:px-8">
@@ -97,17 +160,78 @@ export function Speakers() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Speakers</h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Invite speakers to the portal and track onboarding{event ? ` for ${event.name}` : ''}.
+              Manage your speaker roster, onboarding, and communications{event ? ` for ${event.name}` : ''}.
             </p>
           </div>
         </div>
-        <Button onClick={() => setTaskOpen(true)} disabled={!event || speakers.length === 0}>
-          <Plus />
-          Add task
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={() => setImportOpen(true)} disabled={!event}>
+            <Upload />
+            Import CSV
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onExport}
+            disabled={!event || speakers.length === 0}
+            data-testid="export-speakers"
+          >
+            <Download />
+            Export CSV
+          </Button>
+          <Button onClick={() => setAddOpen(true)} disabled={!event}>
+            <UserPlus />
+            Add speaker
+          </Button>
+        </div>
       </header>
 
-      <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      {event && speakers.length > 0 && (
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, email, or company"
+              aria-label="Search speakers"
+              data-testid="speaker-search"
+              className="pl-9"
+            />
+          </div>
+          <NativeSelect
+            aria-label="Filter by onboarding status"
+            data-testid="filter-onboarding"
+            value={onboardingFilter}
+            onValueChange={(v) => setOnboardingFilter(v as OnboardingFilter)}
+            className="w-auto min-w-[160px]"
+            options={[
+              { value: 'all', label: 'All onboarding' },
+              { value: 'onboarded', label: 'Onboarded' },
+              { value: 'outstanding', label: 'Outstanding tasks' },
+            ]}
+          />
+          <NativeSelect
+            aria-label="Filter by invite status"
+            data-testid="filter-invite"
+            value={inviteFilter}
+            onValueChange={(v) => setInviteFilter(v as InviteFilter)}
+            className="w-auto min-w-[150px]"
+            options={[
+              { value: 'all', label: 'All speakers' },
+              { value: 'invited', label: 'Invited' },
+              { value: 'uninvited', label: 'Not invited' },
+            ]}
+          />
+          <div className="ml-auto">
+            <Button variant="outline" onClick={() => setTaskOpen(true)} disabled={filtered.length === 0}>
+              <Plus />
+              Add task
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
         {error ? (
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
@@ -131,7 +255,38 @@ export function Speakers() {
           <EmptyState
             icon={<Users className="h-6 w-6 text-muted-foreground" />}
             title="No speakers yet"
-            description="Once sessions have speakers or submitters, they'll appear here to invite and onboard."
+            description="Import a CSV or add a speaker to start building your roster."
+            action={
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setImportOpen(true)}>
+                  <Upload />
+                  Import CSV
+                </Button>
+                <Button size="sm" onClick={() => setAddOpen(true)}>
+                  <UserPlus />
+                  Add speaker
+                </Button>
+              </div>
+            }
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<Search className="h-6 w-6 text-muted-foreground" />}
+            title="No matches"
+            description="No speakers match your search and filters."
+            action={
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setSearch('')
+                  setOnboardingFilter('all')
+                  setInviteFilter('all')
+                }}
+              >
+                Clear filters
+              </Button>
+            }
           />
         ) : (
           <Table>
@@ -148,8 +303,12 @@ export function Speakers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {speakers.map((speaker) => (
-                <TableRow key={speaker.contact_id} data-state={selected.has(speaker.contact_id) ? 'selected' : undefined}>
+              {filtered.map((speaker) => (
+                <TableRow
+                  key={speaker.contact_id}
+                  data-testid={`speaker-row-${speaker.contact_id}`}
+                  data-state={selected.has(speaker.contact_id) ? 'selected' : undefined}
+                >
                   <TableCell className="pr-0">
                     <Checkbox
                       checked={selected.has(speaker.contact_id)}
@@ -158,10 +317,14 @@ export function Speakers() {
                     />
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setOpenContactId(speaker.contact_id)}
+                      className="flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    >
                       <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-foreground">{speaker.name}</div>
+                        <div className="truncate font-medium text-foreground group-hover:underline">{speaker.name}</div>
                         {speaker.email && (
                           <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                             <Mail className="h-3 w-3 shrink-0" />
@@ -169,7 +332,7 @@ export function Speakers() {
                           </div>
                         )}
                       </div>
-                    </div>
+                    </button>
                   </TableCell>
                   <TableCell className="text-center tabular-nums text-foreground">
                     {speaker.session_count}
@@ -203,21 +366,636 @@ export function Speakers() {
       )}
 
       {event && (
-        <AddTaskDialog
-          open={taskOpen}
-          onOpenChange={setTaskOpen}
-          eventId={event.id}
-          speakers={speakers}
-          selected={selected}
-          onCreated={() => {
-            queryClient.invalidateQueries({ queryKey: speakersKey })
-            setSelected(new Set())
-          }}
-        />
+        <>
+          <AddTaskDialog
+            open={taskOpen}
+            onOpenChange={setTaskOpen}
+            eventId={event.id}
+            speakers={filtered}
+            selected={selected}
+            onCreated={() => {
+              queryClient.invalidateQueries({ queryKey: speakersKey })
+              setSelected(new Set())
+            }}
+          />
+          <ImportSpeakersDialog
+            open={importOpen}
+            onOpenChange={setImportOpen}
+            eventId={event.id}
+            onImported={refreshRoster}
+          />
+          <AddSpeakerDialog
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            eventId={event.id}
+            onAdded={refreshRoster}
+          />
+          <SpeakerDrawer
+            eventId={event.id}
+            contactId={openContactId}
+            onOpenChange={(open) => !open && setOpenContactId(null)}
+            onChanged={refreshRoster}
+          />
+        </>
       )}
 
       <InviteLinkDialog invite={inviteLink} onOpenChange={(open) => !open && setInviteLink(null)} />
     </div>
+  )
+}
+
+// ── CSV helpers (exported for tests) ─────────────────────────────────────────
+
+export function onboardingStatusLabel(speaker: EventSpeaker): string {
+  if (speaker.tasks_total === 0) return 'No tasks'
+  if (speaker.tasks_outstanding === 0) return 'Onboarded'
+  return `${speaker.tasks_done}/${speaker.tasks_total} done`
+}
+
+function csvCell(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+/** The roster as CSV text: name, email, company, status, invited, sessions. */
+export function speakersToCsv(speakers: EventSpeaker[]): string {
+  const header = ['Name', 'Email', 'Company', 'Status', 'Invited', 'Sessions']
+  const rows = speakers.map((s) => [
+    s.name,
+    s.email ?? '',
+    (s as { company_name?: string | null }).company_name ?? '',
+    onboardingStatusLabel(s),
+    s.invited ? 'Yes' : 'No',
+    String(s.session_count),
+  ])
+  return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')
+}
+
+function downloadCsv(filename: string, csv: string): void {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ── speaker profile drawer ───────────────────────────────────────────────────
+
+function SpeakerDrawer({
+  eventId,
+  contactId,
+  onOpenChange,
+  onChanged,
+}: {
+  eventId: string
+  contactId: string | null
+  onOpenChange: (open: boolean) => void
+  onChanged: () => void
+}) {
+  const open = Boolean(contactId)
+  const profileQuery = useQuery({
+    queryKey: ['speakerProfile', eventId, contactId],
+    queryFn: () => getSpeakerProfile(eventId, contactId!),
+    enabled: open && Boolean(contactId),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className={cn(
+          'left-auto right-0 top-0 h-screen max-h-screen w-full max-w-none translate-x-0 translate-y-0',
+          'flex flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-xl',
+          'data-[state=open]:slide-in-from-right-8 data-[state=closed]:slide-out-to-right-8'
+        )}
+      >
+        {profileQuery.isPending ? (
+          <div className="space-y-4 p-6">
+            <Skeleton className="h-12 w-12 rounded-full" />
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-56" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : profileQuery.error ? (
+          <div className="p-6">
+            <DialogTitle>Speaker</DialogTitle>
+            <DialogDescription className="mt-2 text-destructive">
+              {(profileQuery.error as Error).message}
+            </DialogDescription>
+          </div>
+        ) : profileQuery.data ? (
+          <SpeakerProfileBody
+            eventId={eventId}
+            profile={profileQuery.data}
+            onChanged={onChanged}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SpeakerProfileBody({
+  eventId,
+  profile,
+  onChanged,
+}: {
+  eventId: string
+  profile: SpeakerProfile
+  onChanged: () => void
+}) {
+  const queryClient = useQueryClient()
+  const speaker = profile.speaker
+  const [editing, setEditing] = useState(false)
+
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [company, setCompany] = useState('')
+  const [title, setTitle] = useState('')
+  const [about, setAbout] = useState('')
+
+  const beginEdit = () => {
+    setFirstName(speaker.first_name ?? '')
+    setLastName(speaker.last_name ?? '')
+    setEmail(speaker.email ?? '')
+    setCompany(speaker.company_name ?? '')
+    setTitle(speaker.title ?? '')
+    setAbout(speaker.about ?? '')
+    setEditing(true)
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateSpeaker(eventId, speaker.contact_id, {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        email: email.trim(),
+        company_name: company.trim(),
+        title: title.trim(),
+        about: about.trim(),
+      }),
+    onSuccess: () => {
+      toast({ title: 'Speaker updated', description: `Saved changes for ${speaker.name}.` })
+      setEditing(false)
+      queryClient.invalidateQueries({ queryKey: ['speakerProfile', eventId, speaker.contact_id] })
+      onChanged()
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't save", description: error.message }),
+  })
+
+  return (
+    <>
+      <div className="border-b border-border px-6 py-5 pr-12">
+        <div className="flex items-start gap-3">
+          <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="text-xl leading-snug">{speaker.name}</DialogTitle>
+            <DialogDescription className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              {speaker.email && (
+                <span className="inline-flex items-center gap-1">
+                  <Mail className="h-3.5 w-3.5" />
+                  {speaker.email}
+                </span>
+              )}
+              {(speaker.title || speaker.company_name) && (
+                <span className="inline-flex items-center gap-1">
+                  <Building2 className="h-3.5 w-3.5" />
+                  {[speaker.title, speaker.company_name].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </DialogDescription>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {speaker.invited ? (
+                <Badge variant="success" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Invited
+                </Badge>
+              ) : (
+                <Badge variant="outline">Not invited</Badge>
+              )}
+              <Badge variant="muted">{speaker.session_count} session{speaker.session_count === 1 ? '' : 's'}</Badge>
+              {speaker.tasks_total > 0 && (
+                <Badge variant={speaker.tasks_outstanding === 0 ? 'success' : 'warning'}>
+                  {speaker.tasks_outstanding === 0
+                    ? 'Onboarded'
+                    : `${speaker.tasks_done}/${speaker.tasks_total} tasks`}
+                </Badge>
+              )}
+            </div>
+          </div>
+          {!editing && (
+            <Button size="sm" variant="secondary" onClick={beginEdit} data-testid="edit-speaker">
+              <Pencil />
+              Edit
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-app px-6 py-5">
+        {editing ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-first">First name</Label>
+                <Input id="edit-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-last">Last name</Label>
+                <Input id="edit-last" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-email">Email</Label>
+              <Input id="edit-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-company">Company</Label>
+                <Input id="edit-company" value={company} onChange={(e) => setCompany(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-title">Title</Label>
+                <Input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-about">Bio</Label>
+              <Textarea id="edit-about" value={about} onChange={(e) => setAbout(e.target.value)} rows={4} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditing(false)} disabled={save.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={() => save.mutate()} disabled={save.isPending || !email.trim()}>
+                {save.isPending ? 'Saving…' : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {speaker.about && (
+              <Section icon={<FileText className="h-4 w-4" />} title="Bio">
+                <p className="whitespace-pre-wrap text-sm text-foreground">{speaker.about}</p>
+              </Section>
+            )}
+
+            <Section
+              icon={<FileText className="h-4 w-4" />}
+              title={`Submissions (${profile.submissions.length})`}
+            >
+              {profile.submissions.length === 0 ? (
+                <Muted>No submissions yet.</Muted>
+              ) : (
+                <ul className="space-y-2">
+                  {profile.submissions.map((s) => (
+                    <li key={s.id} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm text-foreground">{s.title || 'Untitled'}</span>
+                      <StatusBadge status={s.status} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+
+            <Section icon={<Calendar className="h-4 w-4" />} title={`Sessions (${profile.sessions.length})`}>
+              {profile.sessions.length === 0 ? (
+                <Muted>Not on the program yet.</Muted>
+              ) : (
+                <ul className="space-y-2.5">
+                  {profile.sessions.map((s) => (
+                    <li key={s.id} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-sm text-foreground">{s.title || 'Untitled'}</span>
+                        <StatusBadge status={s.status} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                        {s.scheduled ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDateTime(s.starts_at)}
+                          </span>
+                        ) : (
+                          <span>Not scheduled</span>
+                        )}
+                        {s.room && (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {s.room}
+                          </span>
+                        )}
+                        {s.role && <span className="capitalize">{s.role}</span>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+
+            <Section
+              icon={<CheckCircle2 className="h-4 w-4" />}
+              title={`Onboarding (${profile.speaker.tasks_done}/${profile.speaker.tasks_total})`}
+            >
+              {profile.onboarding.length === 0 ? (
+                <Muted>No onboarding tasks assigned.</Muted>
+              ) : (
+                <ul className="space-y-2">
+                  {profile.onboarding.map((t) => {
+                    const done = t.status === 'approved' || t.status === 'done'
+                    return (
+                      <li key={t.assignment_id} className="flex items-center justify-between gap-3">
+                        <span className={cn('min-w-0 truncate text-sm', done ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                          {t.name || 'Task'}
+                        </span>
+                        <Badge variant={done ? 'success' : t.status === 'submitted' ? 'warning' : 'outline'}>
+                          {taskStatusLabel(t.status)}
+                        </Badge>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Section>
+
+            <Section
+              icon={<MessageSquare className="h-4 w-4" />}
+              title={`Communications (${profile.communications.length})`}
+            >
+              {profile.communications.length === 0 ? (
+                <Muted>No emails sent to this speaker yet.</Muted>
+              ) : (
+                <ul className="space-y-2">
+                  {profile.communications.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-foreground">{c.subject || c.template_key || 'Email'}</div>
+                        <div className="text-xs text-muted-foreground">{relative(c.sent_at ?? c.created_at)}</div>
+                      </div>
+                      <Badge variant={c.status === 'sent' ? 'success' : c.status === 'failed' ? 'destructive' : 'muted'}>
+                        {c.status ?? 'queued'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <span className="text-muted-foreground">{icon}</span>
+        {title}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function Muted({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-muted-foreground">{children}</p>
+}
+
+// ── import CSV dialog ─────────────────────────────────────────────────────────
+
+const CSV_TEMPLATE = 'first_name,last_name,email,company,title'
+
+function ImportSpeakersDialog({
+  open,
+  onOpenChange,
+  eventId,
+  onImported,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  eventId: string
+  onImported: () => void
+}) {
+  const [csv, setCsv] = useState('')
+  const [result, setResult] = useState<SpeakerImportResult | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setCsv('')
+      setResult(null)
+    }
+  }, [open])
+
+  const run = useMutation({
+    mutationFn: () => importSpeakers(eventId, { csv }),
+    onSuccess: (data) => {
+      setResult(data)
+      if (data.created + data.updated > 0) onImported()
+      toast({
+        title: 'Import complete',
+        description: `${data.created} added, ${data.updated} updated, ${data.skipped} skipped.`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't import", description: error.message }),
+  })
+
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setCsv(String(reader.result ?? ''))
+    reader.readAsText(file)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !run.isPending && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Import speakers from CSV</DialogTitle>
+          <DialogDescription>
+            Columns: <code className="font-mono text-xs">{CSV_TEMPLATE}</code>. Rows are matched to existing
+            speakers by email, so re-importing updates rather than duplicates.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="flex items-center gap-2">
+            <input
+              id="csv-file"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={onFile}
+              className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-input file:bg-card file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-accent"
+              data-testid="csv-file"
+            />
+          </div>
+          <Textarea
+            value={csv}
+            onChange={(e) => setCsv(e.target.value)}
+            placeholder={`${CSV_TEMPLATE}\nAda,Lovelace,ada@example.com,Analytical Engines,Mathematician`}
+            rows={7}
+            className="font-mono text-xs"
+            data-testid="csv-textarea"
+          />
+
+          {result && (
+            <div
+              className="space-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm"
+              data-testid="import-result"
+            >
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="success">{result.created} added</Badge>
+                <Badge variant="muted">{result.updated} updated</Badge>
+                <Badge variant="outline">{result.skipped} skipped</Badge>
+                {result.errors.length > 0 && (
+                  <Badge variant="destructive">{result.errors.length} error{result.errors.length === 1 ? '' : 's'}</Badge>
+                )}
+              </div>
+              {result.errors.length > 0 && (
+                <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-destructive-strong">
+                  {result.errors.map((err, i) => (
+                    <li key={i}>
+                      {err.line ? `Row ${err.line}: ` : ''}
+                      {err.message}
+                      {err.email ? ` (${err.email})` : ''}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={run.isPending}>
+            {result ? 'Close' : 'Cancel'}
+          </Button>
+          <Button onClick={() => run.mutate()} disabled={!csv.trim() || run.isPending}>
+            {run.isPending ? 'Importing…' : 'Import'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── manual add speaker dialog ────────────────────────────────────────────────
+
+function AddSpeakerDialog({
+  open,
+  onOpenChange,
+  eventId,
+  onAdded,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  eventId: string
+  onAdded: () => void
+}) {
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [company, setCompany] = useState('')
+  const [title, setTitle] = useState('')
+
+  const reset = () => {
+    setFirstName('')
+    setLastName('')
+    setEmail('')
+    setCompany('')
+    setTitle('')
+  }
+
+  const add = useMutation({
+    mutationFn: () =>
+      importSpeakers(eventId, {
+        rows: [
+          {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            email: email.trim(),
+            company: company.trim(),
+            title: title.trim(),
+          },
+        ],
+      }),
+    onSuccess: (data) => {
+      if (data.errors.length > 0) {
+        toast({ variant: 'destructive', title: "Couldn't add speaker", description: data.errors[0].message })
+        return
+      }
+      if (data.created > 0) {
+        toast({ title: 'Speaker added', description: `${firstName.trim() || email.trim()} is on the roster.` })
+      } else {
+        toast({ title: 'Already on the roster', description: `${email.trim()} was already a speaker.` })
+      }
+      reset()
+      onOpenChange(false)
+      onAdded()
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't add speaker", description: error.message }),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !add.isPending && onOpenChange(next)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add a speaker</DialogTitle>
+          <DialogDescription>Add one speaker to the roster. They can be invited to the portal after.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-first">First name</Label>
+              <Input id="add-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-last">Last name</Label>
+              <Input id="add-last" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="add-email" required>
+              Email
+            </Label>
+            <Input
+              id="add-email"
+              type="email"
+              value={email}
+              placeholder="speaker@example.com"
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-company">Company</Label>
+              <Input id="add-company" value={company} onChange={(e) => setCompany(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-title">Title</Label>
+              <Input id="add-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={add.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={() => add.mutate()} disabled={!email.trim() || add.isPending}>
+            {add.isPending ? 'Adding…' : 'Add speaker'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -402,7 +1180,36 @@ function AddTaskDialog({
   )
 }
 
-// ── cells ────────────────────────────────────────────────────────────────────
+// ── cells & bits ─────────────────────────────────────────────────────────────
+
+const STATUS_META: Record<SubmissionStatus, { label: string; variant: 'default' | 'muted' | 'success' | 'warning' | 'destructive' | 'outline' }> = {
+  draft: { label: 'Draft', variant: 'outline' },
+  pending: { label: 'Pending', variant: 'muted' },
+  accept_queue: { label: 'Accept queue', variant: 'warning' },
+  accepted: { label: 'Accepted', variant: 'success' },
+  decline_queue: { label: 'Decline queue', variant: 'warning' },
+  declined: { label: 'Declined', variant: 'destructive' },
+  withdrawn: { label: 'Withdrawn', variant: 'outline' },
+}
+
+function StatusBadge({ status }: { status: SubmissionStatus }) {
+  const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
+  return <Badge variant={meta.variant}>{meta.label}</Badge>
+}
+
+function taskStatusLabel(status: string | null): string {
+  switch (status) {
+    case 'approved':
+    case 'done':
+      return 'Done'
+    case 'submitted':
+      return 'In review'
+    case 'denied':
+      return 'Needs redo'
+    default:
+      return 'To do'
+  }
+}
 
 function OnboardingCell({ speaker }: { speaker: EventSpeaker }) {
   if (speaker.tasks_total === 0) {
@@ -448,6 +1255,15 @@ function relative(value: string | null): ReactNode {
   if (!value) return <span className="text-muted-foreground/70">Never</span>
   try {
     return formatDistanceToNow(parseISO(value), { addSuffix: true })
+  } catch {
+    return '—'
+  }
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return '—'
+  try {
+    return format(parseISO(value), 'MMM d, h:mm a')
   } catch {
     return '—'
   }

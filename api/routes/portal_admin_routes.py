@@ -15,13 +15,14 @@ from __future__ import annotations
 import html as html_module
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.core.settings import settings
 from auth import get_current_user_and_org, verify_org_access
+from services import content_pipeline
 from services.magic_links import mint
 from services.org_scope import fetch_event
 from services.supabase_helpers import db, first, rows
@@ -54,6 +55,18 @@ class ReviewRequest(BaseModel):
     decision: str  # 'approved' | 'denied'
 
 
+class CommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=4000)
+    # queue the speaker a heads-up email that new feedback is waiting
+    notify: bool = True
+
+
+class RemindRequest(BaseModel):
+    # by default only nudge speakers missing REQUIRED content
+    required_only: bool = True
+    item_type: str | None = Field(default=None, max_length=40)
+
+
 def _contact_name(contact: dict) -> str:
     name = " ".join(
         part for part in (contact.get("first_name"), contact.get("last_name")) if part
@@ -70,11 +83,31 @@ async def _queue_email(
     html: str,
     *,
     dedupe_key: str | None = None,
-) -> None:
+) -> bool:
     """Drop a message onto the email_outbox for the sender worker to pick up.
 
-    Best-effort: a notification that fails to enqueue must not fail the review
-    or invite it accompanies."""
+    Best-effort: a notification that fails to enqueue must not fail the review or
+    invite it accompanies. Returns True iff a new row was queued.
+
+    When ``dedupe_key`` is set, a matching (event_id, dedupe_key) row already in
+    the outbox short-circuits the insert — a coarse-window key (e.g. per day) is
+    how bulk reminders stay idempotent under repeated clicks/retries, backing up
+    the ``unique(event_id, dedupe_key)`` constraint the DB also enforces."""
+    if dedupe_key:
+        existing = rows(
+            await db(
+                lambda: supabase.table("email_outbox")
+                .select("id")
+                .eq("event_id", event_id)
+                .eq("dedupe_key", dedupe_key)
+                .limit(1)
+                .execute(),
+                "portal_queue_dedupe_check",
+            )
+        )
+        if existing:
+            return False
+
     record: dict = {
         "org_id": org_id,
         "event_id": event_id,
@@ -90,8 +123,10 @@ async def _queue_email(
             lambda: supabase.table("email_outbox").insert(record).execute(),
             "portal_queue_email",
         )
+        return True
     except Exception:
         logger.warning("portal: could not queue %s email contact=%s", template_key, contact_id, exc_info=True)
+        return False
 
 
 # ── speaker roster ──────────────────────────────────────────────────────────
@@ -484,3 +519,135 @@ async def _notify_review(org_id: str, assignment: dict, decision: str) -> None:
     await _queue_email(
         org_id, (task or {}).get("event_id"), contact.get("id"), f"task_{decision}", subject, body
     )
+
+
+# ── content library (cross-speaker) ──────────────────────────────────────────
+
+
+@router.get("/events/{event_id}/content")
+async def list_content(
+    event_id: str,
+    type: str | None = Query(default=None, description="slides|headshot|bio|other|all"),
+    status: str | None = Query(default=None, description="received|missing|needs_changes|all"),
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Every collected deliverable across the event's speakers, filterable by item
+    type and status, plus who is still outstanding on required content."""
+    _user_id, org_id = auth
+    return await content_pipeline.list_content(org_id, event_id, item_type=type, status=status)
+
+
+@router.get("/task-assignments/{assignment_id}/content")
+async def get_content_item(assignment_id: str, auth: tuple = Depends(get_current_user_and_org)):
+    """One content item's version history + comment thread (org-scoped)."""
+    _user_id, org_id = auth
+    return await content_pipeline.content_item(org_id, assignment_id)
+
+
+@router.post("/task-assignments/{assignment_id}/comments", status_code=201)
+async def add_content_comment(
+    assignment_id: str,
+    payload: CommentRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Organizer leaves feedback on a speaker's content item. The speaker sees it
+    in their portal, and (by default) gets an email nudge that feedback is waiting."""
+    _user_id, org_id = auth
+    result = await content_pipeline.add_organizer_comment(org_id, assignment_id, payload.body)
+    if payload.notify:
+        await _notify_comment(org_id, result)
+    return {"comment": result["comment"]}
+
+
+async def _notify_comment(org_id: str, result: dict) -> None:
+    """Queue the 'new feedback on your content' email the speaker gets."""
+    contact = result.get("contact") or {}
+    task = result.get("task") or {}
+    if not contact.get("email"):
+        return
+    item_name = html_module.escape(task.get("name") or "your content")
+    greeting = html_module.escape((contact.get("first_name") or "").strip() or "there")
+    subject = f"New feedback: {task.get('name') or 'your content'}"
+    body = (
+        '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;'
+        'font-size:15px;line-height:1.5;color:#111">'
+        f"<p>Hi {greeting},</p>"
+        f"<p>An organizer left feedback on <strong>{item_name}</strong>. "
+        "Open your speaker portal to read it and reply or upload a new version.</p></div>"
+    )
+    await _queue_email(org_id, task.get("event_id"), contact.get("id"), "content_feedback", subject, body)
+
+
+# ── bulk reminders ───────────────────────────────────────────────────────────
+
+
+@router.post("/events/{event_id}/content/remind")
+async def remind_outstanding(
+    event_id: str,
+    payload: RemindRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Queue one reminder email to each speaker missing required content. Returns
+    how many were reminded."""
+    _user_id, org_id = auth
+    event = await fetch_event(event_id, org_id, columns="id, name")
+    groups = await content_pipeline.outstanding_by_contact(
+        org_id, event_id, required_only=payload.required_only, item_type=payload.item_type
+    )
+    event_name = html_module.escape(event.get("name") or "the event")
+    # Coarse per-day window: a second "remind" click the same day is a no-op, so
+    # a jumpy organizer (or a retry) can't flood a speaker's inbox.
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    reminded = 0
+    for group in groups:
+        greeting = html_module.escape((group.get("first_name") or "").strip() or "there")
+        items = "".join(
+            f"<li>{html_module.escape(str(name))}</li>" for name in group.get("missing", [])
+        )
+        subject = f"[{event.get('name') or 'Reminder'}] Content still needed"
+        body = (
+            '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;'
+            'font-size:15px;line-height:1.5;color:#111">'
+            f"<p>Hi {greeting},</p>"
+            f"<p>We're still missing some content from you for {event_name}:</p>"
+            f"<ul>{items}</ul>"
+            "<p>Please open your speaker portal to upload it. Thank you!</p></div>"
+        )
+        queued = await _queue_email(
+            org_id,
+            event["id"],
+            group.get("contact_id"),
+            "content_reminder",
+            subject,
+            body,
+            dedupe_key=f"content-reminder:{group.get('contact_id')}:{day}",
+        )
+        if queued:
+            reminded += 1
+
+    return {
+        "reminded": reminded,
+        "outstanding": len(groups),
+        "contacts": [g.get("contact_id") for g in groups],
+    }
+
+
+# ── bundle export ────────────────────────────────────────────────────────────
+
+
+@router.get("/events/{event_id}/content/export")
+async def export_content(
+    event_id: str,
+    format: str = Query(default="zip", description="zip|manifest"),
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Bundle every collected file (current version) into a ZIP named by
+    speaker/item. ``?format=manifest`` returns a metadata-only JSON listing
+    (filenames, sizes, URLs) without downloading a single byte."""
+    _user_id, org_id = auth
+    if format == "manifest":
+        return await content_pipeline.export_manifest(org_id, event_id)
+    zip_bytes = await content_pipeline.build_export_zip(org_id, event_id)
+    headers = {"Content-Disposition": f'attachment; filename="content-{event_id}.zip"'}
+    return Response(content=zip_bytes, media_type="application/zip", headers=headers)

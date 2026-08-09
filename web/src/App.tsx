@@ -14,6 +14,7 @@ import { AppShell } from '@/shell/AppShell'
 import { Agenda } from '@/pages/Agenda'
 import { ApiDocs } from '@/pages/ApiDocs'
 import { Comms } from '@/pages/Comms'
+import { ContentLibrary } from '@/pages/ContentLibrary'
 import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
 import { Home } from '@/pages/Home'
@@ -145,6 +146,7 @@ export default function App() {
         >
           <Route path="/submissions" element={<Inbox />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/content" element={<ContentLibrary />} />
           <Route path="/forms" element={<Forms />} />
           <Route path="/forms/:formId" element={<FormEditor />} />
           <Route path="/evaluation" element={<Evaluation />} />

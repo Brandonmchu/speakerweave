@@ -31,6 +31,7 @@ PATCH_TARGET_MODULES = (
     "routes.taxonomy_routes",
     "routes.v1_routes",
     "services.api_keys",
+    "services.content_pipeline",
     "services.evaluations",
     "services.forms",
     "services.magic_links",
@@ -210,6 +211,12 @@ class FakeStorageBucket:
 
     def get_public_url(self, path: str) -> str:
         return f"https://storage.test/{self.bucket}/{path}"
+
+    def download(self, path: str) -> bytes:
+        data = self.uploads.get(self.bucket, {}).get(path)
+        if data is None:
+            raise FileNotFoundError(path)
+        return data
 
 
 class FakeStorage:
