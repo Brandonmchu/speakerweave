@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { Navigate } from 'react-router-dom'
 import {
   ClerkProvider,
   RedirectToSignIn,
@@ -41,14 +42,46 @@ export function MaybeClerkProvider({ children }: { children: ReactNode }) {
   )
 }
 
-/** Admin-surface gate for Clerk mode; the dev-token guard covers the fallback. */
-export function ClerkRequireAuth({ children }: { children: ReactNode }) {
+/**
+ * Admin-surface gate for Clerk mode; the dev-token guard covers the fallback.
+ *
+ * `unauthedRedirect` lets a route send signed-out visitors to a public page
+ * (e.g. the alias paths /agenda, /speakers point guests at the public program)
+ * instead of Clerk's sign-in flow.
+ */
+export function ClerkRequireAuth({
+  children,
+  unauthedRedirect,
+}: {
+  children: ReactNode
+  unauthedRedirect?: string
+}) {
   return (
     <>
       <SignedIn>{children}</SignedIn>
       <SignedOut>
-        <RedirectToSignIn />
+        {unauthedRedirect ? <Navigate to={unauthedRedirect} replace /> : <RedirectToSignIn />}
       </SignedOut>
+    </>
+  )
+}
+
+/**
+ * Render `authed` for a signed-in Clerk session, `unauthed` otherwise. Used by
+ * the Home route to decide app-vs-landing when Clerk is on but there's no local
+ * demo token. Only mount this inside a Clerk-enabled tree.
+ */
+export function ClerkSignedInSwitch({
+  authed,
+  unauthed,
+}: {
+  authed: ReactNode
+  unauthed: ReactNode
+}) {
+  return (
+    <>
+      <SignedIn>{authed}</SignedIn>
+      <SignedOut>{unauthed}</SignedOut>
     </>
   )
 }

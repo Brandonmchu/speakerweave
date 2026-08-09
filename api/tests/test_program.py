@@ -198,6 +198,44 @@ def test_schedule_leaks_no_pii(program_client, program_db):
     assert ZETA_PHONE not in raw
 
 
+def test_schedule_defaults_to_event_timezone_when_no_tz_given(program_client, program_db):
+    """No ?tz — the public page must render in the EVENT's own zone (the one the
+    organizer published against), never the visitor's browser clock."""
+    body = program_client.get(f"/public/program/{SLUG}/schedule").json()
+    assert body["event"]["timezone"] == "America/Los_Angeles"
+
+
+def test_schedule_groups_days_in_event_timezone_not_utc(program_client, program_db):
+    """With no ?tz the grid follows the EVENT's calendar. A 05:00Z session is the
+    12th in UTC but 22:00 on the 11th in LA — event-tz grouping lands it on the
+    11th, a bucket a UTC render never produces."""
+    program_db.seed(
+        "sessions",
+        _session(
+            "eeeeeeee-0000-0000-0000-0000000000s7",
+            status="accepted",
+            starts_at="2026-10-12T05:00:00+00:00",
+            ends_at="2026-10-12T05:30:00+00:00",
+            room=ROOM_A,
+            track=TRACK_ENG,
+            title="Late Night Hack",
+        ),
+    )
+    body = program_client.get(f"/public/program/{SLUG}/schedule").json()
+    assert body["event"]["timezone"] == "America/Los_Angeles"
+    assert "2026-10-11" in [d["date"] for d in body["days"]]
+    utc = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    assert "2026-10-11" not in [d["date"] for d in utc["days"]]
+
+
+def test_schedule_sessions_carry_id_for_detail_links(program_client, program_db):
+    """Each card needs a stable id to open its detail modal against."""
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    first = body["days"][0]["sessions"][0]
+    assert first["title"] == "Opening Keynote"
+    assert first["id"] == S1
+
+
 def test_schedule_timezone_shifts_day_boundaries(program_client, program_db):
     """A session at 16:00 UTC is the 12th in UTC but still the 12th in LA (08:00);
     grouping in a far-eastern zone rolls it onto the 13th."""
@@ -257,6 +295,46 @@ def test_speakers_leak_no_pii(program_client, program_db):
     for speaker in payload["speakers"]:
         assert "email" not in speaker
         assert "phone" not in speaker
+
+
+# ── session detail ───────────────────────────────────────────────────────────
+
+
+def test_session_detail_returns_full_description_and_speaker_bio(program_client, program_db):
+    """The card clamps its blurb and omits bios; the detail view returns the full
+    description plus each speaker's bio and social links (EMB-08)."""
+    detail = program_client.get(f"/public/program/{SLUG}/session/{S1}").json()
+    sess = detail["session"]
+    assert sess["id"] == S1
+    assert sess["title"] == "Opening Keynote"
+    assert sess["description"] == "<p>About Opening Keynote</p>"  # full, unclamped
+    assert sess["room"] == "Room B"
+    assert sess["track"] == {"name": "Engineering", "color": "#123456"}
+    assert detail["event"]["timezone"] == "America/Los_Angeles"
+
+    speaker = sess["speakers"][0]
+    assert speaker["name"] == "Zed Zeta"
+    assert speaker["bio"] == "Zed is a speaker."
+    assert speaker["linkedin_url"] == "https://linkedin.com/in/zed"
+    assert speaker["twitter_url"] == "https://twitter.com/zed"
+
+
+def test_session_detail_resolves_submitter_fallback_speaker(program_client, program_db):
+    # S3 has only a submitter — who stands in as the speaker, as on the schedule.
+    detail = program_client.get(f"/public/program/{SLUG}/session/{S3}").json()
+    assert detail["session"]["speakers"][0]["name"] == "Bob Beta"
+
+
+def test_session_detail_leaks_no_pii(program_client, program_db):
+    raw = program_client.get(f"/public/program/{SLUG}/session/{S1}").text
+    assert ZETA_EMAIL not in raw
+    assert ZETA_PHONE not in raw
+
+
+def test_session_detail_404s_for_pending_unknown_or_bad_slug(program_client, program_db):
+    assert program_client.get(f"/public/program/{SLUG}/session/{S5}").status_code == 404  # pending
+    assert program_client.get(f"/public/program/{SLUG}/session/nope").status_code == 404
+    assert program_client.get(f"/public/program/nope/session/{S1}").status_code == 404
 
 
 # ── embed.js ─────────────────────────────────────────────────────────────────

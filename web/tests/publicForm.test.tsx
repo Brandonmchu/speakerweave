@@ -155,3 +155,98 @@ describe('PublicForm — live conditional logic', () => {
     expect(submitted).toHaveLength(0)
   })
 })
+
+/**
+ * The eval-legibility contract: Track and Session format are native `<select>`
+ * elements (so a blind browser agent / the harness `select` tool can drive
+ * them), and a native change still records the right answer and submits — the
+ * conditional-logic answer map is unchanged by the widget swap.
+ */
+const TRACK = 'field-track'
+const FORMAT = 'field-format'
+
+// The wire shape the backend actually sends: field_type 'dropdown' with a
+// JSONB `options.choices` string array (see getPublicForm's adapter).
+const SELECT_FORM_PAYLOAD = {
+  form: { id: 'form-2', slug: 'cfp', name: 'Call for Papers', welcome_html: '', settings: {} },
+  event: { name: 'DaisConf' },
+  fields: [
+    {
+      id: TRACK,
+      label: 'Track',
+      type: 'dropdown',
+      required: true,
+      order: 1,
+      options: { choices: ['Platform', 'AI & ML'] },
+    },
+    {
+      id: FORMAT,
+      label: 'Session format',
+      type: 'dropdown',
+      required: true,
+      order: 2,
+      options: { choices: ['Talk (30 min)', 'Workshop (90 min)'] },
+    },
+  ],
+  question_rules: [],
+}
+
+describe('PublicForm — native select fields (eval-legible)', () => {
+  beforeEach(() => {
+    submitted = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/submissions')) {
+          submitted.push(JSON.parse(String(init?.body ?? '{}')))
+          return jsonResponse({ id: 'sub-2', friendly_id: 'DAIS-002' }, 201)
+        }
+        return jsonResponse(SELECT_FORM_PAYLOAD)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('renders Track and Session format as native <select> elements', async () => {
+    renderForm()
+    const track = await screen.findByLabelText(/Track/)
+    const format = screen.getByLabelText(/Session format/)
+    expect(track.tagName).toBe('SELECT')
+    expect(format.tagName).toBe('SELECT')
+  })
+
+  it('records the selected Track and Format and submits them', async () => {
+    renderForm()
+    await screen.findByLabelText(/Track/)
+
+    fill(/First name/, 'Ada')
+    fill(/Last name/, 'Lovelace')
+    fill(/Email/, 'ada@example.com')
+    fill(/Session title/, 'Analytical Engines')
+    // Native change events — exactly what the harness `select` tool emits.
+    fill(/Track/, 'AI & ML')
+    fill(/Session format/, 'Workshop (90 min)')
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].answers).toEqual({ [TRACK]: 'AI & ML', [FORMAT]: 'Workshop (90 min)' })
+  })
+
+  it('blocks submit until a required native select is chosen', async () => {
+    renderForm()
+    await screen.findByLabelText(/Track/)
+
+    fill(/First name/, 'Ada')
+    fill(/Last name/, 'Lovelace')
+    fill(/Email/, 'ada@example.com')
+    fill(/Session title/, 'Analytical Engines')
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+
+    expect(await screen.findAllByText('Required')).not.toHaveLength(0)
+    expect(submitted).toHaveLength(0)
+  })
+})

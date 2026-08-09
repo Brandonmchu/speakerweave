@@ -55,7 +55,7 @@ import {
 } from '@/ui/dialog'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs'
@@ -356,15 +356,15 @@ function CreatePlanDialog({
             />
           </Field>
           <Field label="Score scale" htmlFor="evaluation-plan-scale">
-            <Select value={scale} onValueChange={(value) => setScale(value as EvaluationScale)}>
-              <SelectTrigger id="evaluation-plan-scale">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1_5">1–5</SelectItem>
-                <SelectItem value="1_10">1–10</SelectItem>
-              </SelectContent>
-            </Select>
+            <NativeSelect
+              id="evaluation-plan-scale"
+              value={scale}
+              onValueChange={(value) => setScale(value as EvaluationScale)}
+              options={[
+                { value: '1_5', label: '1–5' },
+                { value: '1_10', label: '1–10' },
+              ]}
+            />
           </Field>
           <label className="flex items-start gap-3 rounded-md border border-border p-3">
             <Checkbox checked={anonymized} onCheckedChange={(value) => setAnonymized(value === true)} />

@@ -23,7 +23,7 @@ import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { Textarea } from '@/ui/textarea'
 
@@ -429,18 +429,15 @@ function FormField({
     const options = normalizeOptions(field.options)
     return (
       <Field id={field.id} label={field.label} required={isRequired} help={field.help_text} error={error}>
-        <Select value={typeof value === 'string' ? value : ''} onValueChange={onChange}>
-          <SelectTrigger id={field.id} aria-invalid={invalid}>
-            <SelectValue placeholder={field.placeholder ?? 'Select an option'} />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label ?? option.value}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <NativeSelect
+          id={field.id}
+          value={typeof value === 'string' ? value : ''}
+          onValueChange={onChange}
+          options={options}
+          placeholder={field.placeholder ?? 'Select an option'}
+          required={isRequired}
+          aria-invalid={invalid}
+        />
       </Field>
     )
   }

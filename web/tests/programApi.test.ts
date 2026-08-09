@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getProgramSchedule, getProgramSpeakers } from '@/lib/programApi'
+import {
+  buildSessionIcs,
+  formatTimeZoneNote,
+  getProgramSchedule,
+  getProgramSession,
+  getProgramSpeakers,
+} from '@/lib/programApi'
 
 interface Call {
   url: string
@@ -63,5 +69,76 @@ describe('program API fetchers', () => {
     await getProgramSpeakers('ai-builders-summit')
     expect(last().url).toBe('/public/program/ai-builders-summit/speakers')
     expect(last().headers.has('Authorization')).toBe(false)
+  })
+
+  it('getProgramSession GETs the public session-detail path anonymously', async () => {
+    window.localStorage.setItem('dais.token', 'admin-token')
+    nextPayload = { event: { name: 'X', timezone: 'UTC', location: null }, session: {} }
+    await getProgramSession('ai-builders-summit', 'sess-1')
+    expect(last().url).toBe('/public/program/ai-builders-summit/session/sess-1')
+    expect(last().method).toBe('GET')
+    expect(last().headers.has('Authorization')).toBe(false)
+  })
+
+  it('getProgramSchedule sends no tz — the page renders in the event zone', async () => {
+    nextPayload = { event: { name: 'X', timezone: 'America/Los_Angeles' }, days: [] }
+    await getProgramSchedule('ai-builders-summit')
+    // No ?tz query: the API falls back to the event's own timezone.
+    expect(last().url).toBe('/public/program/ai-builders-summit/schedule')
+  })
+})
+
+describe('formatTimeZoneNote', () => {
+  it('names the zone the times are shown in', () => {
+    expect(formatTimeZoneNote('UTC', '2026-10-12T16:00:00Z')).toContain('UTC')
+    expect(formatTimeZoneNote('America/Los_Angeles', '2026-10-12T16:00:00Z')).toContain(
+      'America/Los_Angeles'
+    )
+  })
+
+  it('is empty when there is no zone', () => {
+    expect(formatTimeZoneNote(null)).toBe('')
+    expect(formatTimeZoneNote(undefined)).toBe('')
+  })
+})
+
+describe('buildSessionIcs', () => {
+  it('emits a single VEVENT with UTC times and RFC 5545-escaped text', () => {
+    const ics = buildSessionIcs(
+      {
+        id: 's1',
+        friendly_id: 'SESS-1',
+        title: 'RAG; in, Prod',
+        description: 'Line one\nLine two',
+        starts_at: '2026-10-12T16:00:00+00:00',
+        ends_at: '2026-10-12T16:45:00+00:00',
+        location: 'Room A',
+      },
+      new Date('2026-01-01T00:00:00Z')
+    )
+    expect(ics).toContain('BEGIN:VCALENDAR')
+    expect(ics).toContain('BEGIN:VEVENT')
+    expect(ics).toContain('UID:SESS-1@dais')
+    expect(ics).toContain('DTSTART:20261012T160000Z')
+    expect(ics).toContain('DTEND:20261012T164500Z')
+    expect(ics).toContain('SUMMARY:RAG\\; in\\, Prod')
+    expect(ics).toContain('DESCRIPTION:Line one\\nLine two')
+    expect(ics).toContain('LOCATION:Room A')
+    expect(ics.endsWith('END:VCALENDAR')).toBe(true)
+  })
+
+  it('falls back to a one-hour block when no end time is given', () => {
+    const ics = buildSessionIcs({
+      id: 's2',
+      title: 'Open Mic',
+      starts_at: '2026-10-12T16:00:00+00:00',
+      ends_at: null,
+    })
+    expect(ics).toContain('DTSTART:20261012T160000Z')
+    expect(ics).toContain('DTEND:20261012T170000Z')
+  })
+
+  it('returns an empty string for a session with no start', () => {
+    expect(buildSessionIcs({ id: 's', title: 'x', starts_at: null, ends_at: null })).toBe('')
   })
 })

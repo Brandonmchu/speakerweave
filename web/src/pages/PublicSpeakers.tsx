@@ -1,13 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Linkedin, Twitter, UsersRound } from 'lucide-react'
+import { Linkedin, Search, Twitter, UsersRound } from 'lucide-react'
 
 import {
   formatSessionMoment,
   getProgramSpeakers,
   type ProgramSpeaker,
 } from '@/lib/programApi'
+import { Input } from '@/ui/input'
 import { Skeleton } from '@/ui/skeleton'
 import {
   Dialog,
@@ -31,7 +32,18 @@ export function PublicSpeakers() {
   })
 
   const speakers = useMemo(() => query.data?.speakers ?? [], [query.data])
+  const zone = query.data?.event.timezone ?? null
   const [selected, setSelected] = useState<ProgramSpeaker | null>(null)
+  const [search, setSearch] = useState('')
+
+  // Client-side keyword filter over name, company and title (EMB-05/12).
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return speakers
+    return speakers.filter((s) =>
+      [s.name, s.company ?? '', s.title ?? ''].join(' ').toLowerCase().includes(q)
+    )
+  }, [speakers, search])
 
   useEmbedHeight(embed)
 
@@ -60,10 +72,29 @@ export function PublicSpeakers() {
     )
   } else {
     body = (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        {speakers.map((speaker) => (
-          <SpeakerCard key={speaker.name} speaker={speaker} onClick={() => setSelected(speaker)} />
-        ))}
+      <div className="space-y-5">
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search speakers"
+            className="pl-9"
+            aria-label="Search speakers"
+          />
+        </div>
+        {filtered.length === 0 ? (
+          <EmptyState
+            title="No speakers match"
+            description="Try a different name, company, or title."
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {filtered.map((speaker) => (
+              <SpeakerCard key={speaker.name} speaker={speaker} onClick={() => setSelected(speaker)} />
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -71,7 +102,7 @@ export function PublicSpeakers() {
   const content = (
     <>
       {body}
-      <SpeakerDialog speaker={selected} onClose={() => setSelected(null)} />
+      <SpeakerDialog speaker={selected} zone={zone} onClose={() => setSelected(null)} />
     </>
   )
 
@@ -109,7 +140,15 @@ function SpeakerCard({ speaker, onClick }: { speaker: ProgramSpeaker; onClick: (
   )
 }
 
-function SpeakerDialog({ speaker, onClose }: { speaker: ProgramSpeaker | null; onClose: () => void }) {
+function SpeakerDialog({
+  speaker,
+  zone,
+  onClose,
+}: {
+  speaker: ProgramSpeaker | null
+  zone: string | null
+  onClose: () => void
+}) {
   return (
     <Dialog open={speaker !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -158,7 +197,7 @@ function SpeakerDialog({ speaker, onClose }: { speaker: ProgramSpeaker | null; o
                     >
                       <div className="text-sm font-medium text-foreground">{session.title}</div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {formatSessionMoment(session.starts_at)}
+                        {formatSessionMoment(session.starts_at, zone)}
                         {session.room ? ` · ${session.room}` : ''}
                       </div>
                     </li>

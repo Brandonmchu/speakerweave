@@ -6,7 +6,7 @@
  * card, chip and conflict on screen now came out of the API — and that an event
  * with nothing accepted says so instead of drawing an empty lattice.
  */
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -188,6 +188,38 @@ function stubApi(agenda: unknown = AGENDA, conflicts: unknown = CONFLICTS) {
   )
 }
 
+interface Patch {
+  url: string
+  body: Record<string, unknown>
+}
+
+/**
+ * Like stubApi, but records every PATCH to /schedule and echoes the placement
+ * back as the saved session — so a click-to-assign flow can be asserted end to
+ * end (select → click slot → the exact room/time the grid sent).
+ */
+function stubApiCapturing(agenda: unknown = AGENDA, conflicts: unknown = CONFLICTS): Patch[] {
+  const patches: Patch[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      const method = init.method ?? 'GET'
+      if (method === 'PATCH' && url.includes('/schedule')) {
+        const body = init.body ? JSON.parse(String(init.body)) : {}
+        patches.push({ url, body })
+        const id = url.split('/').slice(-2)[0]
+        return jsonResponse({ session: { id, ...body } })
+      }
+      if (url.endsWith('/api/events')) return jsonResponse({ events: [EVENT] })
+      if (url.includes('/agenda/conflicts')) return jsonResponse(conflicts)
+      if (url.includes('/agenda')) return jsonResponse(agenda)
+      return jsonResponse({}, 404)
+    })
+  )
+  return patches
+}
+
 function renderAgenda() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -277,6 +309,72 @@ describe('Agenda on real event data', () => {
     expect(
       await screen.findByText('No accepted sessions yet — accept submissions to build the agenda')
     ).toBeInTheDocument()
+  })
+
+  it('schedules an unscheduled session by click-to-assign (select → click slot)', async () => {
+    vi.unstubAllGlobals()
+    const patches = stubApiCapturing()
+    renderAgenda()
+
+    // Arm the tray card with its "Place" affordance.
+    fireEvent.click(await screen.findByTestId('place-sess-3'))
+    // The armed card is called out, and the empty slot is a real, tagged target.
+    expect(screen.getByTestId('placement-banner')).toHaveTextContent('Waiting in the Wings')
+    const slot = screen.getByTestId('slot-room-b-1100')
+    expect(slot).toHaveAttribute('aria-label', 'Studio 11:00')
+
+    // Click 11:00 in Studio — no drag involved.
+    fireEvent.click(slot)
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0].url).toContain('/api/sessions/sess-3/schedule')
+    expect(patches[0].body).toEqual({
+      room_id: 'room-b',
+      // 45-minute session dropped at the clicked slot, event day + explicit UTC.
+      starts_at: '2026-10-12T11:00:00+00:00',
+      ends_at: '2026-10-12T11:45:00+00:00',
+    })
+    // Placing it disarms the selection.
+    await waitFor(() =>
+      expect(screen.queryByTestId('placement-banner')).not.toBeInTheDocument()
+    )
+  })
+
+  it('moves a placed session by selecting its card and clicking a new slot', async () => {
+    vi.unstubAllGlobals()
+    const patches = stubApiCapturing()
+    renderAgenda()
+
+    // A click (never a drag) on a grid card arms it for a move.
+    const card = (await screen.findByText('Postgres for Programme Chairs')).closest(
+      '[data-session-id]'
+    )
+    expect(card).not.toBeNull()
+    fireEvent.click(card as Element)
+    expect(screen.getByTestId('placement-banner')).toHaveTextContent('move')
+
+    fireEvent.click(screen.getByTestId('slot-room-b-1400'))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0].url).toContain('/api/sessions/sess-2/schedule')
+    expect(patches[0].body).toEqual({
+      room_id: 'room-b',
+      starts_at: '2026-10-12T14:00:00+00:00',
+      ends_at: '2026-10-12T14:30:00+00:00',
+    })
+  })
+
+  it('unschedules a placed session from its ×/Unschedule button', async () => {
+    vi.unstubAllGlobals()
+    const patches = stubApiCapturing()
+    renderAgenda()
+
+    fireEvent.click(await screen.findByTestId('unschedule-sess-1'))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0].url).toContain('/api/sessions/sess-1/schedule')
+    // Explicit nulls send it back to the tray — the same contract the drag uses.
+    expect(patches[0].body).toEqual({ room_id: null, starts_at: null, ends_at: null })
   })
 
   it('surfaces a failed load instead of an empty grid', async () => {

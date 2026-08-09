@@ -26,7 +26,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 import { Textarea } from '@/ui/textarea'
@@ -345,15 +345,15 @@ function AddTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="task-kind">Type</Label>
-              <Select value={kind} onValueChange={(v) => setKind(v as TaskKind)}>
-                <SelectTrigger id="task-kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todo">Checklist item</SelectItem>
-                  <SelectItem value="file_request">File upload</SelectItem>
-                </SelectContent>
-              </Select>
+              <NativeSelect
+                id="task-kind"
+                value={kind}
+                onValueChange={(v) => setKind(v as TaskKind)}
+                options={[
+                  { value: 'todo', label: 'Checklist item' },
+                  { value: 'file_request', label: 'File upload' },
+                ]}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="task-due">Due date</Label>

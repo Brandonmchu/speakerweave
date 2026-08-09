@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   DndContext,
@@ -18,12 +18,14 @@ import {
   AlertCircle,
   AlertTriangle,
   CalendarDays,
+  CalendarPlus,
   CalendarRange,
   CheckCircle2,
   Columns3,
   Inbox,
   List,
   RotateCcw,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -355,12 +357,21 @@ function DraggableCard({
   style,
   dense,
   className,
+  selected,
+  onSelect,
+  action,
 }: {
   session: SpikeSession
   conflicted: boolean
   style?: React.CSSProperties
   dense?: boolean
   className?: string
+  /** Armed for click-to-assign — draws the blue selection ring. */
+  selected?: boolean
+  /** A plain click (no drag) picks the card up for click-to-assign. */
+  onSelect?: () => void
+  /** Corner affordance: "Place" in the tray, "Unschedule" on the grid. */
+  action?: React.ReactNode
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: session.id,
@@ -373,16 +384,24 @@ function DraggableCard({
       style={style}
       data-testid="session-card"
       data-session-id={session.id}
+      data-selected={selected ? 'true' : undefined}
+      // A click that never became a drag (the sensor needs 4px of travel first)
+      // selects the card instead — the click-to-assign entry point.
+      onClick={onSelect}
       {...listeners}
       {...attributes}
       className={cn(
         // touch-none is required or the browser scrolls instead of dragging.
-        'cursor-grab touch-none select-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing',
+        // `group/card` lets the corner action reveal on hover. `relative` is the
+        // action's positioning context; a passed `absolute` (grid cards) wins.
+        'group/card relative cursor-grab touch-none select-none rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing',
         isDragging && 'opacity-30',
+        selected && 'ring-2 ring-primary ring-offset-2 ring-offset-card',
         className
       )}
     >
       <SessionCard session={session} conflicted={conflicted} dense={dense} />
+      {action}
     </div>
   )
 }
@@ -392,33 +411,71 @@ function DraggableCard({
 /* -------------------------------------------------------------------------- */
 
 /**
- * One (room, slot) droppable. Kept deliberately dumb: every droppable
- * re-renders when the DndContext's `over` changes, so the cheapest possible
- * render here is what keeps the grid at 60fps. All hover feedback is drawn
- * once, by the ghost layer above.
+ * One (room, slot) droppable — and, for keyboard/agent access, a real click
+ * target. Kept deliberately dumb: every droppable re-renders when the
+ * DndContext's `over` changes, so the cheapest possible render here is what
+ * keeps the grid at 60fps. `memo` keeps the parent's per-drag preview renders
+ * from touching it; only its own `over` subscription and a selection toggle
+ * ever re-render it.
+ *
+ * The cell carries a stable `data-testid="slot-<roomId>-<HHMM>"` plus a
+ * button role and time-stamped aria-label so a session can be placed without a
+ * drag: select a card, click a slot. Present in EVERY slot, empty or not, so
+ * any minute of the day is a legal, taggable destination — the card layer
+ * above is `pointer-events-none` except on the cards themselves, so an empty
+ * slot is always the thing under the pointer.
  */
-function SlotCell({
+const SlotCell = memo(function SlotCell({
   roomId,
+  roomName,
   slot,
   slotsPerHour,
+  grid,
+  selecting,
+  onPlace,
 }: {
   roomId: string
+  roomName: string
   slot: number
   slotsPerHour: number
+  grid: GridGeometry
+  /** A card is armed for placement, so cells advertise themselves as targets. */
+  selecting: boolean
+  onPlace: (roomId: string, slot: number) => void
 }) {
   const { setNodeRef } = useDroppable({
     id: cellId(roomId, slot),
     data: { type: 'cell', roomId, slot } satisfies DropData,
   })
 
+  const timeLabel = formatMinutes(slotToMin(grid, slot))
+
   return (
     <div
       ref={setNodeRef}
+      role="button"
+      // Out of the tab order until a card is armed, so the day isn't 100+ dead
+      // tab stops; reachable by keyboard the moment placement is in play.
+      tabIndex={selecting ? 0 : -1}
+      aria-label={`${roomName} ${timeLabel}`}
+      data-testid={`slot-${roomId}-${timeLabel.replace(':', '')}`}
+      onClick={() => onPlace(roomId, slot)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onPlace(roomId, slot)
+        }
+      }}
       style={{ height: SLOT_PX }}
-      className={cn('border-t', slot % slotsPerHour === 0 ? 'border-border' : 'border-border/45')}
+      className={cn(
+        'border-t outline-none',
+        slot % slotsPerHour === 0 ? 'border-border' : 'border-border/45',
+        selecting &&
+          'cursor-pointer hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary'
+      )}
     />
   )
-}
+})
 
 /** The translucent "it would land here" box, spanning the full duration. */
 function DropGhost({ preview, grid }: { preview: Preview; grid: GridGeometry }) {
@@ -454,12 +511,24 @@ function RoomColumn({
   conflictedIds,
   preview,
   grid,
+  selectedId,
+  selecting,
+  onSelect,
+  onUnschedule,
+  onPlaceSlot,
 }: {
   room: AgendaRoom
   sessions: SpikeSession[]
   conflictedIds: Set<string>
   preview: Preview | null
   grid: GridGeometry
+  /** Which card is armed for click-to-assign (draws its selection ring). */
+  selectedId: string | null
+  /** Any card is armed — cells advertise themselves as drop targets. */
+  selecting: boolean
+  onSelect: (id: string) => void
+  onUnschedule: (id: string) => void
+  onPlaceSlot: (roomId: string, slot: number) => void
 }) {
   // Overlapping sessions share the column width instead of hiding each other.
   const placed = useMemo(
@@ -475,10 +544,19 @@ function RoomColumn({
       data-room-id={room.id}
       className="relative min-w-0 flex-1 border-l border-border first:border-l-0"
     >
-      {/* Droppable lattice — one cell per slot. */}
+      {/* Droppable lattice — one cell per slot. Also the click-to-assign grid. */}
       <div style={{ height: grid.slotCount * SLOT_PX }}>
         {Array.from({ length: grid.slotCount }, (_, slot) => (
-          <SlotCell key={slot} roomId={room.id} slot={slot} slotsPerHour={slotsPerHour} />
+          <SlotCell
+            key={slot}
+            roomId={room.id}
+            roomName={room.name}
+            slot={slot}
+            slotsPerHour={slotsPerHour}
+            grid={grid}
+            selecting={selecting}
+            onPlace={onPlaceSlot}
+          />
         ))}
       </div>
 
@@ -496,6 +574,26 @@ function RoomColumn({
               conflicted={conflictedIds.has(session.id)}
               dense={session.durationMin <= 30 || lanes > 1}
               className="pointer-events-auto absolute z-10"
+              selected={selectedId === session.id}
+              onSelect={() => onSelect(session.id)}
+              action={
+                <button
+                  type="button"
+                  data-testid={`unschedule-${session.id}`}
+                  aria-label={`Unschedule ${session.title}`}
+                  title="Send back to unscheduled"
+                  // Keep pointerdown off the drag sensor and the click off the
+                  // card's select handler — this button does one thing only.
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onUnschedule(session.id)
+                  }}
+                  className="absolute right-0.5 top-0.5 z-20 inline-flex h-4 w-4 items-center justify-center rounded border border-border bg-card/90 text-muted-foreground opacity-0 shadow-soft transition-opacity hover:border-destructive hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              }
               style={{
                 top: top + 1,
                 height: height - 2,
@@ -519,10 +617,15 @@ function UnscheduledPanel({
   sessions,
   conflictedIds,
   active,
+  selectedId,
+  onSelect,
 }: {
   sessions: SpikeSession[]
   conflictedIds: Set<string>
   active: boolean
+  /** Which tray card is armed for click-to-assign. */
+  selectedId: string | null
+  onSelect: (id: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: UNSCHEDULED_ID,
@@ -553,12 +656,39 @@ function UnscheduledPanel({
           </p>
         ) : (
           sessions.map((session) => (
-            <DraggableCard
-              key={session.id}
-              session={session}
-              conflicted={conflictedIds.has(session.id)}
-              className="h-[54px]"
-            />
+            <div key={session.id} data-testid={`unscheduled-${session.id}`}>
+              <DraggableCard
+                session={session}
+                conflicted={conflictedIds.has(session.id)}
+                className="h-[54px]"
+                selected={selectedId === session.id}
+                onSelect={() => onSelect(session.id)}
+                action={
+                  <button
+                    type="button"
+                    data-testid={`place-${session.id}`}
+                    aria-label={`Schedule ${session.title}`}
+                    title="Pick a slot on the grid to schedule this"
+                    // Don't let a press start a drag, and don't double-fire the
+                    // card's own select handler underneath.
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onSelect(session.id)
+                    }}
+                    className={cn(
+                      'absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-soft transition-colors',
+                      selectedId === session.id
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-card/90 text-muted-foreground hover:border-primary hover:text-primary'
+                    )}
+                  >
+                    <CalendarPlus className="h-3 w-3" />
+                    {selectedId === session.id ? 'Selected' : 'Place'}
+                  </button>
+                }
+              />
+            </div>
           ))
         )}
       </div>
@@ -879,6 +1009,10 @@ export function Agenda() {
   const queryClient = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
+  // The card armed for click-to-assign — the drag-free path. Select a card
+  // (tray "Place" or a click on a grid card), then click a slot to place/move
+  // it. Independent of `activeId`, which is the *drag* in flight.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   // Rooms (the drag grid) is the default read; the other tabs are lighter views
   // over the same data.
   const [view, setView] = useState<AgendaView>('rooms')
@@ -891,6 +1025,12 @@ export function Agenda() {
   const grabSlotOffset = useRef(0)
   /** Last target we computed conflicts for — skips redundant work + renders. */
   const lastTargetKey = useRef<string | null>(null)
+  /**
+   * A drag that just ended fires a synthetic click on the card it landed on;
+   * this suppresses that click so a drop doesn't also arm the card for
+   * click-to-assign. Cleared on the next tick, once the stray click is past.
+   */
+  const justDragged = useRef(false)
 
   const sensors = useSensors(
     // A few pixels of slop so a click on a card is still a click, not a drag.
@@ -960,6 +1100,7 @@ export function Agenda() {
   const scheduledCount = sessions.length - unscheduled.length
 
   const activeSession = activeId ? (byId.get(activeId) ?? null) : null
+  const selectedSession = selectedId ? (byId.get(selectedId) ?? null) : null
 
   /**
    * The drop, persisted.
@@ -1054,10 +1195,60 @@ export function Agenda() {
     move.mutate({ id: session.id, patch })
   }
 
+  /* ---- click-to-assign: the drag-free path -------------------------------- */
+
+  /** Arm a card for placement (or disarm it if it's already the armed one). */
+  const selectSession = useCallback((id: string) => {
+    // A click synthesised by a just-finished drag must not re-arm the card.
+    if (justDragged.current) return
+    setSelectedId((prev) => (prev === id ? null : id))
+  }, [])
+
+  /** The "Unschedule" / × affordance on a placed card — back to the tray. */
+  function unschedule(id: string) {
+    const session = byId.get(id)
+    if (session) commit(session, null)
+    setSelectedId((prev) => (prev === id ? null : prev))
+  }
+
+  /**
+   * Drop the armed card into a clicked slot. The top of the card lands on the
+   * clicked slot (no grab offset — a click has no grab point), clamped to the
+   * day; then the same `commit` the drag path uses persists it.
+   */
+  function placeInSlot(roomId: string, slot: number) {
+    if (!selectedId) return
+    const session = byId.get(selectedId)
+    if (session) {
+      commit(session, { roomId, startSlot: clampSlot(grid, slot, session.durationMin) })
+    }
+    setSelectedId(null)
+  }
+
+  // A stable identity for the memoized cells, always calling the latest closure
+  // (which closes over the current selection, board and geometry).
+  const placeInSlotRef = useRef(placeInSlot)
+  placeInSlotRef.current = placeInSlot
+  const onPlaceSlot = useCallback((roomId: string, slot: number) => {
+    placeInSlotRef.current(roomId, slot)
+  }, [])
+
+  // Escape disarms the current selection — the keyboard's Cancel.
+  useEffect(() => {
+    if (!selectedId) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId])
+
   function handleDragStart(event: DragStartEvent) {
     const session = byId.get(String(event.active.id))
     setActiveId(session?.id ?? null)
     setPreview(null)
+    // Drag and click-to-assign are mutually exclusive modes.
+    setSelectedId(null)
     lastTargetKey.current = null
 
     // Grab offset only makes sense for a card that is already slot-aligned;
@@ -1119,6 +1310,11 @@ export function Agenda() {
     setPreview(null)
     lastTargetKey.current = null
     grabSlotOffset.current = 0
+    // Swallow the click the browser fires on the drop target right after a drag.
+    justDragged.current = true
+    window.setTimeout(() => {
+      justDragged.current = false
+    }, 0)
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -1225,12 +1421,36 @@ export function Agenda() {
           <ConflictsPanel conflicts={conflicts} titles={titles} />
         </div>
 
+        {selectedSession && (
+          <div
+            data-testid="placement-banner"
+            className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary-subtle px-3 py-2 text-sm"
+          >
+            <CalendarPlus className="h-4 w-4 shrink-0 text-primary" />
+            <span className="text-foreground">
+              Placing <strong className="font-semibold">{selectedSession.title}</strong> — click a
+              slot to {isScheduled(selectedSession) ? 'move' : 'schedule'} it.
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              data-testid="placement-cancel"
+              onClick={() => setSelectedId(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
+
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
             <UnscheduledPanel
               sessions={unscheduled}
               conflictedIds={conflictedIds}
               active={activeId !== null}
+              selectedId={selectedId}
+              onSelect={selectSession}
             />
             <p className="mt-2 px-1 text-xs text-muted-foreground">
               {grid.slotMinutes}-minute slots, {formatMinutes(grid.dayStartMin)}–
@@ -1288,6 +1508,11 @@ export function Agenda() {
                       conflictedIds={conflictedIds}
                       preview={preview}
                       grid={grid}
+                      selectedId={selectedId}
+                      selecting={selectedId !== null}
+                      onSelect={selectSession}
+                      onUnschedule={unschedule}
+                      onPlaceSlot={onPlaceSlot}
                     />
                   ))}
                 </div>
@@ -1321,8 +1546,8 @@ export function Agenda() {
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">Agenda</h1>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Drag sessions onto the grid{eventName ? ` for ${eventName}` : ''}. Conflicts are
-                  flagged while you drag, before you drop.
+                  Drag a session onto the grid{eventName ? ` for ${eventName}` : ''}, or hit Place
+                  and click a slot. Conflicts are flagged live, before you drop.
                 </p>
               </div>
             </div>

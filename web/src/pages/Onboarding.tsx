@@ -9,7 +9,7 @@ import { fromDateInput, localTimezone, timezoneOptions } from '@/pages/SettingsP
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
+import { NativeSelect } from '@/ui/native-select'
 import { Skeleton } from '@/ui/skeleton'
 import { toast } from '@/ui/use-toast'
 
@@ -125,19 +125,13 @@ export function Onboarding() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Timezone</Label>
-              <Select value={timezone} onValueChange={setTimezone}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {timezoneOptions(timezone).map((tz) => (
-                    <SelectItem key={tz} value={tz}>
-                      {tz}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="onboarding-timezone">Timezone</Label>
+              <NativeSelect
+                id="onboarding-timezone"
+                value={timezone}
+                onValueChange={setTimezone}
+                options={timezoneOptions(timezone).map((tz) => ({ value: tz, label: tz }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="onboarding-location">Location</Label>

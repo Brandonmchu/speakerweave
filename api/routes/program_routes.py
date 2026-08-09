@@ -290,6 +290,7 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
         track = track_meta.get(str(session.get("track_id")))
         days.setdefault(day_key, []).append(
             {
+                "id": str(session["id"]),
                 "friendly_id": session.get("friendly_id"),
                 "title": session.get("title") or "",
                 "description": session.get("description") or "",
@@ -387,7 +388,79 @@ async def get_speakers(request: Request, event_slug: str):
             }
         )
 
-    return {"event": {"name": event.get("name")}, "speakers": speakers}
+    return {
+        "event": {"name": event.get("name"), "timezone": event.get("timezone")},
+        "speakers": speakers,
+    }
+
+
+@router.get("/{event_slug}/session/{session_id}")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def get_session_detail(request: Request, event_slug: str, session_id: str):
+    """One accepted session's public detail, for the schedule's detail modal.
+
+    The schedule list clamps its cards; this returns the *full* description plus
+    the speakers' bios and social links, which the list omits. Only ``accepted``
+    sessions of this event resolve — anything else (wrong org, pending, unknown
+    id) is a 404, never a peek at another event's programme.
+    """
+    event = await _load_event(event_slug)
+    org_id, event_id = event["org_id"], event["id"]
+
+    session = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .select(
+                "id, friendly_id, title, description, starts_at, ends_at, "
+                "room_id, track_id"
+            )
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("id", session_id)
+            .eq("status", "accepted")
+            .limit(1)
+            .execute(),
+            "program_session_detail",
+        )
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _zone, zone_key = _resolve_timezone(None, event.get("timezone"))
+    room_names, track_meta = await _name_maps(org_id, event_id)
+    speakers_by_session, _contacts = await _speakers_by_session([str(session["id"])], org_id)
+
+    speakers = [
+        {
+            "name": _speaker_name(contact),
+            "title": contact.get("title") or None,
+            "company": contact.get("company_name") or None,
+            "photo_url": contact.get("photo_url") or None,
+            "bio": contact.get("about") or None,
+            "linkedin_url": contact.get("linkedin_url") or None,
+            "twitter_url": contact.get("twitter_url") or None,
+        }
+        for contact in speakers_by_session.get(str(session["id"]), [])
+    ]
+
+    return {
+        "event": {
+            "name": event.get("name"),
+            "timezone": zone_key,
+            "location": event.get("location"),
+        },
+        "session": {
+            "id": str(session["id"]),
+            "friendly_id": session.get("friendly_id"),
+            "title": session.get("title") or "",
+            "description": session.get("description") or "",
+            "starts_at": session.get("starts_at"),
+            "ends_at": session.get("ends_at"),
+            "room": room_names.get(str(session.get("room_id"))) or None,
+            "track": track_meta.get(str(session.get("track_id"))),
+            "speakers": speakers,
+        },
+    }
 
 
 @router.get("/{event_slug}/embed.js")

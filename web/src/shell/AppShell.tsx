@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
+import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -229,11 +230,18 @@ export function AppShell() {
             <Button
               variant="outline"
               size="sm"
-              title="Open the public speaker portal"
+              title="Open the public schedule in a new tab"
               className="hidden md:inline-flex"
+              onClick={() =>
+                window.open(
+                  `/e/${event?.slug ?? FEATURED_EVENT_SLUG}/schedule`,
+                  '_blank',
+                  'noopener,noreferrer'
+                )
+              }
             >
               <ExternalLink className="h-4 w-4" />
-              View Portal
+              View public page
             </Button>
 
             <button
