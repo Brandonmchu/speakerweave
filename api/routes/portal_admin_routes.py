@@ -21,7 +21,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.core.settings import settings
-from auth import get_current_user_and_org, verify_org_access
+from auth import (
+    get_current_user_and_org,
+    get_current_user_or_api_org,
+    verify_org_access,
+)
 from services import content_pipeline
 from services.magic_links import mint
 from services.org_scope import fetch_event
@@ -636,7 +640,7 @@ async def _notify_comment(org_id: str, result: dict) -> None:
 async def remind_outstanding(
     event_id: str,
     payload: RemindRequest,
-    auth: tuple = Depends(get_current_user_and_org),
+    auth: tuple = Depends(get_current_user_or_api_org),
 ):
     """Queue one reminder email to each speaker missing required content. Returns
     how many were reminded."""

@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from auth import get_current_user_and_org
+from auth import get_current_user_and_org, get_current_user_or_api_org
 from deps.portal_deps import get_reviewer
 from routes.evaluation_routes import router as evaluation_router
 from routes.review_routes import router as review_router
@@ -71,6 +71,10 @@ def evaluation_client(seeded_db, monkeypatch):
     app.include_router(evaluation_router)
     app.include_router(review_router)
     app.dependency_overrides[get_current_user_and_org] = lambda: ("user-1", TEST_ORG_ID)
+    app.dependency_overrides[get_current_user_or_api_org] = lambda: (
+        "user-1",
+        TEST_ORG_ID,
+    )
     app.dependency_overrides[get_reviewer] = lambda: (
         reviewer["org_id"],
         reviewer["evaluator_id"],

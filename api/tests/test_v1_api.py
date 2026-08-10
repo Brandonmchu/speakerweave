@@ -250,11 +250,18 @@ def test_submission_get_create_update_and_track_filter(v1_client, api_db):
     updated = v1_client.patch(
         f"/v1/submissions/{submission_id}",
         headers=HEADERS,
-        json={"status": "accepted", "title": "Agentic Events", "abstract": "Final"},
+        json={
+            "status": "accepted",
+            "title": "Agentic Events",
+            "abstract": "Final",
+            "feedback": "Strong fit for the audience.",
+        },
     )
     assert updated.status_code == 200
     assert updated.json()["data"]["status"] == "accepted"
     assert updated.json()["data"]["description"] == "Final"
+    stored = next(row for row in api_db.rows("sessions") if row["id"] == submission_id)
+    assert stored["custom_fields"]["decision_feedback"] == "Strong fit for the audience."
 
     filtered = v1_client.get(
         f"/v1/events/{TEST_EVENT_ID}/submissions",

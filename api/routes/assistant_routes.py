@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from auth import get_current_user_and_org
+from auth import get_current_user_or_api_org
 from security.rate_limiting import RATE_PUBLIC_WRITE, limiter
 from services import assistant
 
@@ -59,7 +59,7 @@ class ChatResponse(BaseModel):
 async def chat(
     request: Request,
     payload: ChatRequest,
-    auth: tuple = Depends(get_current_user_and_org),
+    auth: tuple = Depends(get_current_user_or_api_org),
 ) -> ChatResponse:
     _user_id, org_id = auth
     result = await assistant.run(

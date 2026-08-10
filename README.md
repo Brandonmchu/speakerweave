@@ -184,6 +184,19 @@ curl https://speakerweave.com/v1/events \
 
 The stable integration API covers events, submissions/sessions, speakers/contacts, schedules, tracks, formats, rooms, content status, and evaluation summaries. The application itself is also RESTful, and its complete generated OpenAPI explorer is available at the API service's `/docs`.
 
+### Companion CLI
+
+The Python 3.11+ companion CLI exposes conference operations as the `sw` command. Install it from a checkout, authenticate with an organization API token, and start with the event or submission views:
+
+```bash
+pipx install ./cli
+sw auth login
+sw events list
+sw submissions list --status pending
+```
+
+It supports submission decisions, speaker CSV import, scheduling, content reminders, AI triage, one-shot assistant questions, and an interactive assistant REPL. See [`cli/README.md`](cli/README.md) for the full command reference, configuration precedence, JSON output, and its separate test suite.
+
 ### MCP for Claude and other header-capable clients
 
 API tokens also authenticate the hosted Streamable HTTP MCP endpoint. Put this in the MCP JSON configuration used by Claude Code/Desktop or another client that supports remote HTTP servers and custom headers:
@@ -259,6 +272,9 @@ No preferences? Tell your agent: **use the reference stack exactly as documented
 │   ├── mcp_server.py           # hosted MCP tools/resources and auth boundary
 │   ├── slack_manifest.json     # importable Slack app manifest
 │   └── tests/                  # pytest suite
+├── cli/
+│   ├── src/speakerweave_cli/   # Python 3.11+ `sw` command package
+│   └── tests/                  # isolated CLI pytest suite with mocked HTTP
 └── web/
     ├── src/                    # React application, pages, API clients, and shared logic
     ├── tests/                  # Vitest + Testing Library suite

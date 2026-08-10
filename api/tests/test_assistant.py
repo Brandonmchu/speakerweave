@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from services import assistant
+from services.magic_links import hash_token
+from tests.conftest import TEST_ORG_ID
 
 
 def _tool_use(name: str, arguments: dict) -> dict:
@@ -16,6 +18,40 @@ def _tool_use(name: str, arguments: dict) -> dict:
             }
         ]
     }
+
+
+def test_chat_accepts_org_api_token(client, fake_db, monkeypatch):
+    """The companion CLI can use its durable org token without a JWT."""
+    raw_token = "dais_cli_assistant_test"
+    fake_db.seed(
+        "api_tokens",
+        {
+            "id": "cli-assistant-token",
+            "org_id": TEST_ORG_ID,
+            "token_hash": hash_token(raw_token),
+            "scopes": ["read"],
+        },
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+
+    response = client.post(
+        "/api/assistant/chat",
+        headers={"x-access-token": raw_token},
+        json={"messages": [{"role": "user", "content": "What needs attention?"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"reply": assistant.WEB_NO_KEY_REPLY, "tool_calls": []}
+
+
+def test_chat_rejects_invalid_org_api_token(client, fake_db):
+    response = client.post(
+        "/api/assistant/chat",
+        headers={"x-access-token": "dais_not_valid"},
+        json={"messages": [{"role": "user", "content": "Hello"}]},
+    )
+
+    assert response.status_code == 401
 
 
 def test_chat_executes_tools_in_jwt_org_and_returns_audit(client, auth_headers, monkeypatch):

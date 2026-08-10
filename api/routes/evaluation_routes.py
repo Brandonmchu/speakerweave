@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
-from auth import get_current_user_and_org
+from auth import get_current_user_and_org, get_current_user_or_api_org
 from services import evaluations
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
@@ -296,7 +296,7 @@ async def bulk_unassign(
 async def run_ai_triage(
     plan_id: str,
     payload: TriageRunRequest | None = None,
-    auth: tuple = Depends(get_current_user_and_org),
+    auth: tuple = Depends(get_current_user_or_api_org),
 ):
     """Summarize, score and rank every submission on this plan in one model call.
 

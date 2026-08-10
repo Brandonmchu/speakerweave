@@ -23,7 +23,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
 from pydantic import BaseModel
 
-from auth import get_current_user_and_org, verify_org_access
+from auth import (
+    get_current_user_and_org,
+    get_current_user_or_api_org,
+    verify_org_access,
+)
 from services.auto_place import plan_auto_placements
 from services.scheduling import (
     Labels,
@@ -457,7 +461,7 @@ async def update_session_schedule(
 
 
 @router.post("/events/{event_id}/schedule/auto-place")
-async def auto_place_schedule(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
+async def auto_place_schedule(event_id: str, auth: tuple = Depends(get_current_user_or_api_org)):
     """Fill the tray in one action: every unscheduled session into a clean slot.
 
     The decision is made by `services/auto_place.py` against the *same* rule
@@ -533,7 +537,7 @@ async def auto_place_schedule(event_id: str, auth: tuple = Depends(get_current_u
 
 
 @router.post("/events/{event_id}/schedule/publish")
-async def publish_schedule(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
+async def publish_schedule(event_id: str, auth: tuple = Depends(get_current_user_or_api_org)):
     """Mark the programme published and hand back the public schedule link.
 
     This is an explicit, visible affirmation — NOT a visibility switch. The

@@ -15,7 +15,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field, field_validator
 
-from auth import get_current_user_and_org, verify_org_access
+from auth import (
+    get_current_user_and_org,
+    get_current_user_or_api_org,
+    verify_org_access,
+)
 from services import crm, mailer, portal, session_revisions, speaker_crm
 from services.comms import DEFAULT_TEMPLATES, render_template
 from services.evaluations import session_review_aggregate, session_review_scores
@@ -1661,7 +1665,7 @@ async def get_speaker_profile(
 async def import_speakers(
     event_id: str,
     payload: SpeakerImportRequest,
-    auth: tuple = Depends(get_current_user_and_org),
+    auth: tuple = Depends(get_current_user_or_api_org),
 ):
     """Bulk-add speakers by upserting contacts on ``(event_id, email)``.
 

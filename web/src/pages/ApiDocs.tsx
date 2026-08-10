@@ -152,6 +152,10 @@ function Authentication() {
         value is shown once. Each token resolves to one organization, and resources outside that
         organization return <Mono>404</Mono>.
       </p>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        Prefer a terminal? From a checkout, run <Mono>pipx install ./cli</Mono>, then{' '}
+        <Mono>sw auth login</Mono> with the same organization API token.
+      </p>
       <CodeBlock code={AUTH_EXAMPLE} />
     </section>
   )

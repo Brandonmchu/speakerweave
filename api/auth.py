@@ -88,6 +88,28 @@ async def get_current_user_and_org(request: Request) -> tuple[str, str]:
     return user_id, org_id
 
 
+async def get_current_user_or_api_org(request: Request) -> tuple[str, str]:
+    """Accept an organizer JWT or an organization API token.
+
+    Most ``/api`` routes deliberately remain JWT-only. A small set of
+    organizer operations is also exposed to the companion CLI, whose durable
+    credential is the same ``x-access-token`` used by ``/v1``. Those routes use
+    this dependency and continue to receive the familiar ``(actor_id, org_id)``
+    tuple. The synthetic actor id is never used for organization scoping.
+
+    When an API-token header is present it is authoritative: an invalid token
+    fails closed instead of falling through to a possibly unrelated JWT.
+    """
+    if (request.headers.get("x-access-token") or "").strip():
+        # Local import avoids coupling the JWT-only path to API-key services at
+        # module import time and keeps auth.py free of a circular dependency.
+        from deps.api_key_deps import get_api_org
+
+        org_id, _scopes = await get_api_org(request)
+        return "api-token", org_id
+    return await get_current_user_and_org(request)
+
+
 # Clerk creates orgs; our orgs table learns about them lazily on first
 # authenticated request. Positive-only TTL cache so the upsert isn't per-call.
 _ORG_SEEN: dict[str, float] = {}

@@ -38,6 +38,7 @@ class SubmissionPatchRequest(BaseModel):
     status: str | None = None
     title: str | None = Field(default=None, max_length=300)
     abstract: str | None = Field(default=None, max_length=50_000)
+    feedback: str | None = Field(default=None, max_length=50_000)
 
 
 class SpeakerCreateRequest(BaseModel):
@@ -178,6 +179,7 @@ async def update_submission(
             status=body.status,
             title=body.title,
             abstract=body.abstract,
+            feedback=body.feedback,
             fields_set=set(provided),
         )
     }

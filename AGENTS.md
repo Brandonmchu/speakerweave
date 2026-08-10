@@ -24,9 +24,15 @@ web/
 ├── src/auth/                  organizer auth provider and token bridge
 ├── src/ui/native-select.tsx   agent-drivable select primitive
 └── tests/                     Vitest and Testing Library suite
+
+cli/
+├── pyproject.toml              standalone Python 3.11+ speakerweave-cli package
+├── src/speakerweave_cli/       Click command tree, HTTP client, config, output
+└── tests/                      isolated mocked-HTTP pytest suite
 ```
 
 Python tests live beside their shared fakes under `api/tests/`. Browser and TypeScript tests live under `web/tests/`; parity fixtures for rule and scheduling behavior are mirrored across the API and web suites.
+CLI development and its separate test gate are documented in [`cli/README.md`](cli/README.md); do not add CLI tests to the API suite.
 
 ## (b) The four gates you must keep green
 
@@ -154,6 +160,7 @@ venv/bin/python scripts/mint_dev_token.py   # print a short-lived organizer toke
 ## (g) Integration surfaces
 
 - **v1 API:** stable organization-token REST resources are routed in `api/routes/v1_routes.py` and implemented in `api/services/integration_api.py`.
+- **CLI:** the standalone `speakerweave-cli` package and `sw` command live in `cli/`; follow [`cli/README.md`](cli/README.md) for install, commands, and its isolated pytest gate.
 - **MCP:** Streamable HTTP tools/resources and bearer/OAuth auth live in `api/mcp_server.py` and mount at `/mcp` from `api/main.py`.
 - **OAuth:** discovery, dynamic registration, PKCE authorization, and token rotation live in `api/routes/oauth_routes.py`, `api/services/oauth.py`, and `api/migrations/015_oauth.sql`.
 - **Assistant:** shared prompts, tools, guarded execution, and the model loop live in `api/services/assistant.py`; the authenticated in-app boundary is `api/routes/assistant_routes.py` and Slack stays a thin transport in `api/services/slack_agent.py`.
