@@ -40,6 +40,7 @@ PATCH_TARGET_MODULES = (
     "services.onboarding",
     "services.org_scope",
     "services.portal",
+    "services.session_revisions",
     "services.slugs",
     "services.submitter_selfservice",
 )

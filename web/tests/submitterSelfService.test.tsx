@@ -265,6 +265,16 @@ const DASHBOARD_DATA = {
       decided: false,
       decision: null,
       feedback: null,
+      participants: [
+        {
+          contact_id: 'contact-ada',
+          name: 'Ada Lovelace',
+          email: 'ada@example.com',
+          role: 'speaker',
+          roles: ['speaker', 'submitter'],
+          is_primary: true,
+        },
+      ],
     },
   ],
 }
@@ -297,6 +307,64 @@ describe('SubmitterDashboard', () => {
     expect(screen.getByText('SESS-1')).toBeInTheDocument()
     expect(screen.getByText(/Pending review/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Edit$/ })).toBeInTheDocument()
+    expect(screen.getByText('Participants (1)')).toBeInTheDocument()
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument()
+    expect(screen.getByText('speaker · submitter')).toBeInTheDocument()
+    expect(screen.getByText('Primary')).toBeInTheDocument()
+  })
+
+  it('adds a co-speaker from an editable submission', async () => {
+    let added = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const call = recordCall(input, init)
+        if (call.url.endsWith('/participants') && call.method === 'POST') {
+          added = true
+          return jsonResponse({ participants: [] }, 201)
+        }
+        const participants = added
+          ? [
+              ...DASHBOARD_DATA.submissions[0].participants,
+              {
+                contact_id: 'contact-grace',
+                name: 'Grace Hopper',
+                email: 'grace@example.com',
+                role: 'speaker',
+                roles: ['speaker'],
+                is_primary: false,
+              },
+            ]
+          : DASHBOARD_DATA.submissions[0].participants
+        return jsonResponse({
+          ...DASHBOARD_DATA,
+          submissions: [{ ...DASHBOARD_DATA.submissions[0], participants }],
+        })
+      })
+    )
+    renderDashboard()
+    await screen.findByText('Ada Lovelace')
+
+    fireEvent.change(screen.getByLabelText('Co-speaker name'), {
+      target: { value: 'Grace Hopper' },
+    })
+    fireEvent.change(screen.getByLabelText('Co-speaker email'), {
+      target: { value: 'grace@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.endsWith('/participants') && call.method === 'POST'))
+        .toBe(true)
+    )
+    const post = calls.find((call) => call.url.endsWith('/participants') && call.method === 'POST')!
+    expect(post.body).toEqual({
+      token: 'tok',
+      name: 'Grace Hopper',
+      email: 'grace@example.com',
+    })
+    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument()
+    expect(screen.getByText('Participants (2)')).toBeInTheDocument()
   })
 
   it('edits a submission and PATCHes with the token', async () => {

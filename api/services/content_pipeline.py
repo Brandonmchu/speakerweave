@@ -285,7 +285,7 @@ async def _collect(org_id: str, event_id: str) -> dict:
         for t in rows(
             await db(
                 lambda: supabase.table("tasks")
-                .select("id, name, required, due_at")
+                .select("id, name, required, due_at, session_id")
                 .eq("org_id", org_id)
                 .eq("event_id", event_id)
                 .eq("kind", CONTENT_TASK_KIND)
@@ -297,6 +297,25 @@ async def _collect(org_id: str, event_id: str) -> dict:
     ]
     tasks_by_id = {t["id"]: t for t in tasks}
     task_ids = sorted(tasks_by_id)
+
+    session_ids = sorted({str(t["session_id"]) for t in tasks if t.get("session_id")})
+    sessions_by_id: dict[str, dict] = {}
+    if session_ids:
+        sessions_by_id = {
+            str(session["id"]): session
+            for session in rows(
+                await db(
+                    lambda: supabase.table("sessions")
+                    .select("id, title")
+                    .eq("org_id", org_id)
+                    .eq("event_id", event_id)
+                    .in_("id", session_ids)
+                    .execute(),
+                    "content_sessions",
+                )
+            )
+            if session.get("id")
+        }
 
     assignments: list[dict] = []
     if task_ids:
@@ -371,6 +390,7 @@ async def _collect(org_id: str, event_id: str) -> dict:
 
     ctx = {
         "tasks_by_id": tasks_by_id,
+        "sessions_by_id": sessions_by_id,
         "assignments": assignments,
         "contacts_by_id": contacts_by_id,
         "files_by_assignment": files_by_assignment,
@@ -410,6 +430,7 @@ def _item_from(assignment: dict, ctx: dict) -> dict:
     contact = ctx["contacts_by_id"].get(assignment.get("contact_id"), {})
     versions = ctx["versions_by_assignment"].get(assignment.get("id"), [])
     current = next((v for v in versions if v["is_current"]), None)
+    session = ctx["sessions_by_id"].get(str(task.get("session_id") or ""))
     return {
         "item_id": assignment.get("id"),
         "type": classify_item_type(task.get("name")),
@@ -417,12 +438,19 @@ def _item_from(assignment: dict, ctx: dict) -> dict:
         "required": bool(task.get("required")),
         "due_at": task.get("due_at"),
         "assignment_status": assignment.get("status"),
+        "approved": assignment.get("status") == "approved",
         "status": content_status(assignment.get("status"), has_file=bool(versions)),
         "current_version": current["version"] if current else 0,
         "versions_count": len(versions),
         "current_file": current,
         "comment_count": ctx["comments_by_assignment"].get(assignment.get("id"), 0),
         "updated_at": current["created_at"] if current else None,
+        "uploaded_at": current["created_at"] if current else None,
+        "session": (
+            {"id": session.get("id"), "title": session.get("title") or "Untitled session"}
+            if session
+            else None
+        ),
         "speaker": {
             "contact_id": contact.get("id") or assignment.get("contact_id"),
             "name": _contact_name(contact) if contact else "Speaker",
@@ -560,7 +588,7 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
     task = first(
         await db(
             lambda: supabase.table("tasks")
-            .select("id, name, required, due_at, event_id")
+            .select("id, name, required, due_at, event_id, session_id")
             .eq("id", assignment.get("task_id"))
             .eq("org_id", org_id)
             .limit(1)
@@ -590,6 +618,20 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
     )
     versions = item_versions(assignment, task, contact, files, profile_files)
     current = next((v for v in versions if v["is_current"]), None)
+    session = None
+    if task.get("session_id"):
+        session = first(
+            await db(
+                lambda: supabase.table("sessions")
+                .select("id, title")
+                .eq("id", task["session_id"])
+                .eq("org_id", org_id)
+                .eq("event_id", task.get("event_id"))
+                .limit(1)
+                .execute(),
+                "content_item_session",
+            )
+        )
     return {
         "item": {
             "item_id": assignment_id,
@@ -600,8 +642,15 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
             # dialog is deciding whether to chase, and "due when?" is half of it.
             "due_at": task.get("due_at"),
             "assignment_status": assignment.get("status"),
+            "approved": assignment.get("status") == "approved",
             "status": content_status(assignment.get("status"), has_file=bool(versions)),
             "current_version": current["version"] if current else 0,
+            "uploaded_at": current["created_at"] if current else None,
+            "session": (
+                {"id": session.get("id"), "title": session.get("title") or "Untitled session"}
+                if session
+                else None
+            ),
             "speaker": {
                 "contact_id": contact.get("id") or assignment.get("contact_id"),
                 "name": _contact_name(contact) if contact else "Speaker",

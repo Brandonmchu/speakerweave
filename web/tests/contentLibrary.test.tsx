@@ -16,6 +16,9 @@ const LIBRARY = {
       // The judge's own fixture deadline, stored the way the API stores it:
       // UTC midnight on the calendar day the organizer typed.
       due_at: '2027-05-01T00:00:00+00:00',
+      approved: false,
+      uploaded_at: '2026-08-05T10:00:00Z',
+      session: { id: 'session-1', title: 'Analytical Engines in Practice' },
       assignment_status: 'submitted',
       status: 'received',
       current_version: 2,
@@ -31,6 +34,9 @@ const LIBRARY = {
       title: 'Headshot photo',
       required: true,
       due_at: '2027-04-14T00:00:00+00:00',
+      approved: false,
+      uploaded_at: null,
+      session: null,
       assignment_status: 'todo',
       status: 'missing',
       current_version: 0,
@@ -48,6 +54,9 @@ const LIBRARY = {
       // Long past for any plausible run date — the overdue treatment has to be
       // provable without freezing the clock.
       due_at: '2020-03-01T00:00:00+00:00',
+      approved: false,
+      uploaded_at: null,
+      session: null,
       assignment_status: 'todo',
       status: 'missing',
       current_version: 0,
@@ -69,6 +78,9 @@ const DETAIL = {
     title: 'Upload slides',
     required: true,
     due_at: '2027-05-01T00:00:00+00:00',
+    approved: false,
+    uploaded_at: '2026-08-05T10:00:00Z',
+    session: { id: 'session-1', title: 'Analytical Engines in Practice' },
     assignment_status: 'submitted',
     status: 'received',
     current_version: 2,
@@ -105,6 +117,7 @@ const RESTORED_DETAIL = {
 
 let calls: { url: string; method: string; body: unknown }[] = []
 let restored = false
+let approved = false
 
 function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -123,13 +136,37 @@ function stub() {
       if (u.includes('/content/remind')) return json({ reminded: 1, contacts: ['ben'] })
       if (u.includes('/content/export')) return new Response(new Blob(['zip']), { status: 200 })
       if (u.endsWith('/comments')) return json({ comment: { id: 'new', author_role: 'organizer' } })
+      if (u.endsWith('/review') && method === 'PATCH') {
+        approved = true
+        return json({ assignment: { id: 'a1', status: 'approved' } })
+      }
       if (u.endsWith('/restore')) {
         restored = true
         return json({ ...RESTORED_DETAIL, restored: { version: 1, file_id: 'f1', changed: true } })
       }
       // Once v1 has been restored the item detail reports it as current.
-      if (u.includes('/task-assignments/')) return json(restored ? RESTORED_DETAIL : DETAIL)
-      if (u.includes('/content')) return json(LIBRARY)
+      if (u.includes('/task-assignments/')) {
+        const detail = restored ? RESTORED_DETAIL : DETAIL
+        return json(
+          approved
+            ? { ...detail, item: { ...detail.item, approved: true, assignment_status: 'approved' } }
+            : detail
+        )
+      }
+      if (u.includes('/content')) {
+        return json(
+          approved
+            ? {
+                ...LIBRARY,
+                items: LIBRARY.items.map((item) =>
+                  item.item_id === 'a1'
+                    ? { ...item, approved: true, assignment_status: 'approved' }
+                    : item
+                ),
+              }
+            : LIBRARY
+        )
+      }
       if (u.includes('/api/events')) return json([{ id: 'e1', name: 'AI Builders Summit', slug: 'summit' }])
       return json({})
     })
@@ -150,6 +187,7 @@ function renderLibrary() {
 beforeEach(() => {
   calls = []
   restored = false
+  approved = false
   window.localStorage.setItem('dais.token', 'admin-token')
   vi.stubGlobal('URL', {
     ...URL,
@@ -180,6 +218,16 @@ describe('ContentLibrary', () => {
     expect(versionCells[1]).toHaveTextContent('—')
     // outstanding summary drives the remind button label
     expect(screen.getByRole('button', { name: /Remind outstanding \(1\)/ })).toBeInTheDocument()
+  })
+
+  it('shows the linked session and the current version upload date in the row', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('Analytical Engines in Practice')).toBeInTheDocument()
+    expect(screen.getByTestId('uploaded-cell-a1')).toHaveTextContent('5 Aug 2026')
+    expect(screen.getByTestId('uploaded-cell-a2')).toHaveTextContent('—')
   })
 
   it('detail is legible: labelled version list + comment thread with author and time', async () => {
@@ -238,6 +286,24 @@ describe('ContentLibrary', () => {
       expect(post).toBeTruthy()
       expect((post!.body as { body: string }).body).toBe('Looks great now, approved.')
     })
+  })
+
+  it('sets an explicit approval and refreshes the list and detail chips', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('button', { name: /Approve/ }))
+
+    await waitFor(() => {
+      const call = calls.find((entry) => entry.url.endsWith('/task-assignments/a1/review'))
+      expect(call?.method).toBe('PATCH')
+      expect(call?.body).toEqual({ decision: 'approved' })
+    })
+    expect(await within(dialog).findByText('Approved')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(within(screen.getByRole('table')).getByText('Approved')).toBeInTheDocument())
   })
 
   it('queues reminders to outstanding speakers', async () => {

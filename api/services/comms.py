@@ -221,9 +221,19 @@ async def resolve_recipients(
     *,
     roles: list[str] | None = None,
     statuses: list[str] | None = None,
+    all_roster: bool = False,
+    contact_ids: list[str] | None = None,
 ) -> tuple[dict, list[dict]]:
-    """Resolve distinct contacts and the first matching session for each."""
+    """Resolve an audience, with an explicit validated contact list as override.
+
+    ``all_roster`` includes every event contact, even when they have no session.
+    Once the organizer checks individual recipients, ``contact_ids`` is the
+    exact final audience: filters no longer remove a person they deliberately
+    added or re-add one they deliberately deselected.
+    """
     event = await get_scoped_event(event_id, org_id)
+    explicit_ids = list(dict.fromkeys(contact_ids)) if contact_ids is not None else None
+    broad_audience = all_roster or explicit_ids is not None
 
     def session_query():
         query = (
@@ -232,28 +242,27 @@ async def resolve_recipients(
             .eq("org_id", org_id)
             .eq("event_id", event_id)
         )
-        if statuses:
+        if statuses and not broad_audience:
             query = query.in_("status", statuses)
         return query.order("created_at").execute()
 
     sessions = rows(await db(session_query, "comms_recipient_sessions"))
     session_by_id = {str(row["id"]): row for row in sessions}
     session_rank = {str(row["id"]): index for index, row in enumerate(sessions)}
-    if not session_by_id:
-        return event, []
+    participants: list[dict] = []
+    if session_by_id:
+        def participant_query():
+            query = (
+                supabase.table("session_participants")
+                .select("id, org_id, session_id, contact_id, role")
+                .eq("org_id", org_id)
+                .in_("session_id", list(session_by_id))
+            )
+            if roles and not broad_audience:
+                query = query.in_("role", roles)
+            return query.execute()
 
-    def participant_query():
-        query = (
-            supabase.table("session_participants")
-            .select("id, org_id, session_id, contact_id, role")
-            .eq("org_id", org_id)
-            .in_("session_id", list(session_by_id))
-        )
-        if roles:
-            query = query.in_("role", roles)
-        return query.execute()
-
-    participants = rows(await db(participant_query, "comms_recipient_participants"))
+        participants = rows(await db(participant_query, "comms_recipient_participants"))
     contact_to_participant: dict[str, dict] = {}
     for participant in participants:
         contact_id = str(participant.get("contact_id") or "")
@@ -268,34 +277,49 @@ async def resolve_recipients(
             )
         ):
             contact_to_participant[contact_id] = participant
-    if not contact_to_participant:
+    if not broad_audience and not contact_to_participant:
         return event, []
 
-    contacts = rows(
-        await db(
-            lambda: supabase.table("contacts")
+    if explicit_ids is not None and not explicit_ids:
+        return event, []
+
+    target_ids = explicit_ids if explicit_ids is not None else (
+        None if all_roster else list(contact_to_participant)
+    )
+
+    def contacts_query():
+        query = (
+            supabase.table("contacts")
             .select("id, org_id, event_id, email, first_name, last_name")
             .eq("org_id", org_id)
             .eq("event_id", event_id)
-            .in_("id", list(contact_to_participant))
-            .execute(),
-            "comms_recipient_contacts",
         )
-    )
+        if target_ids is not None:
+            query = query.in_("id", target_ids)
+        return query.execute()
+
+    contacts = rows(await db(contacts_query, "comms_recipient_contacts"))
+    if explicit_ids is not None:
+        found_ids = {str(contact.get("id") or "") for contact in contacts}
+        if found_ids != set(explicit_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="Every selected recipient must belong to this event.",
+            )
 
     recipients: list[dict] = []
     for contact in contacts:
         participant = contact_to_participant.get(str(contact.get("id") or ""))
-        if not participant:
+        if not participant and not broad_audience:
             continue
-        session = session_by_id[str(participant["session_id"])]
+        session = session_by_id.get(str((participant or {}).get("session_id") or ""), {})
         first_name = str(contact.get("first_name") or "")
         last_name = str(contact.get("last_name") or "")
         full_name = " ".join(part for part in (first_name, last_name) if part).strip()
         recipients.append(
             {
                 **contact,
-                "role": participant.get("role"),
+                "role": (participant or {}).get("role"),
                 "session_id": session.get("id"),
                 "session_title": session.get("title") or "",
                 "session_status": session.get("status"),
@@ -342,6 +366,8 @@ async def send_communication(
     *,
     roles: list[str] | None,
     statuses: list[str] | None,
+    all_roster: bool = False,
+    contact_ids: list[str] | None = None,
     template_key: str | None = None,
     subject: str | None = None,
     body_html: str | None = None,
@@ -352,6 +378,8 @@ async def send_communication(
         org_id,
         roles=roles,
         statuses=statuses,
+        all_roster=all_roster,
+        contact_ids=contact_ids,
     )
     if template_key:
         template = await _template_by_key(event_id, org_id, template_key)

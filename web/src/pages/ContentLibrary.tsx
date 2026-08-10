@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   Bell,
   CalendarClock,
+  CheckCircle2,
   Download,
   FileArchive,
   FileText,
@@ -28,6 +29,7 @@ import {
   getContentItem,
   listContent,
   remindOutstanding,
+  reviewContentItem,
   restoreContentVersion,
   type ContentItem,
   type ContentStatus,
@@ -305,6 +307,7 @@ export function ContentLibrary() {
                 <TableHead>Speaker</TableHead>
                 <TableHead className="w-[120px]">Type</TableHead>
                 <TableHead>Item</TableHead>
+                <TableHead>Session</TableHead>
                 <TableHead className="w-[150px]">
                   {/* Sortable: the organizer's real question here is "what is
                       due next", which the server's speaker order can't answer. */}
@@ -328,6 +331,7 @@ export function ContentLibrary() {
                   </button>
                 </TableHead>
                 <TableHead className="w-[140px]">Status</TableHead>
+                <TableHead className="w-[150px]">Uploaded</TableHead>
                 <TableHead className="w-[90px] text-center">Version</TableHead>
                 <TableHead className="w-[110px] text-right">Open</TableHead>
               </TableRow>
@@ -383,11 +387,21 @@ export function ContentLibrary() {
                         )}
                       </div>
                     </TableCell>
+                    <TableCell>
+                      {item.session ? (
+                        <span className="line-clamp-2 text-sm text-foreground">{item.session.title}</span>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell data-testid={`due-cell-${item.item_id}`}>
                       <DueCell dueAt={item.due_at} done={item.status === 'received'} />
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={item.status} />
+                      <StatusBadge status={item.status} approved={item.approved} />
+                    </TableCell>
+                    <TableCell data-testid={`uploaded-cell-${item.item_id}`}>
+                      <UploadedCell uploadedAt={item.uploaded_at} />
                     </TableCell>
                     <TableCell
                       className="text-center tabular-nums text-sm text-muted-foreground"
@@ -492,6 +506,24 @@ function ItemDialog({
       toast({ variant: 'destructive', title: "Couldn't send feedback", description: error.message }),
   })
 
+  const review = useMutation({
+    mutationFn: (decision: 'approved' | 'denied') =>
+      reviewContentItem(item!.item_id, decision),
+    onSuccess: (_result, decision) => {
+      queryClient.invalidateQueries({ queryKey: ['content-item', item?.item_id] })
+      onChanged()
+      toast({
+        title: decision === 'approved' ? 'Content approved' : 'Changes requested',
+        description:
+          decision === 'approved'
+            ? 'The speaker can see that this item is approved.'
+            : 'The speaker can see that this item needs changes.',
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't update review", description: error.message }),
+  })
+
   const detail = detailQuery.data
   // The detail payload carries its own due date; the row that opened the dialog
   // is the fallback so the deadline is on screen before the fetch lands.
@@ -507,6 +539,7 @@ function ItemDialog({
           <DialogDescription>
             {item?.speaker.name}
             {item ? ` · ${item.type}` : ''}
+            {item?.session ? ` · ${item.session.title}` : ''}
           </DialogDescription>
         </DialogHeader>
 
@@ -536,6 +569,36 @@ function ItemDialog({
           </div>
         ) : (
           <div className="space-y-5">
+            <section
+              data-testid="content-review-control"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/25 px-3 py-3"
+            >
+              <div>
+                <p className="text-sm font-medium text-foreground">Review status</p>
+                <div className="mt-1">
+                  <StatusBadge status={detail.item.status} approved={detail.item.approved} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={review.isPending || detail.versions.length === 0 || detail.item.assignment_status === 'denied'}
+                  onClick={() => review.mutate('denied')}
+                >
+                  Needs changes
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={review.isPending || detail.versions.length === 0 || detail.item.approved}
+                  onClick={() => review.mutate('approved')}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Approve
+                </Button>
+              </div>
+            </section>
+
             {/* change history — every upload, newest first, with an undo */}
             <section data-testid="content-version-list">
               <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-foreground">
@@ -746,7 +809,17 @@ function DueCell({ dueAt, done }: { dueAt: string | null; done: boolean }) {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function UploadedCell({ uploadedAt }: { uploadedAt: string | null }) {
+  if (!uploadedAt) return <span className="text-sm text-muted-foreground">—</span>
+  return (
+    <span className="text-sm text-foreground" title={absolute(uploadedAt)}>
+      {absolute(uploadedAt)}
+    </span>
+  )
+}
+
+function StatusBadge({ status, approved = false }: { status: string; approved?: boolean }) {
+  if (approved) return <Badge variant="success">Approved</Badge>
   const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
   return <Badge variant={meta.variant}>{meta.label}</Badge>
 }

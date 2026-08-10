@@ -59,6 +59,7 @@ const MARCUS_ROW = {
 
 let writes: Array<{ url: string; method: string; body: unknown }> = []
 let participants: unknown[] = []
+let revisions: unknown[] = []
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -89,6 +90,7 @@ describe('Inbox drawer — participants editor', () => {
   beforeEach(() => {
     writes = []
     participants = [...PRIYA_ROWS]
+    revisions = []
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -102,6 +104,16 @@ describe('Inbox drawer — participants editor', () => {
             method,
             body: init?.body ? JSON.parse(String(init.body)) : undefined,
           })
+        }
+
+        if (url.includes('/revisions/') && url.endsWith('/restore') && method === 'POST') {
+          return jsonResponse({
+            session: { ...SUBMISSION, title: 'The original title' },
+          })
+        }
+
+        if (url.endsWith('/revisions')) {
+          return jsonResponse({ revisions })
         }
 
         if (url.includes('/participants')) {
@@ -276,5 +288,36 @@ describe('Inbox drawer — participants editor', () => {
     expect(await screen.findByTestId('participant-contact-marcus')).toBeInTheDocument()
     expect(screen.queryByLabelText('Co-speaker email')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Make primary' })).not.toBeInTheDocument()
+  })
+
+  it('lists title history and restores an old value from the drawer', async () => {
+    revisions = [
+      {
+        id: 'revision-1',
+        session_id: 'session-ci',
+        field: 'title',
+        old_value: 'The original title',
+        new_value: 'Taming 40-Minute CI',
+        actor: 'Organizer',
+        created_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    ]
+    renderInbox()
+    fireEvent.click(await screen.findByText('Taming 40-Minute CI'))
+
+    const history = await screen.findByTestId('session-history')
+    const revision = await within(history).findByTestId('session-revision-revision-1')
+    expect(within(revision).getByText('title')).toBeInTheDocument()
+    expect(revision).toHaveTextContent('The original title')
+    expect(revision).toHaveTextContent('Taming 40-Minute CI')
+    expect(revision).toHaveTextContent('Organizer')
+
+    fireEvent.click(within(revision).getByRole('button', { name: /Restore title/ }))
+    await waitFor(() =>
+      expect(writes.some((write) =>
+        write.url.endsWith('/api/sessions/session-ci/revisions/revision-1/restore') &&
+        write.method === 'POST'
+      )).toBe(true)
+    )
   })
 })

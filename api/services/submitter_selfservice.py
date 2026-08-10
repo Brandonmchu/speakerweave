@@ -26,8 +26,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from postgrest.exceptions import APIError
 
 from app.core.settings import settings
+from services import crm, session_revisions
 from services.forms import (
     abstract_from_answers,
     classify_taxonomy_fields,
@@ -62,6 +64,11 @@ MANAGE_LINK_MESSAGE = (
     "If that email has any submissions for this event, we've sent a link to "
     "manage them. Check your inbox."
 )
+
+# The manage dashboard may add co-speakers, but a session stays intentionally
+# small. The submitter counts toward this total; their dual speaker+submitter
+# storage rows still count as one person.
+MAX_SESSION_PARTICIPANTS = 3
 
 
 class InvalidSubmitterToken(Exception):
@@ -318,6 +325,107 @@ async def list_submissions(org_id: str, contact_id: str) -> dict:
     }
 
 
+async def _participants_for_sessions(
+    org_id: str,
+    sessions: list[dict],
+) -> dict[str, list[dict]]:
+    """Participant people per session, de-duplicated across stored roles."""
+    session_by_id = {str(session["id"]): session for session in sessions if session.get("id")}
+    if not session_by_id:
+        return {}
+
+    participant_rows = rows(
+        await db(
+            lambda: supabase.table("session_participants")
+            .select("session_id, contact_id, role, is_primary")
+            .eq("org_id", org_id)
+            .in_("session_id", list(session_by_id))
+            .execute(),
+            "submitter_participants",
+        )
+    )
+
+    # Old/manual rows may predate participant inserts. The submitter column is
+    # still authoritative, so include it as the safe fallback.
+    for session_id, session in session_by_id.items():
+        submitter_id = session.get("submitter_contact_id")
+        if submitter_id and not any(
+            row.get("session_id") == session_id and row.get("contact_id") == submitter_id
+            for row in participant_rows
+        ):
+            participant_rows.append(
+                {
+                    "session_id": session_id,
+                    "contact_id": submitter_id,
+                    "role": "submitter",
+                    "is_primary": True,
+                }
+            )
+
+    contact_ids = sorted(
+        {str(row["contact_id"]) for row in participant_rows if row.get("contact_id")}
+    )
+    contacts_by_id: dict[str, dict] = {}
+    if contact_ids:
+        contacts_by_id = {
+            str(contact["id"]): contact
+            for contact in rows(
+                await db(
+                    lambda: supabase.table("contacts")
+                    .select("id, first_name, last_name, email")
+                    .eq("org_id", org_id)
+                    .in_("id", contact_ids)
+                    .execute(),
+                    "submitter_participant_contacts",
+                )
+            )
+            if contact.get("id")
+        }
+
+    grouped: dict[str, dict[str, dict]] = {session_id: {} for session_id in session_by_id}
+    for row in participant_rows:
+        session_id = str(row.get("session_id") or "")
+        contact_id = str(row.get("contact_id") or "")
+        if session_id not in grouped or not contact_id:
+            continue
+        contact = contacts_by_id.get(contact_id, {})
+        person = grouped[session_id].setdefault(
+            contact_id,
+            {
+                "contact_id": contact_id,
+                "first_name": contact.get("first_name") or "",
+                "last_name": contact.get("last_name") or "",
+                "email": contact.get("email"),
+                "roles": [],
+                "is_primary": False,
+            },
+        )
+        role = str(row.get("role") or "")
+        if role and role not in person["roles"]:
+            person["roles"].append(role)
+        person["is_primary"] = person["is_primary"] or bool(row.get("is_primary"))
+
+    result: dict[str, list[dict]] = {}
+    role_rank = {"speaker": 0, "moderator": 1, "chairperson": 2, "submitter": 3}
+    for session_id, people in grouped.items():
+        out = []
+        for person in people.values():
+            person["roles"].sort(key=lambda role: role_rank.get(role, 99))
+            person["role"] = person["roles"][0] if person["roles"] else None
+            person["name"] = " ".join(
+                part for part in (person["first_name"], person["last_name"]) if part
+            ).strip() or str(person.get("email") or "Speaker")
+            out.append(person)
+        out.sort(
+            key=lambda person: (
+                not person["is_primary"],
+                str(person.get("name") or "").casefold(),
+            )
+        )
+        result[session_id] = out
+    return result
+
+
 # ── write: edit / withdraw, close-locked and contact-scoped ─────────────────
 
 
@@ -348,6 +456,7 @@ async def edit_submission(org_id: str, contact_id: str, submission_id: str, patc
     session = await _load_owned_session(org_id, contact_id, submission_id)
     if not await _is_editable(session):
         raise HTTPException(status_code=403, detail="This submission can no longer be edited.")
+    before = dict(session)
 
     event_id = session.get("event_id")
     update: dict[str, Any] = {}
@@ -393,8 +502,150 @@ async def edit_submission(org_id: str, contact_id: str, submission_id: str, patc
         if not updated:
             raise HTTPException(status_code=403, detail="This submission can no longer be edited.")
         session = updated[0]
+        await session_revisions.record_changes(
+            org_id,
+            submission_id,
+            before,
+            session,
+            actor="Submitter",
+        )
 
     return {"submission": await _serialize_one(org_id, contact_id, session)}
+
+
+async def _upsert_participant_contact(
+    org_id: str,
+    event_id: str,
+    email: str,
+    first_name: str,
+    last_name: str,
+) -> dict:
+    """The CFP contact upsert rules, reused by token-scoped co-speaker adds."""
+    normalized = email.strip().lower()
+
+    def _select():
+        return (
+            supabase.table("contacts")
+            .select("*")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .eq("email", normalized)
+            .limit(1)
+            .execute()
+        )
+
+    existing = first(await db(_select, "submitter_participant_contact_lookup"))
+    if existing:
+        patch = {}
+        if first_name and not existing.get("first_name"):
+            patch["first_name"] = first_name
+        if last_name and not existing.get("last_name"):
+            patch["last_name"] = last_name
+        if patch:
+            updated = first(
+                await db(
+                    lambda: supabase.table("contacts")
+                    .update(patch)
+                    .eq("id", existing["id"])
+                    .eq("org_id", org_id)
+                    .execute(),
+                    "submitter_participant_contact_fill",
+                )
+            )
+            return updated or existing
+        return existing
+
+    record = {
+        "org_id": org_id,
+        "event_id": event_id,
+        "email": normalized,
+        "first_name": first_name,
+        "last_name": last_name,
+    }
+    try:
+        created = first(
+            await db(
+                lambda: supabase.table("contacts").insert(record).execute(),
+                "submitter_participant_contact_create",
+            )
+        )
+        if created:
+            await crm.sync_contact(org_id, created)
+            return created
+    except APIError as exc:
+        if getattr(exc, "code", None) != "23505":
+            raise
+
+    raced = first(await db(_select, "submitter_participant_contact_relookup"))
+    if not raced:
+        raise HTTPException(status_code=500, detail="Could not create co-speaker.")
+    return raced
+
+
+async def add_participant(
+    org_id: str,
+    contact_id: str,
+    submission_id: str,
+    *,
+    email: str,
+    first_name: str,
+    last_name: str,
+) -> dict:
+    """Add a co-speaker to an editable submission owned by this token."""
+    session = await _load_owned_session(org_id, contact_id, submission_id)
+    if not await _is_editable(session):
+        raise HTTPException(
+            status_code=403,
+            detail="Participants can no longer be changed for this submission.",
+        )
+
+    people_by_session = await _participants_for_sessions(org_id, [session])
+    people = people_by_session.get(submission_id, [])
+    if len(people) >= MAX_SESSION_PARTICIPANTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A submission can have up to {MAX_SESSION_PARTICIPANTS} participants.",
+        )
+
+    normalized = email.strip().lower()
+    if any(str(person.get("email") or "").strip().lower() == normalized for person in people):
+        raise HTTPException(status_code=409, detail="That person is already on this submission.")
+
+    co_speaker = await _upsert_participant_contact(
+        org_id,
+        str(session.get("event_id") or ""),
+        normalized,
+        first_name.strip(),
+        last_name.strip(),
+    )
+    if any(person.get("contact_id") == co_speaker.get("id") for person in people):
+        raise HTTPException(status_code=409, detail="That person is already on this submission.")
+
+    try:
+        await db(
+            lambda: supabase.table("session_participants")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "session_id": submission_id,
+                    "contact_id": co_speaker["id"],
+                    "role": "speaker",
+                    "is_primary": False,
+                }
+            )
+            .execute(),
+            "submitter_participant_create",
+        )
+    except APIError as exc:
+        if getattr(exc, "code", None) == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail="That person is already on this submission.",
+            ) from exc
+        raise
+
+    refreshed = await _participants_for_sessions(org_id, [session])
+    return {"participants": refreshed.get(submission_id, [])}
 
 
 async def withdraw_submission(org_id: str, contact_id: str, submission_id: str) -> dict:
@@ -597,6 +848,7 @@ async def _enrich(
             )
 
     feedback_by_title = await _decision_feedback(org_id, contact_id)
+    participants_by_session = await _participants_for_sessions(org_id, sessions)
 
     out: list[dict] = []
     for session in sessions:
@@ -639,6 +891,7 @@ async def _enrich(
                 "decided": decided,
                 "decision": status if decided else None,
                 "feedback": feedback_by_title.get(session.get("title")) if decided else None,
+                "participants": participants_by_session.get(str(session.get("id") or ""), []),
             }
         )
     return out

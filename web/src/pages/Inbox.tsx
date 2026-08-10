@@ -10,6 +10,7 @@ import {
   Download,
   FileDown,
   Filter,
+  History,
   Inbox as InboxIcon,
   Layers,
   Mail,
@@ -17,6 +18,7 @@ import {
   Pencil,
   Plus,
   Search,
+  RotateCcw,
   Star,
   Trash2,
   Upload,
@@ -28,7 +30,9 @@ import {
   createSubmission,
   decideSubmission,
   getSessionDetail,
+  listSessionRevisions,
   removeSessionParticipant,
+  restoreSessionRevision,
   setPrimaryParticipant,
   unwrapList,
   updateSession,
@@ -38,6 +42,7 @@ import {
   type SessionAnswer,
   type SessionDetail,
   type SessionParticipant,
+  type SessionRevision,
   type SessionReviewAggregate,
   type Submission,
   type SubmissionDecision,
@@ -454,6 +459,12 @@ export function Inbox() {
     enabled: Boolean(openId),
   })
 
+  const revisionsQuery = useQuery({
+    queryKey: ['session-revisions', openId],
+    queryFn: () => listSessionRevisions(openId!),
+    enabled: Boolean(openId),
+  })
+
   // Seed the edit form from the loaded detail — never from the list row, which
   // carries no abstract and would blank it on save.
   const loadedDetail = detailQuery.data
@@ -495,6 +506,24 @@ export function Inbox() {
     onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: submissionsKey })
       queryClient.invalidateQueries({ queryKey: ['session', variables.id] })
+    },
+  })
+
+  const restoreRevision = useMutation({
+    mutationFn: (revision: SessionRevision) =>
+      restoreSessionRevision(revision.session_id, revision.id),
+    onSuccess: (session) => {
+      toast({
+        title: 'Revision restored',
+        description: `Restored ${session.title || 'the session'} and recorded the change.`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't restore revision", description: error.message }),
+    onSettled: (_data, _error, revision) => {
+      queryClient.invalidateQueries({ queryKey: submissionsKey })
+      queryClient.invalidateQueries({ queryKey: ['session', revision.session_id] })
+      queryClient.invalidateQueries({ queryKey: ['session-revisions', revision.session_id] })
     },
   })
 
@@ -1247,6 +1276,13 @@ export function Inbox() {
                     ) : null
                   }
                 />
+                <SessionHistory
+                  revisions={revisionsQuery.data ?? []}
+                  pending={revisionsQuery.isPending}
+                  error={revisionsQuery.error}
+                  restoringId={restoreRevision.isPending ? restoreRevision.variables?.id : undefined}
+                  onRestore={(revision) => restoreRevision.mutate(revision)}
+                />
               </div>
 
               <div className="border-t border-border px-6 py-4">
@@ -1688,6 +1724,77 @@ function SubmissionDetail({
         )}
       </section>
     </div>
+  )
+}
+
+function SessionHistory({
+  revisions,
+  pending,
+  error,
+  restoringId,
+  onRestore,
+}: {
+  revisions: SessionRevision[]
+  pending: boolean
+  error: Error | null
+  restoringId?: string
+  onRestore: (revision: SessionRevision) => void
+}) {
+  return (
+    <section className="mt-6 border-t border-border pt-5" data-testid="session-history">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <History className="h-4 w-4 text-muted-foreground" />
+        History
+      </h3>
+      {pending ? (
+        <div className="mt-3 space-y-2">
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-14 w-full rounded-lg" />
+        </div>
+      ) : error ? (
+        <p className="mt-2 text-sm text-muted-foreground">History is unavailable right now.</p>
+      ) : revisions.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No title or abstract edits yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {revisions.map((revision) => (
+            <li
+              key={revision.id}
+              data-testid={`session-revision-${revision.id}`}
+              className="rounded-lg border border-border px-3 py-2.5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <Badge variant="outline" className="capitalize">
+                      {revision.field === 'description' ? 'Abstract' : revision.field}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {revision.actor || 'Unknown'} · {relativeDate(revision.created_at)}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                    <span className="text-foreground/80">{revision.old_value || '(empty)'}</span>
+                    <span className="mx-1.5" aria-hidden="true">→</span>
+                    <span>{revision.new_value || '(empty)'}</span>
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={Boolean(restoringId)}
+                  onClick={() => onRestore(revision)}
+                  aria-label={`Restore ${revision.field} from ${relativeDate(revision.created_at)}`}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {restoringId === revision.id ? 'Restoring…' : 'Restore'}
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -31,16 +31,28 @@ function renderComms() {
 }
 
 describe('Communications center', () => {
+  let urls: string[]
+
   beforeEach(() => {
+    urls = []
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input)
+        urls.push(url)
         if (url.endsWith('/api/events')) return jsonResponse({ events: [EVENT] })
         if (url.endsWith('/email-templates')) return jsonResponse({ templates: [TEMPLATE] })
         if (url.includes('/recipients-preview')) {
-          return jsonResponse({ count: 1, sample: ['Ada Lovelace'] })
+          const allRoster = url.includes('all_roster=true')
+          const ada = { contact_id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' }
+          const mae = { contact_id: 'mae', name: 'Mae Jemison', email: 'mae@example.com' }
+          return jsonResponse({
+            count: allRoster ? 2 : 1,
+            sample: allRoster ? ['Ada Lovelace', 'Mae Jemison'] : ['Ada Lovelace'],
+            recipients: allRoster ? [ada, mae] : [ada],
+            available_recipients: [ada, mae],
+          })
         }
         if (url.includes('/comms/log')) return jsonResponse({ log: [] })
         return jsonResponse({}, 404)
@@ -62,5 +74,24 @@ describe('Communications center', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Compose message' }))
     expect(await screen.findByText('This will send to 1 speakers')).toBeInTheDocument()
     expect(screen.getByText('{{session_title}}')).toBeInTheDocument()
+  })
+
+  it('can target the whole roster and fine-tune individual recipients', async () => {
+    renderComms()
+    await screen.findByText("You're speaking at {{event_name}}")
+    fireEvent.click(screen.getByRole('button', { name: 'Compose message' }))
+    await screen.findByText('Recipients')
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'All speakers (roster)' }))
+    await waitFor(() =>
+      expect(urls.some((url) => url.includes('all_roster=true'))).toBe(true)
+    )
+    expect(await screen.findByText('2 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Send to Mae Jemison' })).toBeChecked()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Send to Ada Lovelace' }))
+    expect(screen.getByText('1 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Send to Ada Lovelace' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Send to Mae Jemison' })).toBeChecked()
   })
 })

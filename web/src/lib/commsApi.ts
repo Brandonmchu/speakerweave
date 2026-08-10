@@ -28,6 +28,9 @@ export interface EmailTemplateInput {
 export interface CommsAudience {
   roles?: CommsRole[]
   statuses?: CommsSessionStatus[]
+  all_roster?: boolean
+  /** When present, this exact validated event-scoped list overrides filters. */
+  contact_ids?: string[]
 }
 
 export type SendCommunicationInput =
@@ -43,6 +46,14 @@ export interface SendCommunicationResult {
 export interface RecipientsPreview {
   count: number
   sample: string[]
+  recipients?: CommsRecipient[]
+  available_recipients?: CommsRecipient[]
+}
+
+export interface CommsRecipient {
+  contact_id: string
+  name: string
+  email: string | null
 }
 
 export type CommsDeliveryStatus = 'queued' | 'sent' | 'failed' | 'cancelled'
@@ -102,6 +113,7 @@ export function recipientsPreview(
   const params = new URLSearchParams()
   audience.roles?.forEach((role) => params.append('roles', role))
   audience.statuses?.forEach((status) => params.append('statuses', status))
+  if (audience.all_roster) params.set('all_roster', 'true')
   const query = params.toString()
   return apiGet<RecipientsPreview>(
     `${eventPath(eventId)}/comms/recipients-preview${query ? `?${query}` : ''}`

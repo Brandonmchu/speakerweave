@@ -9,7 +9,7 @@
  * lib/portalApi.ts.
  */
 
-import { ApiError, apiGet, apiPost, getToken, request } from '@/lib/api'
+import { ApiError, apiGet, apiPatch, apiPost, getToken, request } from '@/lib/api'
 
 const BASE_URL = (import.meta.env.VITE_BACKEND_URL ?? '').replace(/\/$/, '')
 
@@ -58,12 +58,15 @@ export interface ContentItem {
   required: boolean
   due_at: string | null
   assignment_status: string
+  approved: boolean
   status: ContentStatus
   current_version: number
   versions_count: number
   current_file: ContentVersion | null
   comment_count: number
   updated_at: string | null
+  uploaded_at: string | null
+  session: { id: string; title: string } | null
   speaker: ContentSpeaker
 }
 
@@ -90,8 +93,11 @@ export interface ContentItemDetail {
     /** The task's deadline, a calendar day stored at UTC midnight. */
     due_at: string | null
     assignment_status: string
+    approved: boolean
     status: ContentStatus
     current_version: number
+    uploaded_at: string | null
+    session: { id: string; title: string } | null
     speaker: ContentSpeaker
   }
   versions: ContentVersion[]
@@ -156,6 +162,19 @@ export function addContentComment(
   return apiPost<{ comment: ContentComment }>(
     `/api/task-assignments/${encodeURIComponent(assignmentId)}/comments`,
     { body, notify }
+  )
+}
+
+export type ContentReviewDecision = 'approved' | 'denied'
+
+/** Explicit organizer review: approved or needs changes (stored as denied). */
+export function reviewContentItem(
+  assignmentId: string,
+  decision: ContentReviewDecision
+): Promise<{ assignment: { id: string; status: string } }> {
+  return apiPatch<{ assignment: { id: string; status: string } }>(
+    `/api/task-assignments/${encodeURIComponent(assignmentId)}/review`,
+    { decision }
   )
 }
 

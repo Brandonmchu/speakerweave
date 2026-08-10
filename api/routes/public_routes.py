@@ -544,6 +544,12 @@ class WithdrawRequest(BaseModel):
     token: str | None = Field(default=None, max_length=400)
 
 
+class SubmitterParticipantRequest(BaseModel):
+    token: str | None = Field(default=None, max_length=400)
+    name: str = Field(..., min_length=1, max_length=240)
+    email: EmailStr
+
+
 async def _require_submitter(token: str | None) -> tuple[str, str]:
     """Resolve a submitter token to ``(org_id, contact_id)`` or 401.
 
@@ -590,6 +596,29 @@ async def edit_my_submission(
     org_id, contact_id = await _require_submitter(token)
     patch = payload.model_dump(exclude_unset=True, exclude={"token"})
     return await submitter_selfservice.edit_submission(org_id, contact_id, submission_id, patch)
+
+
+@router.post("/submissions/{submission_id}/participants", status_code=201)
+@limiter.limit(RATE_PUBLIC_WRITE)
+async def add_my_submission_participant(
+    request: Request,
+    submission_id: str,
+    payload: SubmitterParticipantRequest,
+):
+    """Add a co-speaker while this token's submission remains editable."""
+    token = payload.token or request.headers.get("X-Submitter-Token")
+    org_id, contact_id = await _require_submitter(token)
+    parts = payload.name.strip().split()
+    first_name = parts[0] if parts else ""
+    last_name = " ".join(parts[1:])
+    return await submitter_selfservice.add_participant(
+        org_id,
+        contact_id,
+        submission_id,
+        email=str(payload.email),
+        first_name=first_name,
+        last_name=last_name,
+    )
 
 
 @router.post("/submissions/{submission_id}/withdraw")

@@ -9,14 +9,14 @@ import html as html_module
 import logging
 import re
 from datetime import datetime, time, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field, field_validator
 
 from auth import get_current_user_and_org, verify_org_access
-from services import crm, mailer, speaker_crm
+from services import crm, mailer, portal, session_revisions, speaker_crm
 from services.comms import DEFAULT_TEMPLATES, render_template
 from services.evaluations import session_review_aggregate, session_review_scores
 from services.forms import load_form_layout
@@ -737,7 +737,7 @@ async def update_session(
     existing = first(
         await db(
             lambda: supabase.table("sessions")
-            .select("id, org_id, event_id, status")
+            .select("id, org_id, event_id, status, title, description")
             .eq("id", session_id)
             .eq("org_id", org_id)
             .limit(1)
@@ -761,6 +761,14 @@ async def update_session(
     if not updated:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    await session_revisions.record_changes(
+        org_id,
+        session_id,
+        existing or {},
+        values,
+        actor="Organizer",
+    )
+
     # Acceptance means the same thing on every path: a status flipped to
     # 'accepted' here (the tab/status dropdown) provisions the speaker's
     # onboarding exactly like the dedicated decision endpoint — idempotent
@@ -777,6 +785,34 @@ async def update_session(
             logger.exception("session PATCH: onboarding provisioning failed session=%s", session_id)
 
     return {"session": updated}
+
+
+@router.get("/sessions/{session_id}/revisions")
+async def get_session_revisions(
+    session_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Newest-first title/description changes for one org-owned session."""
+    _user_id, org_id = auth
+    await fetch_scoped("sessions", session_id, org_id, "Session")
+    return {"revisions": await session_revisions.list_revisions(org_id, session_id)}
+
+
+@router.post("/sessions/{session_id}/revisions/{revision_id}/restore")
+async def restore_session_revision(
+    session_id: str,
+    revision_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Restore one old value; the restore itself becomes the newest revision."""
+    _user_id, org_id = auth
+    session = await session_revisions.restore_revision(
+        org_id,
+        session_id,
+        revision_id,
+        actor="Organizer",
+    )
+    return {"session": session}
 
 
 # ── session participants (ABS-11) ──────────────────────────────────────────
@@ -1818,3 +1854,18 @@ async def update_speaker(
     # rather than undefined.
     updated.setdefault("speaker_status", None)
     return {"speaker": updated}
+
+
+@router.post("/events/{event_id}/speakers/{contact_id}/photo")
+async def upload_speaker_photo(
+    event_id: str,
+    contact_id: str,
+    file: Annotated[UploadFile, File()],
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Replace a speaker photo with the portal's validation + version history."""
+    _user_id, org_id = auth
+    await fetch_event(event_id, org_id)
+    await _fetch_event_contact(event_id, contact_id, org_id)
+    content = await file.read()
+    return await portal.set_headshot(org_id, contact_id, file.filename, content)

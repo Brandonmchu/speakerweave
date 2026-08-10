@@ -39,6 +39,7 @@ A_BEN_BIO = "44444444-4444-4444-4444-4444444400b2"
 A_FOREIGN = "44444444-4444-4444-4444-4444444400ff"
 
 FILE_ADA_SLIDES = "66666666-6666-6666-6666-6666666600s1"
+SESSION_SLIDES = "99999999-9999-9999-9999-9999999900s1"
 
 
 @pytest.fixture(autouse=True)
@@ -63,11 +64,20 @@ def content_db(seeded_db):
         {"id": BEN, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "first_name": "Ben", "last_name": "Franklin", "email": "ben@example.com"},
     )
     db.seed(
+        "sessions",
+        {
+            "id": SESSION_SLIDES,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Analytical Engines in Practice",
+        },
+    )
+    db.seed(
         "tasks",
         # Due dates are calendar days stored at UTC midnight — the same two the
         # official eval creates ("Upload Session Presentation" due 2027-05-01,
         # the headshot due 2027-04-14).
-        {"id": T_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Upload slides", "required": True, "order": 0, "due_at": "2027-05-01T00:00:00+00:00"},
+        {"id": T_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "session_id": SESSION_SLIDES, "kind": "file_request", "name": "Upload slides", "required": True, "order": 0, "due_at": "2027-05-01T00:00:00+00:00"},
         {"id": T_HEADSHOT, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Headshot photo", "required": True, "order": 1, "due_at": "2027-04-14T00:00:00+00:00"},
         {"id": T_BIO, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Speaker bio", "required": False, "order": 2},
         # Foreign org's task — must never leak into TEST_ORG's library.
@@ -83,7 +93,7 @@ def content_db(seeded_db):
     )
     db.seed(
         "files",
-        {"id": FILE_ADA_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "contact_id": ADA, "task_assignment_id": A_ADA_SLIDES, "bucket_path": "seed/ada-slides-v1.pdf", "filename": "slides.pdf", "mimetype": "application/pdf", "size": 12, "version": 1},
+        {"id": FILE_ADA_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "contact_id": ADA, "task_assignment_id": A_ADA_SLIDES, "bucket_path": "seed/ada-slides-v1.pdf", "filename": "slides.pdf", "mimetype": "application/pdf", "size": 12, "version": 1, "created_at": "2026-08-09T15:30:00+00:00"},
     )
     return db
 
@@ -298,6 +308,50 @@ def test_library_rows_carry_their_due_dates(client, auth_headers, content_db):
     assert by_id[A_ADA_HEADSHOT]["due_at"] == "2027-04-14T00:00:00+00:00"
     # A task with no deadline reports null rather than being dropped.
     assert by_id[A_BEN_BIO]["due_at"] is None
+
+
+def test_library_uses_linked_session_and_real_upload_timestamp(
+    client, auth_headers, content_db
+):
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/content", headers=auth_headers).json()
+    slides = next(item for item in body["items"] if item["item_id"] == A_ADA_SLIDES)
+    assert slides["session"] == {
+        "id": SESSION_SLIDES,
+        "title": "Analytical Engines in Practice",
+    }
+    assert slides["uploaded_at"] == "2026-08-09T15:30:00+00:00"
+    assert slides["uploaded_at"] != slides["due_at"]
+
+    detail = client.get(
+        f"/api/task-assignments/{A_ADA_SLIDES}/content", headers=auth_headers
+    ).json()["item"]
+    assert detail["session"]["id"] == SESSION_SLIDES
+    assert detail["uploaded_at"] == "2026-08-09T15:30:00+00:00"
+
+
+def test_approval_is_explicit_in_library_detail_and_speaker_portal(
+    client, auth_headers, content_db
+):
+    approved = client.patch(
+        f"/api/task-assignments/{A_ADA_SLIDES}/review",
+        headers=auth_headers,
+        json={"decision": "approved"},
+    )
+    assert approved.status_code == 200
+
+    library = client.get(f"/api/events/{TEST_EVENT_ID}/content", headers=auth_headers).json()
+    row = next(item for item in library["items"] if item["item_id"] == A_ADA_SLIDES)
+    assert row["approved"] is True
+    assert row["status"] == "received"
+
+    detail = client.get(
+        f"/api/task-assignments/{A_ADA_SLIDES}/content", headers=auth_headers
+    ).json()
+    assert detail["item"]["approved"] is True
+
+    portal = client.get("/public/portal/me", headers=_cookie(ADA)).json()
+    task = next(task for task in portal["tasks"] if task["assignment_id"] == A_ADA_SLIDES)
+    assert task["status"] == "approved"
 
 
 # ── library (org-scoped list + filters) ──────────────────────────────────────

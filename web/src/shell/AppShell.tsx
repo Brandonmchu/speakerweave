@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
   CalendarDays,
@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
+  Plus,
   Search,
   Settings,
   Star,
@@ -23,7 +24,9 @@ import {
 } from 'lucide-react'
 
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
+import { createEvent } from '@/lib/adminApi'
 import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
+import { fromDateInput, localTimezone, timezoneOptions } from '@/pages/SettingsPage'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -35,6 +38,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/dialog'
+import { Input } from '@/ui/input'
+import { Label } from '@/ui/label'
+import { NativeSelect } from '@/ui/native-select'
+import { toast } from '@/ui/use-toast'
 
 interface NavItem {
   label: string
@@ -78,6 +93,8 @@ const NAV: NavSection[] = [
   { label: 'Configure', items: [{ label: 'Settings', to: '/settings', icon: Settings }] },
 ]
 
+const ACTIVE_EVENT_KEY = 'dais.active-event-id'
+
 function formatEventDates(event?: EventSummary): string {
   if (!event?.starts_at) return 'No dates set'
   const start = new Date(event.starts_at)
@@ -113,15 +130,82 @@ function isDemoSession(): boolean {
 
 export function AppShell() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [activeEventId, setActiveEventId] = useState(() => {
+    try {
+      return window.localStorage.getItem(ACTIVE_EVENT_KEY)
+    } catch {
+      return null
+    }
+  })
+  const [newEventOpen, setNewEventOpen] = useState(false)
+  const [newEventName, setNewEventName] = useState('')
+  const [newEventStart, setNewEventStart] = useState('')
+  const [newEventEnd, setNewEventEnd] = useState('')
+  const [newEventTimezone, setNewEventTimezone] = useState(() => localTimezone())
+  const [newEventLocation, setNewEventLocation] = useState('')
 
   // Shared with Inbox via the same query key — one fetch, both consumers.
   const { data } = useQuery({
     queryKey: ['events'],
     queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
   })
-  const event = data?.[0]
+  const events = data ?? []
+  const event = events.find((candidate) => candidate.id === activeEventId) ?? events[0]
   const eventInitial = initialOf(event?.name)
   const isDemo = isDemoSession()
+
+  const switchEvent = (eventId: string) => {
+    setActiveEventId(eventId)
+    try {
+      window.localStorage.setItem(ACTIVE_EVENT_KEY, eventId)
+    } catch {
+      // Selection remains active for this browser session even if storage fails.
+    }
+    queryClient.setQueryData<EventSummary[]>(['events'], (current = []) => {
+      const selected = current.find((candidate) => candidate.id === eventId)
+      return selected
+        ? [selected, ...current.filter((candidate) => candidate.id !== eventId)]
+        : current
+    })
+  }
+
+  // Every event-scoped page reads the first row from the shared cache. Honor a
+  // persisted selection by moving it to the front once the list arrives.
+  useEffect(() => {
+    if (event && events[0]?.id !== event.id) switchEvent(event.id)
+  }, [event?.id, events[0]?.id])
+
+  const resetNewEvent = () => {
+    setNewEventName('')
+    setNewEventStart('')
+    setNewEventEnd('')
+    setNewEventTimezone(localTimezone())
+    setNewEventLocation('')
+  }
+
+  const create = useMutation({
+    mutationFn: () =>
+      createEvent({
+        name: newEventName.trim(),
+        timezone: newEventTimezone || null,
+        starts_at: fromDateInput(newEventStart, newEventTimezone),
+        ends_at: fromDateInput(newEventEnd, newEventTimezone, true),
+        location: newEventLocation.trim() || null,
+      }),
+    onSuccess: (created) => {
+      queryClient.setQueryData<EventSummary[]>(['events'], (current = []) => [
+        created,
+        ...current.filter((candidate) => candidate.id !== created.id),
+      ])
+      switchEvent(created.id)
+      setNewEventOpen(false)
+      resetNewEvent()
+      toast({ title: 'Event created', description: `${created.name} is now selected.` })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't create event", description: error.message }),
+  })
 
   // The shell owns the viewport; public pages keep natural document flow.
   useEffect(() => {
@@ -172,12 +256,23 @@ export function AppShell() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={6} className="w-[13.5rem]">
               <DropdownMenuLabel>Events</DropdownMenuLabel>
-              <DropdownMenuItem className="gap-2.5">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground">
-                  {eventInitial}
-                </div>
-                <span className="min-w-0 flex-1 truncate">{event?.name ?? 'No event yet'}</span>
-                <Check className="h-4 w-4 shrink-0 text-primary" />
+              {events.map((candidate) => (
+                <DropdownMenuItem
+                  key={candidate.id}
+                  className="gap-2.5"
+                  onSelect={() => switchEvent(candidate.id)}
+                >
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground">
+                    {initialOf(candidate.name)}
+                  </div>
+                  <span className="min-w-0 flex-1 truncate">{candidate.name}</span>
+                  {candidate.id === event?.id && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="gap-2.5" onSelect={() => setNewEventOpen(true)}>
+                <Plus className="h-4 w-4" />
+                New event
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -302,6 +397,70 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      <Dialog open={newEventOpen} onOpenChange={(open) => !create.isPending && setNewEventOpen(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create a new event</DialogTitle>
+            <DialogDescription>Add the event basics now. You can configure the program after.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(submitEvent) => {
+              submitEvent.preventDefault()
+              if (newEventName.trim()) create.mutate()
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="new-event-name" required>Name</Label>
+              <Input
+                id="new-event-name"
+                value={newEventName}
+                maxLength={200}
+                autoFocus
+                onChange={(inputEvent) => setNewEventName(inputEvent.target.value)}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-event-start">Start date</Label>
+                <Input id="new-event-start" type="date" value={newEventStart} onChange={(inputEvent) => setNewEventStart(inputEvent.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="new-event-end">End date</Label>
+                <Input id="new-event-end" type="date" value={newEventEnd} min={newEventStart || undefined} onChange={(inputEvent) => setNewEventEnd(inputEvent.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-event-timezone">Timezone</Label>
+              <NativeSelect
+                id="new-event-timezone"
+                value={newEventTimezone}
+                onValueChange={setNewEventTimezone}
+                options={timezoneOptions(newEventTimezone).map((timezone) => ({ value: timezone, label: timezone }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-event-location">Location</Label>
+              <Input
+                id="new-event-location"
+                value={newEventLocation}
+                maxLength={300}
+                placeholder="Venue or online"
+                onChange={(inputEvent) => setNewEventLocation(inputEvent.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" disabled={create.isPending} onClick={() => setNewEventOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newEventName.trim() || create.isPending}>
+                {create.isPending ? 'Creating…' : 'Create event'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

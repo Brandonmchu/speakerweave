@@ -451,6 +451,96 @@ def test_patch_session_edits_title_and_abstract(client, auth_headers, submission
     assert row["updated_at"]  # the edit stamps the row
 
 
+def test_session_edits_are_listed_and_restorable(client, auth_headers, submission_db):
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"title": "A revised title", "description": "A revised abstract."},
+    )
+    assert response.status_code == 200
+
+    history = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=auth_headers
+    )
+    assert history.status_code == 200
+    revisions = history.json()["revisions"]
+    assert {revision["field"] for revision in revisions} == {"title", "description"}
+    assert {revision["actor"] for revision in revisions} == {"Organizer"}
+
+    title_revision = next(revision for revision in revisions if revision["field"] == "title")
+    assert title_revision["old_value"] == "Scaling LLM inference"
+    assert title_revision["new_value"] == "A revised title"
+
+    restored = client.post(
+        f"/api/sessions/{SESSION_ID}/revisions/{title_revision['id']}/restore",
+        headers=auth_headers,
+    )
+    assert restored.status_code == 200
+    assert restored.json()["session"]["title"] == "Scaling LLM inference"
+
+    latest = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=auth_headers
+    ).json()["revisions"]
+    restore_revision = next(
+        revision
+        for revision in latest
+        if revision["field"] == "title"
+        and revision["old_value"] == "A revised title"
+        and revision["new_value"] == "Scaling LLM inference"
+    )
+    assert restore_revision["actor"] == "Organizer"
+
+
+def test_session_history_is_org_scoped(client, auth_headers, submission_db):
+    submission_db.seed(
+        "session_revisions",
+        {
+            "id": "revision-foreign",
+            "org_id": OTHER_ORG_ID,
+            "session_id": SESSION_ID,
+            "field": "title",
+            "old_value": "Private",
+            "new_value": "Still private",
+            "actor": "Organizer",
+        },
+    )
+
+    history = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=auth_headers
+    ).json()["revisions"]
+    assert history == []
+    assert client.post(
+        f"/api/sessions/{SESSION_ID}/revisions/revision-foreign/restore",
+        headers=auth_headers,
+    ).status_code == 404
+
+
+def test_session_edit_survives_when_revision_table_is_not_migrated(
+    client, auth_headers, submission_db, monkeypatch
+):
+    from services import session_revisions
+
+    class WithoutRevisionTable:
+        def table(self, name):
+            if name == "session_revisions":
+                raise RuntimeError("relation session_revisions does not exist")
+            return submission_db.table(name)
+
+    monkeypatch.setattr(session_revisions, "supabase", WithoutRevisionTable())
+    edited = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"title": "Saved without migration"},
+    )
+    assert edited.status_code == 200
+    assert submission_db.rows("sessions")[0]["title"] == "Saved without migration"
+    history = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=auth_headers
+    )
+    assert history.status_code == 200
+    assert history.json() == {"revisions": []}
+
+
 def test_patch_status_to_accepted_provisions_onboarding(
     client, auth_headers, submission_db, monkeypatch
 ):

@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, CalendarClock, CheckCircle2, Pencil, Inbox as InboxIcon } from 'lucide-react'
+import { AlertCircle, CalendarClock, CheckCircle2, Pencil, Inbox as InboxIcon, UserPlus, Users } from 'lucide-react'
 
 import {
+  addSubmitterParticipant,
   editSubmitterSubmission,
   getSubmitterSubmissions,
   withdrawSubmitterSubmission,
@@ -262,8 +263,129 @@ function SubmissionCard({
             }}
           />
         )}
+
+        <ParticipantsSection token={token} submission={submission} />
       </div>
     </article>
+  )
+}
+
+function ParticipantsSection({
+  token,
+  submission,
+}: {
+  token: string
+  submission: SubmitterSubmission
+}) {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const participants = submission.participants ?? []
+  const atLimit = participants.length >= 3
+
+  const add = useMutation({
+    mutationFn: () =>
+      addSubmitterParticipant(submission.id, token, {
+        name: name.trim(),
+        email: email.trim(),
+      }),
+    onSuccess: async () => {
+      setName('')
+      setEmail('')
+      await queryClient.invalidateQueries({ queryKey: ['submitter-submissions', token] })
+    },
+  })
+
+  return (
+    <section className="mt-5 border-t border-border pt-4" data-testid={`submitter-participants-${submission.id}`}>
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+        <Users className="h-4 w-4 text-muted-foreground" />
+        Participants ({participants.length})
+      </h3>
+      {participants.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No participants are linked yet.</p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {participants.map((participant) => (
+            <li
+              key={participant.contact_id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{participant.name}</p>
+                {participant.email && (
+                  <p className="truncate text-xs text-muted-foreground">{participant.email}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {participant.is_primary && <Badge variant="default">Primary</Badge>}
+                <Badge variant="outline" className="capitalize">
+                  {(participant.roles?.length ? participant.roles : [participant.role])
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Badge>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {submission.editable && (
+        <form
+          className="mt-3 grid gap-2 sm:grid-cols-[1fr_1.2fr_auto]"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!name.trim() || !email.trim() || atLimit) return
+            add.mutate()
+          }}
+        >
+          <div>
+            <Label htmlFor={`co-speaker-name-${submission.id}`} className="sr-only">
+              Co-speaker name
+            </Label>
+            <Input
+              id={`co-speaker-name-${submission.id}`}
+              aria-label="Co-speaker name"
+              value={name}
+              maxLength={240}
+              placeholder="Co-speaker name"
+              disabled={add.isPending || atLimit}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor={`co-speaker-email-${submission.id}`} className="sr-only">
+              Co-speaker email
+            </Label>
+            <Input
+              id={`co-speaker-email-${submission.id}`}
+              aria-label="Co-speaker email"
+              type="email"
+              value={email}
+              placeholder="co-speaker@example.com"
+              disabled={add.isPending || atLimit}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!name.trim() || !email.trim() || add.isPending || atLimit}
+          >
+            <UserPlus className="h-4 w-4" />
+            {add.isPending ? 'Adding…' : 'Add'}
+          </Button>
+          {atLimit && (
+            <p className="text-xs text-muted-foreground sm:col-span-3">
+              This submission already has the maximum of 3 participants.
+            </p>
+          )}
+          {add.error && (
+            <p className="text-sm text-destructive sm:col-span-3">{(add.error as Error).message}</p>
+          )}
+        </form>
+      )}
+    </section>
   )
 }
 

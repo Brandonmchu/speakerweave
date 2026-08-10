@@ -39,7 +39,7 @@ def admin_db(seeded_db):
     db = seeded_db
     db.seed(
         "contacts",
-        {"id": ADA, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com", "last_portal_access_at": "2026-08-01T00:00:00+00:00"},
+        {"id": ADA, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com", "title": "Chief Scientist", "company_name": "Analytical Engines", "last_portal_access_at": "2026-08-01T00:00:00+00:00"},
         {"id": BEN, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "first_name": "Ben", "last_name": "Franklin", "email": "ben@example.com"},
         {"id": FOREIGN, "org_id": OTHER_ORG_ID, "event_id": OTHER_EVENT_ID, "first_name": "Foreign", "last_name": "Speaker", "email": "foreign@example.com"},
     )
@@ -56,7 +56,7 @@ def admin_db(seeded_db):
     )
     db.seed(
         "tasks",
-        {"id": T_FILE, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Upload slides"},
+        {"id": T_FILE, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Upload slides", "required": False, "due_at": "2026-09-01T00:00:00+00:00"},
     )
     db.seed(
         "task_assignments",
@@ -85,6 +85,19 @@ def test_speakers_aggregation(client, auth_headers, admin_db):
     assert ada["tasks_total"] == 1
     assert ada["tasks_done"] == 0  # 'submitted' is not done
     assert ada["tasks_outstanding"] == 1
+    assert ada["title"] == "Chief Scientist"
+    assert ada["company_name"] == "Analytical Engines"
+    assert ada["tasks"] == [
+        {
+            "assignment_id": ASSIGN_ADA_FILE,
+            "task_id": T_FILE,
+            "name": "Upload slides",
+            "status": "submitted",
+            "done": False,
+            "required": False,
+            "due_at": "2026-09-01T00:00:00+00:00",
+        }
+    ]
     assert ada["invited"] is True
     assert ada["last_portal_access_at"]
 
@@ -202,6 +215,40 @@ def test_review_rejects_bad_decision(client, auth_headers, admin_db):
         json={"decision": "maybe"},
     )
     assert resp.status_code == 400
+
+
+def test_admin_photo_upload_uses_validation_and_versioned_files(
+    client, auth_headers, admin_db
+):
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    first = client.post(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}/photo",
+        headers=auth_headers,
+        files={"file": ("ada.png", png, "image/png")},
+    )
+    second = client.post(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}/photo",
+        headers=auth_headers,
+        files={"file": ("ada-new.png", png, "image/png")},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    ada = next(contact for contact in admin_db.rows("contacts") if contact["id"] == ADA)
+    assert ada["photo_url"] == second.json()["photo_url"]
+    versions = sorted(
+        row["version"]
+        for row in admin_db.rows("files")
+        if row.get("contact_id") == ADA and row.get("task_assignment_id") is None
+    )
+    assert versions == [1, 2]
+
+    rejected = client.post(
+        f"/api/events/{TEST_EVENT_ID}/speakers/{ADA}/photo",
+        headers=auth_headers,
+        files={"file": ("notes.pdf", b"%PDF-1.7", "application/pdf")},
+    )
+    assert rejected.status_code == 400
 
 
 # ── regressions: the roster is the event's people, not just its stage ────────

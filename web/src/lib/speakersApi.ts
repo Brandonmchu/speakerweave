@@ -19,7 +19,18 @@ export interface EventSpeaker {
   tasks_total: number
   tasks_done: number
   tasks_outstanding: number
+  tasks?: EventSpeakerTask[]
   invited: boolean
+}
+
+export interface EventSpeakerTask {
+  assignment_id: string
+  task_id: string
+  name: string
+  status: string | null
+  done: boolean
+  due_at: string | null
+  required: boolean
 }
 
 export interface EventSpeakers {

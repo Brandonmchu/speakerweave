@@ -251,6 +251,102 @@ def test_edit_updates_title_and_abstract(client, selfservice_db):
     assert row["title"] == "Faster inference"
     assert row["description"] == "Rewritten."
     assert resp.json()["submission"]["title"] == "Faster inference"
+    revisions = selfservice_db.rows("session_revisions")
+    assert {revision["field"] for revision in revisions} == {"title", "description"}
+    assert {revision["actor"] for revision in revisions} == {"Submitter"}
+
+
+def test_manage_payload_dedupes_participant_roles(client, selfservice_db):
+    co_speaker_id = "99999999-9999-9999-9999-9999999999c3"
+    selfservice_db.seed(
+        "contacts",
+        {
+            "id": co_speaker_id,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "email": "grace@example.com",
+            "first_name": "Grace",
+            "last_name": "Hopper",
+        },
+    )
+    selfservice_db.seed(
+        "session_participants",
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": SESSION_ID,
+            "contact_id": CONTACT_ID,
+            "role": "speaker",
+            "is_primary": True,
+        },
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": SESSION_ID,
+            "contact_id": CONTACT_ID,
+            "role": "submitter",
+            "is_primary": True,
+        },
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": SESSION_ID,
+            "contact_id": co_speaker_id,
+            "role": "speaker",
+            "is_primary": False,
+        },
+    )
+    seed_token(selfservice_db)
+
+    submission = client.get(
+        f"/public/submissions?token={RAW_TOKEN}"
+    ).json()["submissions"][0]
+    assert len(submission["participants"]) == 2
+    submitter = next(
+        person for person in submission["participants"] if person["contact_id"] == CONTACT_ID
+    )
+    assert submitter["roles"] == ["speaker", "submitter"]
+    assert submitter["is_primary"] is True
+    assert submission["participants"][1]["name"] == "Grace Hopper"
+
+
+def test_submitter_can_add_a_co_speaker_until_the_three_person_cap(
+    client, selfservice_db
+):
+    seed_token(selfservice_db)
+    added = client.post(
+        f"/public/submissions/{SESSION_ID}/participants",
+        json={"token": RAW_TOKEN, "name": "Grace Hopper", "email": "grace@example.com"},
+    )
+    assert added.status_code == 201
+    assert {person["email"] for person in added.json()["participants"]} == {
+        "ada@example.com",
+        "grace@example.com",
+    }
+    created = next(
+        row for row in selfservice_db.rows("session_participants")
+        if row.get("contact_id") != CONTACT_ID
+    )
+    assert created["role"] == "speaker"
+    assert created["is_primary"] is False
+
+    second = client.post(
+        f"/public/submissions/{SESSION_ID}/participants",
+        json={"token": RAW_TOKEN, "name": "Katherine Johnson", "email": "kj@example.com"},
+    )
+    assert second.status_code == 201
+    capped = client.post(
+        f"/public/submissions/{SESSION_ID}/participants",
+        json={"token": RAW_TOKEN, "name": "Mae Jemison", "email": "mae@example.com"},
+    )
+    assert capped.status_code == 400
+
+
+def test_submitter_cannot_add_a_participant_after_close(client, selfservice_db):
+    set_form_close(selfservice_db, PAST)
+    seed_token(selfservice_db)
+    response = client.post(
+        f"/public/submissions/{SESSION_ID}/participants",
+        json={"token": RAW_TOKEN, "name": "Grace Hopper", "email": "grace@example.com"},
+    )
+    assert response.status_code == 403
 
 
 def test_edit_keeps_description_and_abstract_form_answer_in_sync(

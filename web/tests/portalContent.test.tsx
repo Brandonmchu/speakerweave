@@ -94,6 +94,26 @@ afterEach(() => {
 })
 
 describe('Portal content pipeline', () => {
+  it('shows an organizer-approved file as Approved to the speaker', async () => {
+    const approved = structuredClone(ME)
+    approved.tasks[0].status = 'approved'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url)
+        if (u.includes('/public/session/redeem')) {
+          return json({ purpose: 'portal', org_id: 'o1', contact_id: 'c1' })
+        }
+        if (u.includes('/public/portal/me')) return json(approved)
+        return json({})
+      })
+    )
+
+    renderPortal()
+    expect(await screen.findByText('Approved')).toBeInTheDocument()
+    expect(screen.queryByTestId('upload-input')).not.toBeInTheDocument()
+  })
+
   it('shows the current version, prior versions, organizer feedback, and lets the speaker reply', async () => {
     renderPortal()
 

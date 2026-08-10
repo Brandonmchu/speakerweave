@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
@@ -6,10 +6,13 @@ import {
   Building2,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   Clock,
+  Circle,
   Download,
   FileText,
   Mail,
+  ImagePlus,
   MapPin,
   MessageSquare,
   Pencil,
@@ -29,6 +32,7 @@ import {
   listSpeakerStatuses,
   unwrapList,
   updateSpeaker,
+  uploadSpeakerPhoto,
   type EventSummary,
   type SpeakerImportResult,
   type SpeakerProfile,
@@ -112,6 +116,7 @@ export function Speakers() {
   const [inviteFilter, setInviteFilter] = useState<InviteFilter>('all')
   const [workflowFilter, setWorkflowFilter] = useState<WorkflowFilter>('all')
   const [openContactId, setOpenContactId] = useState<string | null>(null)
+  const [expandedContactId, setExpandedContactId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
 
@@ -408,8 +413,8 @@ export function Speakers() {
             </TableHeader>
             <TableBody>
               {filtered.map((speaker) => (
+                <Fragment key={speaker.contact_id}>
                 <TableRow
-                  key={speaker.contact_id}
                   data-testid={`speaker-row-${speaker.contact_id}`}
                   data-state={selected.has(speaker.contact_id) ? 'selected' : undefined}
                 >
@@ -429,6 +434,11 @@ export function Speakers() {
                       <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
                       <div className="min-w-0">
                         <div className="truncate font-medium text-foreground group-hover:underline">{speaker.name}</div>
+                        {(speaker.title || speaker.company_name) && (
+                          <div className="mt-0.5 truncate text-xs text-foreground/75">
+                            {[speaker.title, speaker.company_name].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
                         {speaker.email && (
                           <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                             <Mail className="h-3 w-3 shrink-0" />
@@ -445,7 +455,15 @@ export function Speakers() {
                     {speaker.session_count}
                   </TableCell>
                   <TableCell>
-                    <OnboardingCell speaker={speaker} />
+                    <OnboardingCell
+                      speaker={speaker}
+                      expanded={expandedContactId === speaker.contact_id}
+                      onToggle={() =>
+                        setExpandedContactId((current) =>
+                          current === speaker.contact_id ? null : speaker.contact_id
+                        )
+                      }
+                    />
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {relative(speaker.last_portal_access_at)}
@@ -462,6 +480,14 @@ export function Speakers() {
                     </Button>
                   </TableCell>
                 </TableRow>
+                {expandedContactId === speaker.contact_id && (
+                  <TableRow data-testid={`speaker-tasks-${speaker.contact_id}`} className="hover:bg-transparent">
+                    <TableCell colSpan={7} className="bg-muted/25 px-6 py-3">
+                      <SpeakerTaskList speaker={speaker} />
+                    </TableCell>
+                  </TableRow>
+                )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -659,6 +685,17 @@ function SpeakerProfileBody({
       toast({ variant: 'destructive', title: "Couldn't save", description: error.message }),
   })
 
+  const photo = useMutation({
+    mutationFn: (file: File) => uploadSpeakerPhoto(eventId, speaker.contact_id, file),
+    onSuccess: () => {
+      toast({ title: 'Speaker photo updated', description: `${speaker.name}'s new photo is saved.` })
+      queryClient.invalidateQueries({ queryKey: ['speakerProfile', eventId, speaker.contact_id] })
+      onChanged()
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't upload photo", description: error.message }),
+  })
+
   /**
    * The workflow status saves on change — one control, one click, no edit mode.
    * It is the field an organizer updates most often (a speaker replies, you
@@ -749,6 +786,38 @@ function SpeakerProfileBody({
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-app px-6 py-5">
         {editing ? (
           <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/25 p-3">
+              <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">Speaker photo</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Images are checked for type and size before upload.
+                </p>
+              </div>
+              <label
+                htmlFor={`speaker-photo-${speaker.contact_id}`}
+                className={cn(
+                  'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent',
+                  photo.isPending && 'pointer-events-none opacity-50'
+                )}
+              >
+                <ImagePlus className="h-4 w-4" />
+                {photo.isPending ? 'Uploading…' : speaker.photo_url ? 'Replace' : 'Add photo'}
+              </label>
+              <input
+                id={`speaker-photo-${speaker.contact_id}`}
+                data-testid="speaker-photo-input"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={photo.isPending}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) photo.mutate(file)
+                  event.target.value = ''
+                }}
+              />
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="edit-first">First name</Label>
@@ -1435,14 +1504,29 @@ function taskStatusLabel(status: string | null): string {
   }
 }
 
-function OnboardingCell({ speaker }: { speaker: EventSpeaker }) {
+function OnboardingCell({
+  speaker,
+  expanded,
+  onToggle,
+}: {
+  speaker: EventSpeaker
+  expanded: boolean
+  onToggle: () => void
+}) {
   if (speaker.tasks_total === 0) {
     return <span className="text-sm text-muted-foreground">No tasks</span>
   }
   const complete = speaker.tasks_outstanding === 0
   const pct = Math.round((speaker.tasks_done / speaker.tasks_total) * 100)
   return (
-    <div className="flex items-center gap-2">
+    <button
+      type="button"
+      data-testid={`speaker-progress-${speaker.contact_id}`}
+      aria-expanded={expanded}
+      aria-label={`${expanded ? 'Hide' : 'Show'} tasks for ${speaker.name}`}
+      onClick={onToggle}
+      className="flex items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+    >
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
         <div
           className={complete ? 'h-full bg-success' : 'h-full bg-primary'}
@@ -1459,7 +1543,37 @@ function OnboardingCell({ speaker }: { speaker: EventSpeaker }) {
           {speaker.tasks_done}/{speaker.tasks_total}
         </span>
       )}
-    </div>
+      <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+    </button>
+  )
+}
+
+function SpeakerTaskList({ speaker }: { speaker: EventSpeaker }) {
+  const tasks = speaker.tasks ?? []
+  if (tasks.length === 0) {
+    return <p className="text-sm text-muted-foreground">Task details are not available yet.</p>
+  }
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2" aria-label={`Tasks for ${speaker.name}`}>
+      {tasks.map((task) => (
+        <li key={task.assignment_id || task.task_id} className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2">
+          {task.done ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+          ) : (
+            <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className={cn('truncate text-sm', task.done ? 'text-muted-foreground line-through' : 'text-foreground')}>
+              {task.name}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {task.done ? 'Done' : task.status === 'submitted' ? 'In review' : task.status === 'denied' ? 'Needs changes' : 'Not done'}
+              {task.due_at ? ` · ${dueLabel(task.due_at)}` : ''}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }
 

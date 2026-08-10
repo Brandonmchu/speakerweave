@@ -207,30 +207,30 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
     # task progress: the event's tasks, then those tasks' assignments to these
     # contacts — two grouped queries, aggregated in memory.
     task_ids: list[str] = []
+    tasks_by_id: dict[str, dict] = {}
     if contact_ids:
-        task_ids = sorted(
-            {
-                t["id"]
-                for t in rows(
-                    await db(
-                        lambda: supabase.table("tasks")
-                        .select("id")
-                        .eq("org_id", org_id)
-                        .eq("event_id", event_id)
-                        .execute(),
-                        "speakers_tasks",
-                    )
+        tasks_by_id = {
+            str(task["id"]): task
+            for task in rows(
+                await db(
+                    lambda: supabase.table("tasks")
+                    .select("id, name, due_at, required")
+                    .eq("org_id", org_id)
+                    .eq("event_id", event_id)
+                    .execute(),
+                    "speakers_tasks",
                 )
-                if t.get("id")
-            }
-        )
+            )
+            if task.get("id")
+        }
+        task_ids = sorted(tasks_by_id)
 
     assignments: list[dict] = []
     if task_ids and contact_ids:
         assignments = rows(
             await db(
                 lambda: supabase.table("task_assignments")
-                .select("task_id, contact_id, status")
+                .select("id, task_id, contact_id, status")
                 .eq("org_id", org_id)
                 .in_("task_id", task_ids)
                 .in_("contact_id", contact_ids)
@@ -240,13 +240,30 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
         )
     total_by_contact: dict[str, int] = defaultdict(int)
     done_by_contact: dict[str, int] = defaultdict(int)
+    tasks_by_contact: dict[str, list[dict]] = defaultdict(list)
     for assignment in assignments:
         contact_id = assignment.get("contact_id")
         if contact_id not in roster_ids:
             continue
+        task = tasks_by_id.get(str(assignment.get("task_id") or ""), {})
+        done = assignment.get("status") in DONE_STATUSES
         total_by_contact[contact_id] += 1
-        if assignment.get("status") in DONE_STATUSES:
+        if done:
             done_by_contact[contact_id] += 1
+        tasks_by_contact[contact_id].append(
+            {
+                "assignment_id": assignment.get("id"),
+                "task_id": assignment.get("task_id"),
+                "name": task.get("name") or "Task",
+                "status": assignment.get("status"),
+                "done": done,
+                "due_at": task.get("due_at"),
+                "required": bool(task.get("required")),
+            }
+        )
+
+    for task_list in tasks_by_contact.values():
+        task_list.sort(key=lambda task: (task["done"], str(task["name"]).casefold()))
 
     invited: set[str] = set()
     if contact_ids:
@@ -284,6 +301,7 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
                 "tasks_total": total,
                 "tasks_done": done,
                 "tasks_outstanding": max(total - done, 0),
+                "tasks": tasks_by_contact.get(contact_id, []),
                 "invited": contact_id in invited,
             }
         )

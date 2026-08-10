@@ -145,9 +145,10 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, anonymous = path.startsWith('/public'), headers, ...init } = options
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
 
   const finalHeaders = new Headers(headers)
-  if (body !== undefined && !finalHeaders.has('Content-Type')) {
+  if (body !== undefined && !isFormData && !finalHeaders.has('Content-Type')) {
     finalHeaders.set('Content-Type', 'application/json')
   }
   if (!anonymous) {
@@ -163,7 +164,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
       headers: finalHeaders,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
     })
   } catch {
     throw new ApiError("Can't reach the server. Check your connection and try again.", 0)
@@ -503,6 +504,16 @@ export interface SessionDetail {
   reviews: SessionReviewAggregate
 }
 
+export interface SessionRevision {
+  id: string
+  session_id: string
+  field: 'title' | 'description'
+  old_value: string | null
+  new_value: string | null
+  actor: string
+  created_at: string | null
+}
+
 /** GET /api/sessions/{id} → {session, answers, participants, reviews}. */
 export async function getSessionDetail(id: string): Promise<SessionDetail> {
   const wire = await apiGet<Partial<SessionDetail>>(`/api/sessions/${encodeURIComponent(id)}`)
@@ -512,6 +523,25 @@ export async function getSessionDetail(id: string): Promise<SessionDetail> {
     participants: Array.isArray(wire.participants) ? wire.participants : [],
     reviews: wire.reviews ?? EMPTY_REVIEW_AGGREGATE,
   }
+}
+
+/** GET /api/sessions/{id}/revisions — optional, newest-first edit history. */
+export async function listSessionRevisions(id: string): Promise<SessionRevision[]> {
+  const wire = await apiGet<{ revisions?: SessionRevision[] }>(
+    `/api/sessions/${encodeURIComponent(id)}/revisions`
+  )
+  return Array.isArray(wire.revisions) ? wire.revisions : []
+}
+
+/** POST restore — the server records this pointer-back as a fresh revision. */
+export async function restoreSessionRevision(
+  sessionId: string,
+  revisionId: string
+): Promise<Submission> {
+  const wire = await apiPost<{ session?: Submission } | Submission>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/revisions/${encodeURIComponent(revisionId)}/restore`
+  )
+  return (wire as { session?: Submission }).session ?? (wire as Submission)
 }
 
 /* ── participants, after submission (ABS-11) ────────────────────────────────
@@ -665,6 +695,18 @@ export interface SubmitterSubmission {
   decided: boolean
   decision?: string | null
   feedback?: string | null
+  participants: SubmitterParticipant[]
+}
+
+export interface SubmitterParticipant {
+  contact_id: string
+  name: string
+  first_name: string
+  last_name: string
+  email: string | null
+  role: string | null
+  roles: string[]
+  is_primary: boolean
 }
 
 export interface SubmitterTaxonomyItem {
@@ -730,6 +772,9 @@ function normalizeSubmitterSubmission(wire: unknown): SubmitterSubmission {
     format_id: id(row.format_id),
     editable: Boolean(row.editable),
     decided: Boolean(row.decided),
+    participants: Array.isArray(row.participants)
+      ? (row.participants as SubmitterParticipant[])
+      : [],
   }
 }
 
@@ -771,6 +816,19 @@ export async function withdrawSubmitterSubmission(
   )
   const submission = (wire as { submission?: SubmitterSubmission })?.submission
   return normalizeSubmitterSubmission(submission ?? wire)
+}
+
+/** Token-scoped co-speaker add; returns the de-duplicated participant roster. */
+export async function addSubmitterParticipant(
+  id: string,
+  token: string,
+  input: { name: string; email: string }
+): Promise<SubmitterParticipant[]> {
+  const wire = await apiPost<{ participants?: SubmitterParticipant[] }>(
+    `/public/submissions/${encodeURIComponent(id)}/participants`,
+    { token, name: input.name, email: input.email }
+  )
+  return Array.isArray(wire.participants) ? wire.participants : []
 }
 
 // ── Speaker CRM (organizer) ──────────────────────────────────────────────────
@@ -986,4 +1044,18 @@ export async function updateSpeaker(
   )
   const speaker = (wire as { speaker?: SpeakerProfileContact })?.speaker
   return (speaker ?? wire) as SpeakerProfileContact
+}
+
+/** Organizer-side photo replacement; validation and versioning happen server-side. */
+export async function uploadSpeakerPhoto(
+  eventId: string,
+  contactId: string,
+  file: File
+): Promise<{ photo_url: string; version: number | null }> {
+  const form = new FormData()
+  form.append('file', file)
+  return request<{ photo_url: string; version: number | null }>(
+    `/api/events/${encodeURIComponent(eventId)}/speakers/${encodeURIComponent(contactId)}/photo`,
+    { method: 'POST', body: form }
+  )
 }

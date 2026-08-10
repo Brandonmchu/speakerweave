@@ -22,7 +22,7 @@ const BEN = 'c-ben'
 function speaker(overrides: Partial<EventSpeaker> & { contact_id: string; name: string }): EventSpeaker {
   return {
     email: null,
-    photo_url: null,
+    photo_url: null as string | null,
     session_count: 0,
     last_portal_access_at: null,
     tasks_total: 0,
@@ -37,6 +37,7 @@ let roster: EventSpeaker[]
 let rosterGetCount: number
 let importCalls: unknown[]
 let patchCalls: Array<{ contactId: string; body: Record<string, unknown> }>
+let photoCalls: FormData[]
 /** POST /api/events/{id}/tasks bodies — what the task author actually sent. */
 let taskCalls: Array<Record<string, unknown>>
 /** GET /api/events/{id}/speaker-statuses — {contact_id, speaker_status} rows. */
@@ -55,7 +56,7 @@ const PROFILE = {
     about: 'The first programmer.',
     logistics_notes: null as string | null,
     speaker_status: null as string | null,
-    photo_url: null,
+    photo_url: null as string | null,
     pronouns: null,
     linkedin_url: null,
     twitter_url: null,
@@ -153,11 +154,33 @@ describe('Speakers CRM', () => {
         contact_id: ADA,
         name: 'Ada Lovelace',
         email: 'ada@example.com',
+        title: 'Mathematician',
+        company_name: 'Analytical Engines',
         session_count: 2,
         tasks_total: 3,
         tasks_done: 1,
         tasks_outstanding: 2,
         invited: true,
+        tasks: [
+          {
+            assignment_id: 'a1',
+            task_id: 't1',
+            name: 'Upload your slides',
+            status: 'submitted',
+            done: false,
+            required: true,
+            due_at: '2027-05-01T00:00:00+00:00',
+          },
+          {
+            assignment_id: 'a2',
+            task_id: 't2',
+            name: 'Speaker agreement',
+            status: 'done',
+            done: true,
+            required: true,
+            due_at: null,
+          },
+        ],
       }),
       speaker({
         contact_id: BEN,
@@ -173,6 +196,7 @@ describe('Speakers CRM', () => {
     rosterGetCount = 0
     importCalls = []
     patchCalls = []
+    photoCalls = []
     // Ada has been confirmed; Ben has no workflow status set at all.
     statusRows = [{ contact_id: ADA, speaker_status: 'confirmed' }]
     window.localStorage.setItem('dais.token', 'test-token')
@@ -192,6 +216,10 @@ describe('Speakers CRM', () => {
         if (url.endsWith('/speakers') && method === 'GET') {
           rosterGetCount += 1
           return json({ event: EVENT, speakers: roster })
+        }
+        if (url.endsWith(`/speakers/${ADA}/photo`) && method === 'POST') {
+          photoCalls.push(init?.body as FormData)
+          return json({ photo_url: 'https://files.test/ada-new.png' })
         }
         const idMatch = url.match(/\/speakers\/([^/?]+)$/)
         if (idMatch && method === 'GET') return json(PROFILE)
@@ -221,13 +249,26 @@ describe('Speakers CRM', () => {
     expect(screen.getByTestId(`speaker-row-${BEN}`)).toBeInTheDocument()
   })
 
+  it('shows title and company inline and expands task-level progress', async () => {
+    renderSpeakers()
+    const row = await screen.findByTestId(`speaker-row-${ADA}`)
+    expect(within(row).getByText('Mathematician · Analytical Engines')).toBeInTheDocument()
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Show tasks for Ada Lovelace' }))
+    const tasks = await screen.findByTestId(`speaker-tasks-${ADA}`)
+    expect(within(tasks).getByText('Upload your slides')).toBeInTheDocument()
+    expect(within(tasks).getByText(/In review/)).toBeInTheDocument()
+    expect(within(tasks).getByText('Speaker agreement')).toBeInTheDocument()
+    expect(within(tasks).getByText('Done')).toBeInTheDocument()
+  })
+
   it('opens the profile drawer and renders the full aggregate', async () => {
     renderSpeakers()
     fireEvent.click(await screen.findByText('Ada Lovelace'))
 
     // identity + company/title (rendered joined as "Mathematician · Analytical Engines")
     expect(await screen.findByText(/Analytical Engines/)).toBeInTheDocument()
-    expect(screen.getByText('The first programmer.')).toBeInTheDocument()
+    expect(await screen.findByText('The first programmer.')).toBeInTheDocument()
     // submissions, sessions, onboarding, communications all render
     expect(screen.getByText('On the Analytical Engine')).toBeInTheDocument()
     expect(screen.getByText('Keynote: The Future')).toBeInTheDocument()
@@ -361,6 +402,27 @@ describe('Speakers CRM', () => {
     expect(patchCalls[0].contactId).toBe(ADA)
     expect(patchCalls[0].body.company_name).toBe('Babbage & Co')
     await waitFor(() => expect(rosterGetCount).toBeGreaterThan(before))
+  })
+
+  it('shows and replaces the current speaker photo from edit mode', async () => {
+    PROFILE.speaker.photo_url = 'https://files.test/ada.png'
+    try {
+      renderSpeakers()
+      fireEvent.click(await screen.findByText('Ada Lovelace'))
+      fireEvent.click(await screen.findByTestId('edit-speaker'))
+
+      expect(screen.getByText('Speaker photo')).toBeInTheDocument()
+      expect(screen.getByText('Replace')).toBeInTheDocument()
+      const file = new File(['png-bytes'], 'ada-new.png', { type: 'image/png' })
+      fireEvent.change(screen.getByTestId('speaker-photo-input'), {
+        target: { files: [file] },
+      })
+
+      await waitFor(() => expect(photoCalls).toHaveLength(1))
+      expect(photoCalls[0].get('file')).toBe(file)
+    } finally {
+      PROFILE.speaker.photo_url = null
+    }
   })
 
   // ── travel & logistics (SPK-15) ───────────────────────────────────────────

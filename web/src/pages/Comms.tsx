@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 import {
@@ -156,6 +156,8 @@ export function Comms() {
   const [customBody, setCustomBody] = useState('')
   const [roles, setRoles] = useState<CommsRole[]>(['speaker'])
   const [statuses, setStatuses] = useState<CommsSessionStatus[]>(['accepted'])
+  const [allRoster, setAllRoster] = useState(false)
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([])
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const eventsQuery = useQuery({
@@ -171,12 +173,30 @@ export function Comms() {
   })
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data])
 
-  const audience: CommsAudience = useMemo(() => ({ roles, statuses }), [roles, statuses])
+  const audience: CommsAudience = useMemo(
+    () => ({ roles, statuses, all_roster: allRoster }),
+    [roles, statuses, allRoster]
+  )
   const previewQuery = useQuery({
-    queryKey: ['comms-recipients-preview', event?.id, roles, statuses],
+    queryKey: ['comms-recipients-preview', event?.id, roles, statuses, allRoster],
     queryFn: () => recipientsPreview(event!.id, audience),
     enabled: Boolean(event?.id),
   })
+
+  const pickerAvailable = Array.isArray(previewQuery.data?.recipients)
+  const availableRecipients = previewQuery.data?.available_recipients ?? []
+  useEffect(() => {
+    if (!previewQuery.data?.recipients) return
+    setSelectedContactIds(previewQuery.data.recipients.map((recipient) => recipient.contact_id))
+  }, [previewQuery.data])
+
+  const sendAudience: CommsAudience = useMemo(
+    () => ({
+      ...audience,
+      ...(pickerAvailable ? { contact_ids: selectedContactIds } : {}),
+    }),
+    [audience, pickerAvailable, selectedContactIds]
+  )
 
   const logQuery = useQuery({
     queryKey: ['comms-log', event?.id],
@@ -187,7 +207,10 @@ export function Comms() {
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey)
   const subjectSource = selectedTemplate?.subject ?? customSubject
   const bodySource = selectedTemplate?.body_html ?? customBody
-  const sampleName = previewQuery.data?.sample[0] || 'Maya Okafor'
+  const sampleName =
+    availableRecipients.find((recipient) => selectedContactIds.includes(recipient.contact_id))?.name ||
+    previewQuery.data?.sample[0] ||
+    'Maya Okafor'
   const sampleParts = sampleName.trim().split(/\s+/)
   const previewContext = {
     first_name: sampleParts[0] || 'Maya',
@@ -233,11 +256,11 @@ export function Comms() {
     mutationFn: () => {
       if (!event) throw new Error('Choose an event before sending')
       return selectedTemplate
-        ? sendCommunication(event.id, { template_key: selectedTemplate.key, audience })
+        ? sendCommunication(event.id, { template_key: selectedTemplate.key, audience: sendAudience })
         : sendCommunication(event.id, {
             subject: customSubject.trim(),
             body_html: customBody,
-            audience,
+            audience: sendAudience,
           })
     },
     onSuccess: (result) => {
@@ -259,9 +282,13 @@ export function Comms() {
 
   const eventLoading = eventsQuery.isPending
   const eventError = eventsQuery.error
-  const recipientCount = previewQuery.data?.count ?? 0
+  const recipientCount = pickerAvailable
+    ? selectedContactIds.length
+    : (previewQuery.data?.count ?? 0)
   const recipientLabel =
-    roles.length === 1
+    allRoster
+      ? 'speakers'
+      : roles.length === 1
       ? ROLE_OPTIONS.find((option) => option.value === roles[0])?.label.toLowerCase() || 'recipients'
       : 'recipients'
   const customReady = Boolean(customSubject.trim() && customBody.trim())
@@ -418,10 +445,23 @@ export function Comms() {
                   <Card>
                     <CardHeader>
                       <CardTitle>Audience</CardTitle>
-                      <CardDescription>Choose recipients by their role and session status.</CardDescription>
+                      <CardDescription>Choose a group, then fine-tune the individual recipients.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-5">
-                      <fieldset>
+                      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/25 p-3">
+                        <Checkbox
+                          checked={allRoster}
+                          onCheckedChange={(checked) => setAllRoster(checked === true)}
+                          aria-label="All speakers (roster)"
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">All speakers (roster)</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            Every event contact, including speakers who are not attached to a session yet.
+                          </span>
+                        </span>
+                      </label>
+                      <fieldset disabled={allRoster} className={allRoster ? 'opacity-50' : undefined}>
                         <legend className="text-sm font-medium text-foreground">Roles</legend>
                         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                           {ROLE_OPTIONS.map((option) => (
@@ -436,7 +476,7 @@ export function Comms() {
                           ))}
                         </div>
                       </fieldset>
-                      <fieldset>
+                      <fieldset disabled={allRoster} className={allRoster ? 'opacity-50' : undefined}>
                         <legend className="text-sm font-medium text-foreground">Session status</legend>
                         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                           {STATUS_OPTIONS.map((option) => (
@@ -470,6 +510,65 @@ export function Comms() {
                           </p>
                         </div>
                       </div>
+                      {availableRecipients.length > 0 && (
+                        <div className="rounded-lg border border-border">
+                          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">Recipients</p>
+                              <p className="text-xs text-muted-foreground">
+                                {recipientCount} of {availableRecipients.length} selected
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  setSelectedContactIds(availableRecipients.map((recipient) => recipient.contact_id))
+                                }
+                              >
+                                Select all
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedContactIds([])}
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          </div>
+                          <ul className="max-h-52 divide-y divide-border overflow-y-auto scrollbar-app">
+                            {availableRecipients.map((recipient) => (
+                              <li key={recipient.contact_id}>
+                                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-muted/30">
+                                  <Checkbox
+                                    checked={selectedContactIds.includes(recipient.contact_id)}
+                                    onCheckedChange={(checked) =>
+                                      setSelectedContactIds((current) =>
+                                        checked === true
+                                          ? current.includes(recipient.contact_id)
+                                            ? current
+                                            : [...current, recipient.contact_id]
+                                          : current.filter((id) => id !== recipient.contact_id)
+                                      )
+                                    }
+                                    aria-label={`Send to ${recipient.name}`}
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm text-foreground">{recipient.name}</span>
+                                    {recipient.email && (
+                                      <span className="block truncate text-xs text-muted-foreground">{recipient.email}</span>
+                                    )}
+                                  </span>
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 

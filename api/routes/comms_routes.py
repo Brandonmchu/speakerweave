@@ -47,6 +47,8 @@ class TemplatePatchRequest(BaseModel):
 class AudienceRequest(BaseModel):
     roles: list[Role] | None = None
     statuses: list[SessionStatus] | None = None
+    all_roster: bool = False
+    contact_ids: list[str] | None = Field(default=None, max_length=10_000)
 
 
 class SendRequest(BaseModel):
@@ -159,6 +161,7 @@ async def recipients_preview(
     event_id: str,
     roles: Annotated[list[str] | None, Query()] = None,
     statuses: Annotated[list[str] | None, Query()] = None,
+    all_roster: bool = False,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     _user_id, org_id = auth
@@ -168,10 +171,29 @@ async def recipients_preview(
         org_id,
         roles=parsed_roles,
         statuses=parsed_statuses,
+        all_roster=all_roster,
     )
+    if all_roster:
+        available = recipients
+    else:
+        _event, available = await resolve_recipients(
+            event_id,
+            org_id,
+            all_roster=True,
+        )
+
+    def _summary(recipient: dict) -> dict:
+        return {
+            "contact_id": recipient.get("id"),
+            "name": recipient.get("full_name"),
+            "email": recipient.get("email"),
+        }
+
     return {
         "count": len(recipients),
         "sample": [recipient["full_name"] for recipient in recipients[:5]],
+        "recipients": [_summary(recipient) for recipient in recipients],
+        "available_recipients": [_summary(recipient) for recipient in available],
     }
 
 
@@ -187,6 +209,8 @@ async def send_event_communication(
         org_id,
         roles=list(payload.audience.roles) if payload.audience.roles else None,
         statuses=list(payload.audience.statuses) if payload.audience.statuses else None,
+        all_roster=payload.audience.all_roster,
+        contact_ids=payload.audience.contact_ids,
         template_key=payload.template_key,
         subject=payload.subject,
         body_html=payload.body_html,

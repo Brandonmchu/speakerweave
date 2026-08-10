@@ -53,6 +53,14 @@ def seed_recipient_data(fake: FakeSupabase) -> None:
             "first_name": "Katherine",
             "last_name": "Johnson",
         },
+        {
+            "id": "contact-mae",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "email": "mae@example.com",
+            "first_name": "Mae",
+            "last_name": "Jemison",
+        },
     )
     fake.seed(
         "sessions",
@@ -187,6 +195,78 @@ async def test_recipient_resolution_filters_role_and_session_status(seeded_db, m
 
     assert [row["id"] for row in recipients] == ["contact-ada"]
     assert recipients[0]["session_title"] == "Analytical Engines"
+
+
+def test_all_roster_preview_includes_sessionless_contacts(comms_client):
+    client, fake = comms_client
+    seed_recipient_data(fake)
+
+    response = client.get(
+        f"/api/events/{TEST_EVENT_ID}/comms/recipients-preview?all_roster=true"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 4
+    assert {row["contact_id"] for row in response.json()["recipients"]} == {
+        "contact-ada",
+        "contact-grace",
+        "contact-katherine",
+        "contact-mae",
+    }
+
+
+def test_explicit_recipient_ids_are_the_exact_scoped_audience(
+    comms_client, monkeypatch
+):
+    import services.comms as comms_service
+
+    client, fake = comms_client
+    seed_recipient_data(fake)
+    delivered: list[str] = []
+
+    async def capture_delivery(**kwargs):
+        delivered.append(kwargs["to"])
+        return {"id": "mail-test"}
+
+    monkeypatch.setattr(comms_service.mailer, "send_email", capture_delivery)
+    response = client.post(
+        f"/api/events/{TEST_EVENT_ID}/comms/send",
+        json={
+            "subject": "Roster update",
+            "body_html": "<p>Hello</p>",
+            "audience": {
+                "all_roster": True,
+                "contact_ids": ["contact-mae", "contact-ada"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+    assert set(delivered) == {"mae@example.com", "ada@example.com"}
+    assert {row["contact_id"] for row in fake.rows("email_outbox")} == {
+        "contact-mae",
+        "contact-ada",
+    }
+
+    fake.seed(
+        "contacts",
+        {
+            "id": "contact-foreign-event",
+            "org_id": TEST_ORG_ID,
+            "event_id": OTHER_EVENT_ID,
+            "email": "foreign-event@example.com",
+        },
+    )
+    rejected = client.post(
+        f"/api/events/{TEST_EVENT_ID}/comms/send",
+        json={
+            "subject": "Nope",
+            "body_html": "<p>Nope</p>",
+            "audience": {"contact_ids": ["contact-foreign-event"]},
+        },
+    )
+    assert rejected.status_code == 400
 
 
 def test_send_renders_dev_email_and_records_sent_outbox(comms_client, monkeypatch, tmp_path: Path):
