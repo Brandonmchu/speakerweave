@@ -12,6 +12,7 @@ api/
 ├── auth.py                    organizer JWT verification and org boundary
 ├── routes/                    HTTP surfaces: organizer, public, portal, v1, OAuth, Slack
 ├── services/                  domain logic and external-provider boundaries
+├── agent/                     optional in-app chat agent (see docs/chat-agent.md); one guarded mount in main.py; delete whole dir to remove the feature
 ├── migrations/               ordered additive SQL migrations, NNN_description.sql
 ├── scripts/seed_demo.py       deterministic demo reset/seed command
 ├── mcp_server.py              hosted MCP surface
@@ -20,6 +21,7 @@ api/
 
 web/
 ├── src/pages/                 route-level React product surfaces
+├── src/agent/                 optional chat panel (pairs with api/agent/); one conditional mount in shell/AppShell.tsx, gated on GET /api/agent/capabilities
 ├── src/lib/                   API clients and shared domain/browser logic
 ├── src/auth/                  organizer auth provider and token bridge
 ├── src/ui/native-select.tsx   agent-drivable select primitive
@@ -121,6 +123,7 @@ The reference providers are replaceable, but their contracts are not.
 | Email | Keep `api/services/mailer.py:send_email()` as the public boundary. Replace `_send_via_resend()` and provider-specific configuration there; the caller remains `api/services/outbox_worker.py`. | No provider call blocks the primary write; the worker can retry; a stable `idempotency_key` reaches the provider; one bad recipient cannot sink an unrelated batch. |
 | Hosting | Replace `api/railway.json` and/or `web/Dockerfile`; adapt `web/nginx/default.conf` if the host supplies routing. The API entrypoint is `uvicorn main:app`; the web artifact is Vite's `web/dist`. | Serve the SPA with history fallback, route backend/OAuth/MCP paths correctly, keep secrets server-only, inject `VITE_*` values at build time, expose health checks, and run migrations before code that requires them. |
 | AI | Replace `api/services/ai_triage.py:_call_anthropic()` and `api/services/assistant.py:_call_anthropic()` plus their model constants/schema translation. | Triage still returns a complete, labelled heuristic result when AI is absent or fails; in-app and Slack tools still dispatch through organization-scoped `services.integration_api`; human decisions remain authoritative. |
+| Chat agent | Provider choice is configuration, not code: `ASSISTANT_PROVIDER` selects between `api/agent/runtime_openai.py` and `api/agent/runtime_anthropic.py`; both share the harness, tool registry, SSE vocabulary, and permission gate (see `docs/chat-agent.md`). A third provider means one new runtime module implementing the same semantic event stream. | The feature stays absent-by-default (no key → no routes, no UI, no SDK imports); permission-gated tools never execute without an explicit approval; all tool execution stays org-scoped through the shared registry. |
 
 Optional Slack and Airtable integrations are separate from these core swap points and must remain nonessential to conference workflows.
 
@@ -164,5 +167,6 @@ venv/bin/python scripts/mint_dev_token.py   # print a short-lived organizer toke
 - **MCP:** Streamable HTTP tools/resources and bearer/OAuth auth live in `api/mcp_server.py` and mount at `/mcp` from `api/main.py`.
 - **OAuth:** discovery, dynamic registration, PKCE authorization, and token rotation live in `api/routes/oauth_routes.py`, `api/services/oauth.py`, and `api/migrations/015_oauth.sql`.
 - **Assistant:** shared prompts, tools, guarded execution, and the model loop live in `api/services/assistant.py`; the authenticated in-app boundary is `api/routes/assistant_routes.py` and Slack stays a thin transport in `api/services/slack_agent.py`.
+- **Chat agent:** the streaming in-app panel is `api/agent/` (SSE harness, provider runtimes, permissions, Every MCP client) + `web/src/agent/`; it reuses the assistant tool registry and is documented in `docs/chat-agent.md`.
 - **Slack:** import `api/slack_manifest.json`; signed events enter through `api/routes/slack_routes.py` and delegate to the shared assistant engine.
 - **Airtable:** per-organization configuration enters through `api/routes/integration_routes.py` and sync/upsert behavior lives in `api/services/airtable_sync.py`.

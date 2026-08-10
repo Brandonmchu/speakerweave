@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 
+from agent.router import router as agent_router
 from app.core.logging_config import get_logger, setup_logging
 from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
@@ -42,10 +43,10 @@ logger = get_logger(__name__)
 try:
     from mcp_server import mcp_app
     from mcp_server import mcp_server as hosted_mcp_server
-except ModuleNotFoundError as exc:
+except (ModuleNotFoundError, ImportError) as exc:
     # Keep basic app/test workflows usable before a local environment has run
     # `pip install -r requirements.txt`; deployed builds install the pinned SDK.
-    if not (exc.name or "").startswith(("mcp", "httpx2")):
+    if not (getattr(exc, "name", "") or "").startswith(("mcp", "httpx2")):
         raise
     mcp_app = None
     hosted_mcp_server = None
@@ -123,6 +124,7 @@ app.include_router(portal_session_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
 app.include_router(assistant_router)
+app.include_router(agent_router)
 app.include_router(taxonomy_router)
 app.include_router(form_admin_router)
 app.include_router(field_router)

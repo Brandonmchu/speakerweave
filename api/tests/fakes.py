@@ -13,6 +13,7 @@ else should fail loudly rather than pretend.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -30,6 +31,11 @@ PATCH_TARGET_MODULES = (
     "routes.public_routes",
     "routes.schedule_routes",
     "routes.taxonomy_routes",
+    "agent.context_search",
+    "agent.every_mcp",
+    "agent.permissions",
+    "agent.threads",
+    "agent.tools",
     "services.api_keys",
     "services.airtable_sync",
     "services.content_pipeline",
@@ -64,7 +70,15 @@ def _match_or(row: dict, expression: str) -> bool:
             return True
         if op == "is" and value == "null" and row.get(column) is None:
             return True
+        if op == "ilike" and _match_ilike(row.get(column), value):
+            return True
     return False
+
+
+def _match_ilike(actual: Any, pattern: str) -> bool:
+    escaped = re.escape(str(pattern))
+    regex = escaped.replace(r"\%", ".*").replace(r"\*", ".*").replace(r"\_", ".")
+    return bool(re.fullmatch(regex, str(actual or ""), flags=re.IGNORECASE))
 
 
 def _project(row: dict, columns: str) -> dict:
@@ -90,7 +104,9 @@ class FakeQuery:
         self.on_conflict: str | None = None
         self.filters: list[tuple[str, str, Any]] = []
         self.limit_n: int | None = None
+        self.offset_n = 0
         self.order_by: tuple[str, bool] | None = None
+        self.orders: list[tuple[str, bool]] = []
         self.columns = "*"
         self.strict_columns = strict_columns
 
@@ -116,6 +132,10 @@ class FakeQuery:
         self.filters.append(("in", key, list(values)))
         return self
 
+    def ilike(self, key, value):
+        self.filters.append(("ilike", key, value))
+        return self
+
     def or_(self, expression):
         self.filters.append(("or", expression, None))
         return self
@@ -124,8 +144,14 @@ class FakeQuery:
         self.limit_n = n
         return self
 
+    def range(self, start, end):
+        self.offset_n = start
+        self.limit_n = end - start + 1
+        return self
+
     def order(self, column, desc=False):
         self.order_by = (column, desc)
+        self.orders.append((column, desc))
         return self
 
     def insert(self, payload):
@@ -155,6 +181,8 @@ class FakeQuery:
                 return False
             if kind == "in" and row.get(key) not in value:
                 return False
+            if kind == "ilike" and not _match_ilike(row.get(key), value):
+                return False
             if kind == "or" and not _match_or(row, key):
                 return False
         return True
@@ -169,6 +197,9 @@ class FakeQuery:
                 "op": self.op,
                 "filters": list(self.filters),
                 "columns": self.columns,
+                "limit": self.limit_n,
+                "offset": self.offset_n,
+                "orders": list(self.orders),
             }
         )
         rows = self._rows()
@@ -221,7 +252,7 @@ class FakeQuery:
                 reverse=desc,
             )
         if self.limit_n is not None:
-            found = found[: self.limit_n]
+            found = found[self.offset_n : self.offset_n + self.limit_n]
         return FakeResult(found)
 
 

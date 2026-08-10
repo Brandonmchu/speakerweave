@@ -131,10 +131,15 @@ export default {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: '0' },
         },
+        'word-fade-in': {
+          from: { opacity: '0', filter: 'blur(1.5px)' },
+          to: { opacity: '1', filter: 'blur(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'word-fade-in': 'word-fade-in 0.25s ease-out both',
       },
     },
   },

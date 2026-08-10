@@ -37,6 +37,10 @@ os.environ["SLACK_SIGNING_SECRET"] = ""
 os.environ["SLACK_BOT_TOKEN"] = ""
 os.environ["SLACK_DEFAULT_ORG"] = "org_dev"
 os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["ASSISTANT_PROVIDER"] = ""
+os.environ["ASSISTANT_ENABLED"] = ""
+os.environ["EVERY_MCP_URL"] = ""
 
 
 def make_token(

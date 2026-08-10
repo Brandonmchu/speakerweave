@@ -8,12 +8,18 @@ trusted organization id to tools and resources.
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 from urllib.parse import urlsplit
 
-from mcp.server import MCPServer
-from mcp.server.mcpserver import Context
+# mcp 2.x renamed FastMCP to MCPServer; openai-agents (chat agent's OpenAI lane)
+# still pins mcp<2, so both spellings must import cleanly.
+try:
+    from mcp.server import MCPServer
+    from mcp.server.mcpserver import Context
+except ImportError:  # mcp < 2
+    from mcp.server.fastmcp import Context, FastMCP as MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.datastructures import Headers
 from starlette.requests import Request
@@ -27,16 +33,20 @@ from services.oauth import public_origin, resolve_access_token
 
 _ORG_HEADER = b"x-dais-resolved-org"
 
-mcp_server = MCPServer(
-    name="dais-conference-management",
-    title="dais Conference Management",
-    description="Manage an organization's events, submissions, speakers, schedule, content, and evaluations.",
-    instructions=(
+_SERVER_KWARGS: dict[str, Any] = {
+    "name": "dais-conference-management",
+    "title": "dais Conference Management",
+    "description": "Manage an organization's events, submissions, speakers, schedule, content, and evaluations.",
+    "instructions": (
         "All results are scoped to the organization attached to the supplied dais API "
         "token. Pass an event id or slug when the organization has multiple events."
     ),
-    version="1.0.0",
-)
+    "version": "1.0.0",
+}
+# mcp<2 FastMCP does not accept title/description/version; keep whichever
+# kwargs the installed SDK understands.
+_ACCEPTED = set(inspect.signature(MCPServer.__init__).parameters)
+mcp_server = MCPServer(**{k: v for k, v in _SERVER_KWARGS.items() if k in _ACCEPTED})
 
 
 class ApiTokenAuthMiddleware:
@@ -90,7 +100,11 @@ class ApiTokenAuthMiddleware:
 
 
 def _org_id(ctx: Context) -> str:
-    headers = ctx.headers or {}
+    if hasattr(ctx, "headers"):  # mcp >= 2
+        headers = ctx.headers or {}
+    else:  # mcp < 2: reach the Starlette request through the request context
+        request = ctx.request_context.request
+        headers = request.headers if request is not None else {}
     org_id = headers.get(_ORG_HEADER.decode("ascii"))
     if not org_id:  # pragma: no cover - guarded by the ASGI auth boundary
         raise PermissionError("Authenticated organization context is unavailable")
@@ -319,10 +333,16 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-_sdk_app = mcp_server.streamable_http_app(
-    streamable_http_path="/",
-    stateless_http=True,
-    json_response=True,
-    transport_security=_transport_security(),
-)
+_HTTP_APP_KWARGS: dict[str, Any] = {
+    "streamable_http_path": "/",
+    "stateless_http": True,
+    "json_response": True,
+    "transport_security": _transport_security(),
+}
+if "stateless_http" in inspect.signature(mcp_server.streamable_http_app).parameters:
+    _sdk_app = mcp_server.streamable_http_app(**_HTTP_APP_KWARGS)
+else:  # mcp<2 reads the same settings from the server object at app-build time
+    for _key, _value in _HTTP_APP_KWARGS.items():
+        setattr(mcp_server.settings, _key, _value)
+    _sdk_app = mcp_server.streamable_http_app()
 mcp_app = ApiTokenAuthMiddleware(_sdk_app)

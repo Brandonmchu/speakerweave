@@ -12,11 +12,13 @@ httpx
 # module degrades to a score-based heuristic when ANTHROPIC_API_KEY is unset,
 # so a deployment without a key still answers.
 anthropic
+openai>=2.45.0
+openai-agents>=0.18.1
 python-multipart
 slowapi
 anyio
 # Official Model Context Protocol SDK for the hosted /mcp endpoint.
-mcp==2.0.0
+mcp>=1.29,<3  # 2.x preferred; openai-agents currently caps at <2 (compat shim in mcp_server.py)
 # zoneinfo needs a tz database; slim container images often ship without one,
 # and invite emails render local times (services/ics.py falls back to UTC).
 tzdata

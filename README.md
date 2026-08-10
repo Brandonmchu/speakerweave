@@ -168,7 +168,7 @@ Railway is the reference, but any two-service host works:
 | Auth | Clerk in the SPA; HS256 JWT verification in FastAPI | Use whatever you'd like — just point web token acquisition at a JWT issuer that supplies an `org_id` claim and signs with `SUPABASE_JWT_SECRET`. In this implementation, we use Clerk's `supabase` JWT template; the dev-token flow needs no external auth. |
 | Email | One `send_email` boundary in `api/services/mailer.py` | Use whatever you'd like — just point the outbox worker at your provider implementation of that function. In this implementation, we use Resend and write local `.eml` files when its key is absent. |
 | Hosting | Two Railway services: uvicorn API and nginx/static SPA | Use whatever you'd like — just point a Python container or uvicorn service and a static SPA host at one another. In this implementation, we use Railway. |
-| AI | Optional triage and shared in-app/Slack tool-use adapters | Use whatever you'd like — just point `api/services/ai_triage.py` and `api/services/assistant.py` at your model provider. In this implementation, we use Anthropic; triage falls back to reviewer-score heuristics and the assistant returns a configuration message without a key. |
+| AI | Optional chat agent (OpenAI Agents SDK or Anthropic), triage, and shared tool-use adapters for Slack/MCP/CLI | Use whatever you'd like — the in-app agent runs on your `OPENAI_API_KEY` (default, `gpt-5.6-luna` at `xhigh` effort) or `ANTHROPIC_API_KEY` behind one provider switch, and disappears entirely when neither is set. See [docs/chat-agent.md](docs/chat-agent.md). Triage falls back to reviewer-score heuristics without a key. |
 | Integrations | Optional, per-organization Airtable settings; Slack Events API bot | Use whatever you'd like — just point the integration service boundaries at your systems. In this implementation, we use Airtable and Slack, and the core conference workflows run without either. |
 
 ## Integrations
@@ -216,6 +216,12 @@ API tokens also authenticate the hosted Streamable HTTP MCP endpoint. Put this i
 ```
 
 For claude.ai, Claude for Work, or ChatGPT connector UIs, add a custom connector with only `https://speakerweave.com/mcp`. The client discovers `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, dynamically registers, uses authorization code + PKCE, and opens SpeakerWeave's approval page. Paste an API token from Settings there; SpeakerWeave exchanges it for short-lived OAuth access and rotating refresh tokens without storing or forwarding the raw API token. `PUBLIC_APP_URL` must be the externally visible origin for this flow.
+
+### In-app chat agent (bring your own key)
+
+An Every-style agent panel lives on the right side of every organizer page: threads, streaming answers, `@`-mention any submission/speaker/session as context, clickable entity badges that route through the app, agent-driven navigation ("show me the unstaffed sessions"), and inline Approve/Deny confirmation before anything sensitive (emails, decisions, publishing, deletes) happens.
+
+It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning effort) or `ANTHROPIC_API_KEY`, and the same harness runs on either provider. No key, no UI, no routes, no imports. All of it is quarantined in `api/agent/` + `web/src/agent/` with one mount line each, so removing the feature from your fork is a two-deletion job. Optionally connect an [Every](https://every.ai) account to give the agent your business tools (proposals, invoicing) over MCP OAuth. Full details, including what to adjust when running it on Claude instead: [docs/chat-agent.md](docs/chat-agent.md).
 
 ### Slack agent
 

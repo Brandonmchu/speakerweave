@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -19,12 +19,12 @@ import {
   Plus,
   Search,
   Settings,
-  Sparkles,
   Star,
   Users,
 } from 'lucide-react'
 
-import { AssistantPanel } from '@/components/AssistantPanel'
+import { AgentFeature } from '@/agent/ChatSheet'
+import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
 import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
@@ -163,7 +163,30 @@ export function AppShell() {
   const [newEventEnd, setNewEventEnd] = useState('')
   const [newEventTimezone, setNewEventTimezone] = useState(() => localTimezone())
   const [newEventLocation, setNewEventLocation] = useState('')
-  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem('sw.chat.open') === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const capabilitiesQuery = useQuery({
+    queryKey: agentKeys.capabilities,
+    queryFn: getAgentCapabilities,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const agentEnabled = capabilitiesQuery.data?.assistant === true
+
+  const setAgentOpen = (open: boolean) => {
+    setAssistantOpen(open)
+    try {
+      window.localStorage.setItem('sw.chat.open', String(open))
+    } catch {
+      // The panel still opens for this session when storage is unavailable.
+    }
+  }
 
   // Shared with Inbox via the same query key — one fetch, both consumers.
   const { data } = useQuery({
@@ -330,7 +353,17 @@ export function AppShell() {
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        className="flex min-w-0 flex-1 flex-col transition-[margin-right] duration-300 ease-in-out md:mr-[var(--chat-content-margin)]"
+        style={
+          {
+            '--chat-content-margin':
+              agentEnabled && assistantOpen
+                ? 'var(--chat-sheet-width, clamp(420px, 29vw, 500px))'
+                : '0px',
+          } as CSSProperties
+        }
+      >
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6">
           <div className="relative flex max-w-2xl flex-1 items-center">
             <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
@@ -344,17 +377,7 @@ export function AppShell() {
             </kbd>
           </div>
 
-          <button
-            type="button"
-            data-testid="ask-assistant"
-            title="Ask SpeakerWeave"
-            aria-label="Ask SpeakerWeave"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-primary/25 bg-primary-subtle px-2.5 text-sm font-semibold text-primary transition-colors hover:border-primary/40 hover:bg-primary/10 active:scale-[0.98] sm:px-3"
-            onClick={() => setAssistantOpen(true)}
-          >
-            <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline">Ask</span>
-          </button>
+          <span id="speakerweave-agent-toggle" className="contents" />
 
           <div className="ml-auto flex items-center gap-1.5 md:gap-2">
             {isDemo && (
@@ -494,7 +517,14 @@ export function AppShell() {
         </DialogContent>
       </Dialog>
 
-      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
+      {agentEnabled && capabilitiesQuery.data && (
+        <AgentFeature
+          capabilities={capabilitiesQuery.data}
+          open={assistantOpen}
+          onOpenChange={setAgentOpen}
+          toggleContainerId="speakerweave-agent-toggle"
+        />
+      )}
     </div>
   )
 }
