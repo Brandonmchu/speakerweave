@@ -363,13 +363,19 @@ export function Home() {
                 Use it from your AI
               </h2>
             </div>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              SpeakerWeave ships a hosted MCP server at{' '}
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
-                {mcpEndpoint}
-              </code>
-              . Claude and ChatGPT use the same endpoint.
-            </p>
+            <div className="max-w-2xl space-y-2 text-sm leading-relaxed text-muted-foreground">
+              <p>
+                SpeakerWeave ships a hosted MCP server at{' '}
+                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
+                  {mcpEndpoint}
+                </code>
+                . Claude and ChatGPT use the same endpoint.
+              </p>
+              <p>
+                Ask SpeakerWeave in the organizer app, the Slack bot, and MCP all share the same
+                organization-scoped tool layer.
+              </p>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">

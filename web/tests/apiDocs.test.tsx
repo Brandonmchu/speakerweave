@@ -17,6 +17,7 @@ describe('ApiDocs page', () => {
     renderDocs()
     expect(screen.getByRole('heading', { name: 'dais API', level: 1 })).toBeInTheDocument()
     expect(screen.getByText(/speaks Sessionboard/i)).toBeInTheDocument()
+    expect(screen.getByText(/Ask SpeakerWeave in the organizer app, the Slack bot/i)).toBeInTheDocument()
   })
 
   it('documents auth via the x-access-token header and the /v1 base path', () => {

@@ -19,10 +19,12 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Star,
   Users,
 } from 'lucide-react'
 
+import { AssistantPanel } from '@/components/AssistantPanel'
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
 import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
@@ -161,6 +163,7 @@ export function AppShell() {
   const [newEventEnd, setNewEventEnd] = useState('')
   const [newEventTimezone, setNewEventTimezone] = useState(() => localTimezone())
   const [newEventLocation, setNewEventLocation] = useState('')
+  const [assistantOpen, setAssistantOpen] = useState(false)
 
   // Shared with Inbox via the same query key — one fetch, both consumers.
   const { data } = useQuery({
@@ -341,6 +344,18 @@ export function AppShell() {
             </kbd>
           </div>
 
+          <button
+            type="button"
+            data-testid="ask-assistant"
+            title="Ask SpeakerWeave"
+            aria-label="Ask SpeakerWeave"
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-primary/25 bg-primary-subtle px-2.5 text-sm font-semibold text-primary transition-colors hover:border-primary/40 hover:bg-primary/10 active:scale-[0.98] sm:px-3"
+            onClick={() => setAssistantOpen(true)}
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">Ask</span>
+          </button>
+
           <div className="ml-auto flex items-center gap-1.5 md:gap-2">
             {isDemo && (
               <Badge
@@ -478,6 +493,8 @@ export function AppShell() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} />
     </div>
   )
 }

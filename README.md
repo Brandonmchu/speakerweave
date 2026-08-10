@@ -18,7 +18,7 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 - **Public program:** schedule and speaker pages, responsive script/iframe widgets, read-only JSON feeds, per-session calendar downloads, and a subscribable iCal feed.
 - **Full REST API:** organization-scoped API tokens, a stable `/v1` integration surface, and interactive FastAPI OpenAPI docs.
 - **Hosted MCP server:** remote Streamable HTTP at `/mcp`, with bearer-token access and OAuth 2.1 discovery/PKCE for Claude and ChatGPT connector UIs.
-- **Slack agent bot:** signed Events API endpoint, mentions and DMs, Anthropic tool use, and the same organization-scoped service layer as MCP.
+- **Ask SpeakerWeave + Slack agent bot:** authenticated in-app chat plus signed Slack mentions and DMs, both using the same organization-scoped assistant engine and tool layer as MCP.
 - **Airtable sync:** per-organization credentials and upsert syncs for Speakers and Submissions.
 - **Outbox-backed email:** queued invitations and reminders, retry/idempotency handling, Resend delivery, native calendar invitations, and local `.eml` output when no provider key is configured.
 
@@ -168,7 +168,7 @@ Railway is the reference, but any two-service host works:
 | Auth | Clerk in the SPA; HS256 JWT verification in FastAPI | Use whatever you'd like — just point web token acquisition at a JWT issuer that supplies an `org_id` claim and signs with `SUPABASE_JWT_SECRET`. In this implementation, we use Clerk's `supabase` JWT template; the dev-token flow needs no external auth. |
 | Email | One `send_email` boundary in `api/services/mailer.py` | Use whatever you'd like — just point the outbox worker at your provider implementation of that function. In this implementation, we use Resend and write local `.eml` files when its key is absent. |
 | Hosting | Two Railway services: uvicorn API and nginx/static SPA | Use whatever you'd like — just point a Python container or uvicorn service and a static SPA host at one another. In this implementation, we use Railway. |
-| AI | Optional triage and Slack tool-use adapters | Use whatever you'd like — just point `api/services/ai_triage.py` and `api/services/slack_agent.py` at your model provider. In this implementation, we use Anthropic; triage falls back to reviewer-score heuristics and Slack returns a configuration message without a key. |
+| AI | Optional triage and shared in-app/Slack tool-use adapters | Use whatever you'd like — just point `api/services/ai_triage.py` and `api/services/assistant.py` at your model provider. In this implementation, we use Anthropic; triage falls back to reviewer-score heuristics and the assistant returns a configuration message without a key. |
 | Integrations | Optional, per-organization Airtable settings; Slack Events API bot | Use whatever you'd like — just point the integration service boundaries at your systems. In this implementation, we use Airtable and Slack, and the core conference workflows run without either. |
 
 ## Integrations

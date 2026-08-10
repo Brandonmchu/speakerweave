@@ -11,6 +11,7 @@ from app.core.security import SecurityHeadersMiddleware
 from app.core.settings import settings
 from routes.admin_routes import router as admin_router
 from routes.api_key_admin_routes import router as api_key_admin_router
+from routes.assistant_routes import router as assistant_router
 from routes.comms_routes import router as comms_router
 from routes.crm_routes import router as crm_router
 from routes.dashboard_routes import router as dashboard_router
@@ -121,6 +122,7 @@ app.include_router(program_router)
 app.include_router(portal_session_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
+app.include_router(assistant_router)
 app.include_router(taxonomy_router)
 app.include_router(form_admin_router)
 app.include_router(field_router)

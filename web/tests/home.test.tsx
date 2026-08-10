@@ -113,6 +113,9 @@ describe('Home landing', () => {
     expect(aiApps).toHaveTextContent('claude.ai or Claude for Work')
     expect(aiApps).toHaveTextContent('Authorize when prompted with an API token from Settings')
     expect(aiApps).toHaveTextContent('Power-user MCP config')
+    expect(aiApps).toHaveTextContent(
+      'Ask SpeakerWeave in the organizer app, the Slack bot, and MCP all share the same organization-scoped tool layer',
+    )
     expect(within(aiApps).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
       '/developers',

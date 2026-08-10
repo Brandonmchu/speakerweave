@@ -111,6 +111,10 @@ function Hero() {
         A complete integration surface for events, submissions, speakers, schedules, content, and
         evaluations—available as REST for software and MCP for AI agents.
       </p>
+      <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        Ask SpeakerWeave in the organizer app, the Slack bot, and the hosted MCP server all use the
+        same organization-scoped tool layer, so every surface sees the same conference operations.
+      </p>
       <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-subtle/60 p-4">
         <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
         <div className="text-sm text-foreground">
