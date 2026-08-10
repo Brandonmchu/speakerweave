@@ -149,6 +149,7 @@ let segments: { id: string; name: string; kind: string; filter: Record<string, s
 let posted: { url: string; body: unknown }[] = []
 let overviewRequests = 0
 let outreachPayload: Record<string, unknown>
+let outreachLog: Array<Record<string, unknown>>
 
 function renderDirectory({ withToaster = false }: { withToaster?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -167,6 +168,7 @@ describe('Speaker Directory', () => {
     segments = []
     posted = []
     overviewRequests = 0
+    outreachLog = []
     outreachPayload = {
       sent: 2,
       failed: 0,
@@ -229,6 +231,9 @@ describe('Speaker Directory', () => {
         }
         if (url.startsWith('/api/crm/outreach') && method === 'POST') {
           return jsonResponse(outreachPayload)
+        }
+        if (url.startsWith('/api/crm/outreach/log') && method === 'GET') {
+          return jsonResponse({ entries: outreachLog })
         }
         return jsonResponse({}, 404)
       })
@@ -393,8 +398,8 @@ describe('Speaker Directory', () => {
       total: 2,
       event: { id: 'e-1', name: 'AI Builders Summit' },
       recipients: [
-        { person_id: MARCUS.id, name: MARCUS.name, email: MARCUS.email, subject: 'Hello', status: 'cancelled' },
-        { person_id: PRIYA.id, name: PRIYA.name, email: PRIYA.email, subject: 'Hello', status: 'cancelled' },
+        { person_id: MARCUS.id, name: MARCUS.name, email: MARCUS.email, subject: 'Hello', status: 'cancelled', error: 'demo address — delivery suppressed' },
+        { person_id: PRIYA.id, name: PRIYA.name, email: PRIYA.email, subject: 'Hello', status: 'cancelled', error: 'demo address — delivery suppressed' },
       ],
     }
     renderDirectory({ withToaster: true })
@@ -407,9 +412,32 @@ describe('Speaker Directory', () => {
 
     const summary = 'Delivered 0 · suppressed 2 (demo addresses) · failed 0 · 2 recipients'
     await waitFor(() => expect(screen.getAllByText(summary)).toHaveLength(2))
+    expect(screen.getAllByText('suppressed')).toHaveLength(2)
+    expect(screen.queryByText('cancelled')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Email 2 contacts' })).toBeInTheDocument()
     expect(screen.queryByText(/Sent to 2 of 2/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Email 0 contacts' })).not.toBeInTheDocument()
+  })
+
+  it('labels demo-suppressed CRM email history rows as suppressed', async () => {
+    outreachLog = [
+      {
+        id: 'outbox-1',
+        to: MARCUS.email,
+        subject: 'Hello',
+        status: 'cancelled',
+        error: 'demo address — delivery suppressed',
+        sent_at: null,
+        created_at: new Date().toISOString(),
+      },
+    ]
+    renderDirectory()
+    await screen.findByText('Marcus Okafor')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Email history' }))
+
+    expect(await screen.findByText('suppressed')).toBeInTheDocument()
+    expect(screen.queryByText('cancelled')).not.toBeInTheDocument()
   })
 
   it('drills through from a dashboard widget to the filtered list', async () => {

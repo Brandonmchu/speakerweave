@@ -38,7 +38,12 @@ const PAYLOAD = {
       tasks_done: 1,
       tasks_outstanding: 2,
       last_portal_access_at: new Date(Date.now() - 2 * DAY).toISOString(),
-      last_email: { template_key: 'portal_invite', status: 'sent', sent_at: null },
+      last_email: {
+        template_key: 'portal_invite',
+        status: 'cancelled',
+        sent_at: null,
+        last_error: 'demo address — delivery suppressed',
+      },
       onboarding_complete: false,
     },
     {
@@ -51,7 +56,7 @@ const PAYLOAD = {
       tasks_done: 2,
       tasks_outstanding: 0,
       last_portal_access_at: new Date(Date.now() - 3 * DAY).toISOString(),
-      last_email: { template_key: 'acceptance', status: 'sent', sent_at: null },
+      last_email: { template_key: 'acceptance', status: 'sent', sent_at: null, last_error: null },
       onboarding_complete: true,
     },
     {
@@ -164,7 +169,8 @@ describe('Dashboard', () => {
     expect(within(grace).getByText('2 outstanding')).toBeInTheDocument()
     expect(within(grace).getByText('2 days ago')).toBeInTheDocument()
     expect(within(grace).getByText('Portal invite')).toBeInTheDocument()
-    expect(within(grace).getByText('sent')).toBeInTheDocument()
+    expect(within(grace).getByText('suppressed')).toBeInTheDocument()
+    expect(within(grace).queryByText('cancelled')).not.toBeInTheDocument()
 
     // Done: the green badge, no numbers to read.
     const ada = screen.getByText('Ada Lovelace').closest('tr') as HTMLElement

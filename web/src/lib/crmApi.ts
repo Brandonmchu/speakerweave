@@ -457,7 +457,14 @@ export interface OutreachResult {
   skipped: number
   total: number
   event: { id: string; name: string }
-  recipients: { person_id: string; name: string; email: string; subject: string; status: string }[]
+  recipients: {
+    person_id: string
+    name: string
+    email: string
+    subject: string
+    status: string
+    error?: string | null
+  }[]
 }
 
 /** POST /api/crm/outreach — one personalized email per selected contact. */

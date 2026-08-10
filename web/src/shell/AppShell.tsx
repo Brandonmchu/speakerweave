@@ -99,11 +99,28 @@ function formatEventDates(event?: EventSummary): string {
   if (!event?.starts_at) return 'No dates set'
   const start = new Date(event.starts_at)
   const end = event.ends_at ? new Date(event.ends_at) : null
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
-  if (!end || start.toDateString() === end.toDateString()) {
+  const timeZone = event.timezone || undefined
+  const dayKey = (value: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(value)
+      .filter((part) => part.type === 'year' || part.type === 'month' || part.type === 'day')
+      .map((part) => part.value)
+      .join('-')
+  const opts: Intl.DateTimeFormatOptions = {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }
+  if (!end || dayKey(start) === dayKey(end)) {
     return start.toLocaleDateString(undefined, opts)
   }
-  return `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, opts)}`
+  return `${start.toLocaleDateString(undefined, { timeZone, month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, opts)}`
 }
 
 function initialOf(name?: string | null): string {

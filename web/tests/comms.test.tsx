@@ -32,9 +32,11 @@ function renderComms() {
 
 describe('Communications center', () => {
   let urls: string[]
+  let logEntries: Array<Record<string, unknown>>
 
   beforeEach(() => {
     urls = []
+    logEntries = []
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -54,7 +56,7 @@ describe('Communications center', () => {
             available_recipients: [ada, mae],
           })
         }
-        if (url.includes('/comms/log')) return jsonResponse({ log: [] })
+        if (url.includes('/comms/log')) return jsonResponse({ log: logEntries })
         return jsonResponse({}, 404)
       })
     )
@@ -87,11 +89,36 @@ describe('Communications center', () => {
       expect(urls.some((url) => url.includes('all_roster=true'))).toBe(true)
     )
     expect(await screen.findByText('2 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByText('Sample: Ada Lovelace, Mae Jemison')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Send to Mae Jemison' })).toBeChecked()
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Send to Ada Lovelace' }))
     expect(screen.getByText('1 of 2 selected')).toBeInTheDocument()
+    expect(screen.getByText('Sample: Mae Jemison')).toBeInTheDocument()
+    expect(screen.queryByText('Sample: Ada Lovelace, Mae Jemison')).not.toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Send to Ada Lovelace' })).not.toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Send to Mae Jemison' })).toBeChecked()
+  })
+
+  it('labels demo-suppressed communication log rows without changing their status', async () => {
+    logEntries = [
+      {
+        id: 'outbox-1',
+        template_key: 'accept',
+        subject: 'Welcome',
+        recipient_name: 'Ada Lovelace',
+        recipient_email: 'ada@example.com',
+        status: 'cancelled',
+        last_error: 'demo address — delivery suppressed',
+        created_at: new Date().toISOString(),
+      },
+    ]
+    renderComms()
+    await screen.findByText("You're speaking at {{event_name}}")
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Log' }), { button: 0, ctrlKey: false })
+
+    expect(await screen.findByText('suppressed')).toBeInTheDocument()
+    expect(screen.queryByText('cancelled')).not.toBeInTheDocument()
   })
 })

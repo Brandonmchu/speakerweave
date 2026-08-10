@@ -497,7 +497,8 @@ export function Inbox() {
   const saveSessionEdits = useMutation({
     mutationFn: ({ id, title, description }: { id: string; title: string; description: string }) =>
       updateSession(id, { title, description }),
-    onSuccess: (session) => {
+    onSuccess: (session, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['session-revisions', variables.id] })
       toast({ title: 'Session updated', description: `Saved “${session.title || 'Untitled'}”.` })
       closeEditor()
     },
@@ -512,7 +513,8 @@ export function Inbox() {
   const restoreRevision = useMutation({
     mutationFn: (revision: SessionRevision) =>
       restoreSessionRevision(revision.session_id, revision.id),
-    onSuccess: (session) => {
+    onSuccess: (session, revision) => {
+      queryClient.invalidateQueries({ queryKey: ['session-revisions', revision.session_id] })
       toast({
         title: 'Revision restored',
         description: `Restored ${session.title || 'the session'} and recorded the change.`,
@@ -523,7 +525,6 @@ export function Inbox() {
     onSettled: (_data, _error, revision) => {
       queryClient.invalidateQueries({ queryKey: submissionsKey })
       queryClient.invalidateQueries({ queryKey: ['session', revision.session_id] })
-      queryClient.invalidateQueries({ queryKey: ['session-revisions', revision.session_id] })
     },
   })
 

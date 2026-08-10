@@ -672,6 +672,31 @@ def test_bulk_outreach_personalizes_and_logs_every_send(client, auth_headers, cr
     assert any("Cloudreach Labs" in html for html in stored)
 
 
+def test_bulk_outreach_returns_suppression_reason_without_changing_status(
+    client, auth_headers, crm_db, monkeypatch
+):
+    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+    person = next(
+        row for row in _people(client, auth_headers)["people"] if row["email"].endswith(".example")
+    )
+
+    response = client.post(
+        "/api/crm/outreach",
+        json={
+            "person_ids": [person["id"]],
+            "subject": "Hello",
+            "body_html": "<p>Hi</p>",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    recipient = response.json()["recipients"][0]
+    assert recipient["status"] == "cancelled"
+    assert recipient["error"] == "demo address — delivery suppressed"
+    assert crm_db.rows("email_outbox")[0]["status"] == "cancelled"
+
+
 def test_outreach_to_a_foreign_person_finds_nobody(client, auth_headers, crm_db):
     _people(client, auth_headers)
     crm_db.seed(

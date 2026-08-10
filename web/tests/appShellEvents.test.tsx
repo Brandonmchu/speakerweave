@@ -15,6 +15,8 @@ const CURRENT_EVENT = {
   location: 'Toronto',
 }
 
+const ORIGINAL_TZ = process.env.TZ
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -73,6 +75,31 @@ describe('AppShell event switcher', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.localStorage.clear()
+    process.env.TZ = ORIGINAL_TZ
+  })
+
+  it('renders the event range in the event timezone, not the viewer timezone', async () => {
+    process.env.TZ = 'America/New_York'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          events: [
+            {
+              ...CURRENT_EVENT,
+              starts_at: '2026-10-12T07:00:00.000Z',
+              ends_at: '2026-10-14T06:59:59.999Z',
+              timezone: 'America/Los_Angeles',
+            },
+          ],
+        })
+      )
+    )
+
+    renderShell()
+
+    expect(await screen.findByText('Oct 12 – Oct 13, 2026')).toBeInTheDocument()
+    expect(screen.queryByText('Oct 12 – Oct 14, 2026')).not.toBeInTheDocument()
   })
 
   it('creates a dated event from the switcher and selects it', async () => {

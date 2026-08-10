@@ -50,6 +50,7 @@ import {
   type ImportResult,
   type OutreachResult,
 } from '@/lib/crmApi'
+import { deliveryStatusLabel } from '@/lib/deliveryStatus'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import {
@@ -1202,7 +1203,9 @@ function OutreachDialog({
                   <span className="text-foreground">
                     {row.name} <span className="text-muted-foreground">&lt;{row.email}&gt;</span>
                   </span>
-                  <Badge variant={row.status === 'sent' ? 'success' : 'muted'}>{row.status}</Badge>
+                  <Badge variant={row.status === 'sent' ? 'success' : 'muted'}>
+                    {deliveryStatusLabel(row.status, row.error)}
+                  </Badge>
                 </li>
               ))}
             </ul>
@@ -1288,7 +1291,9 @@ function OutreachLogDialog({ onClose }: { onClose: () => void }) {
                   <td className="py-2 text-muted-foreground">{entry.to}</td>
                   <td className="py-2 text-foreground">{entry.subject}</td>
                   <td className="py-2">
-                    <Badge variant={entry.status === 'sent' ? 'success' : 'muted'}>{entry.status}</Badge>
+                    <Badge variant={entry.status === 'sent' ? 'success' : 'muted'}>
+                      {deliveryStatusLabel(entry.status, entry.error)}
+                    </Badge>
                   </td>
                 </tr>
               ))}

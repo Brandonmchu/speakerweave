@@ -1347,6 +1347,7 @@ async def send_outreach(
                 "email": email,
                 "subject": subject,
                 "status": status,
+                "error": error,
             }
         )
 

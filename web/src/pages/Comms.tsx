@@ -31,6 +31,7 @@ import {
   type EmailTemplate,
   type EmailTemplateInput,
 } from '@/lib/commsApi'
+import { deliveryStatusLabel } from '@/lib/deliveryStatus'
 import { stripUnsafeHtml } from '@/lib/sanitize'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -207,10 +208,13 @@ export function Comms() {
   const selectedTemplate = templates.find((template) => template.key === selectedTemplateKey)
   const subjectSource = selectedTemplate?.subject ?? customSubject
   const bodySource = selectedTemplate?.body_html ?? customBody
-  const sampleName =
-    availableRecipients.find((recipient) => selectedContactIds.includes(recipient.contact_id))?.name ||
-    previewQuery.data?.sample[0] ||
-    'Maya Okafor'
+  const recipientSample = pickerAvailable
+    ? availableRecipients
+        .filter((recipient) => selectedContactIds.includes(recipient.contact_id))
+        .slice(0, 5)
+        .map((recipient) => recipient.name)
+    : (previewQuery.data?.sample ?? [])
+  const sampleName = recipientSample[0] || 'Maya Okafor'
   const sampleParts = sampleName.trim().split(/\s+/)
   const previewContext = {
     first_name: sampleParts[0] || 'Maya',
@@ -504,8 +508,8 @@ export function Comms() {
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {previewQuery.error
                               ? previewQuery.error.message
-                              : previewQuery.data?.sample.length
-                                ? `Sample: ${previewQuery.data.sample.join(', ')}`
+                              : recipientSample.length
+                                ? `Sample: ${recipientSample.join(', ')}`
                                 : 'Leave a group unchecked to include every value in that group.'}
                           </p>
                         </div>
@@ -719,7 +723,9 @@ export function Comms() {
                           <TableCell className="font-medium text-foreground">{entry.subject || '—'}</TableCell>
                           <TableCell><Badge variant="outline" className="font-mono">{entry.template_key}</Badge></TableCell>
                           <TableCell>
-                            <Badge variant={statusVariant(entry.status)} className="capitalize">{entry.status}</Badge>
+                            <Badge variant={statusVariant(entry.status)} className="capitalize">
+                              {deliveryStatusLabel(entry.status, entry.last_error)}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right text-sm text-muted-foreground" title={entry.last_error || undefined}>
                             {relativeTime(entry.sent_at ?? entry.created_at)}

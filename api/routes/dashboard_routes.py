@@ -194,7 +194,7 @@ async def event_dashboard(event_id: str, auth: tuple = Depends(get_current_user_
         for row in rows(
             await db(
                 lambda: supabase.table("email_outbox")
-                .select("contact_id, template_key, status, sent_at, created_at")
+                .select("contact_id, template_key, status, last_error, sent_at, created_at")
                 .eq("org_id", org_id)
                 .eq("event_id", event_id)
                 .in_("contact_id", contact_ids)
@@ -259,6 +259,7 @@ async def event_dashboard(event_id: str, auth: tuple = Depends(get_current_user_
                         "template_key": email.get("template_key"),
                         "status": email.get("status"),
                         "sent_at": email.get("sent_at"),
+                        "last_error": email.get("last_error"),
                     }
                     if email
                     else None

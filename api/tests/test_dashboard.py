@@ -311,8 +311,34 @@ def test_dashboard_reports_the_last_email(client, auth_headers, dashboard_db):
         "template_key": "acceptance",
         "status": "sent",
         "sent_at": "2026-07-20T12:00:00+00:00",
+        "last_error": None,
     }
     assert speakers["grace@example.com"]["last_email"] is None
+
+
+def test_dashboard_reports_the_last_email_suppression_reason(
+    client, auth_headers, dashboard_db
+):
+    dashboard_db.seed(
+        "email_outbox",
+        {
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "contact_id": GRACE,
+            "template_key": "portal_invite",
+            "status": "cancelled",
+            "last_error": "demo address — delivery suppressed",
+            "created_at": "2026-07-20T12:00:00+00:00",
+        },
+    )
+
+    speakers = speakers_by_email(client.get(DASHBOARD_PATH, headers=auth_headers).json())
+
+    assert speakers["grace@example.com"]["last_email"]["status"] == "cancelled"
+    assert (
+        speakers["grace@example.com"]["last_email"]["last_error"]
+        == "demo address — delivery suppressed"
+    )
 
 
 def test_dashboard_is_empty_before_anyone_submits(client, auth_headers, seeded_db):

@@ -26,6 +26,7 @@ import {
   type SpeakerOnboarding,
   type SubmissionFunnel,
 } from '@/lib/dashboardApi'
+import { deliveryStatusLabel } from '@/lib/deliveryStatus'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -334,7 +335,7 @@ function SpeakerRow({ speaker }: { speaker: SpeakerOnboarding }) {
                 variant={EMAIL_STATUS_VARIANT[speaker.last_email.status] ?? 'muted'}
                 title={fullDate(speaker.last_email.sent_at)}
               >
-                {speaker.last_email.status}
+                {deliveryStatusLabel(speaker.last_email.status, speaker.last_email.last_error)}
               </Badge>
             )}
           </div>

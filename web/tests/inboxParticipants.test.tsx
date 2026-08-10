@@ -60,6 +60,7 @@ const MARCUS_ROW = {
 let writes: Array<{ url: string; method: string; body: unknown }> = []
 let participants: unknown[] = []
 let revisions: unknown[] = []
+let revisionGets = 0
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -91,6 +92,7 @@ describe('Inbox drawer — participants editor', () => {
     writes = []
     participants = [...PRIYA_ROWS]
     revisions = []
+    revisionGets = 0
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -113,6 +115,7 @@ describe('Inbox drawer — participants editor', () => {
         }
 
         if (url.endsWith('/revisions')) {
+          revisionGets += 1
           return jsonResponse({ revisions })
         }
 
@@ -312,6 +315,7 @@ describe('Inbox drawer — participants editor', () => {
     expect(revision).toHaveTextContent('Taming 40-Minute CI')
     expect(revision).toHaveTextContent('Organizer')
 
+    const revisionsBefore = revisionGets
     fireEvent.click(within(revision).getByRole('button', { name: /Restore title/ }))
     await waitFor(() =>
       expect(writes.some((write) =>
@@ -319,5 +323,6 @@ describe('Inbox drawer — participants editor', () => {
         write.method === 'POST'
       )).toBe(true)
     )
+    await waitFor(() => expect(revisionGets).toBeGreaterThan(revisionsBefore))
   })
 })

@@ -25,6 +25,7 @@ export interface LastEmail {
   template_key: string | null
   status: string | null
   sent_at: string | null
+  last_error: string | null
 }
 
 export interface SpeakerOnboarding {

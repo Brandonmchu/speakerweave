@@ -196,12 +196,14 @@ describe('Inbox session editor', () => {
   let session: Record<string, unknown>
   let detailGets: number
   let listGets: number
+  let revisionGets: number
 
   beforeEach(() => {
     patches = []
     session = { ...SUBMISSION }
     detailGets = 0
     listGets = 0
+    revisionGets = 0
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -212,6 +214,10 @@ describe('Inbox session editor', () => {
         if (url.includes('/submissions')) {
           listGets += 1
           return jsonResponse({ event: EVENT, submissions: [session], count: 1 })
+        }
+        if (url.endsWith('/revisions') && method === 'GET') {
+          revisionGets += 1
+          return jsonResponse({ revisions: [] })
         }
         if (url.includes('/api/sessions/') && method === 'PATCH') {
           const body = JSON.parse(String(init?.body ?? '{}'))
@@ -247,6 +253,7 @@ describe('Inbox session editor', () => {
 
     const detailsBefore = detailGets
     const listBefore = listGets
+    const revisionsBefore = revisionGets
     fireEvent.change(titleInput, { target: { value: '  Analytical Engines, Revisited  ' } })
     fireEvent.change(screen.getByTestId('session-abstract-input'), {
       target: { value: 'Now with punch cards.' },
@@ -265,6 +272,7 @@ describe('Inbox session editor', () => {
     await waitFor(() => expect(screen.queryByTestId('session-title-input')).not.toBeInTheDocument())
     await waitFor(() => expect(detailGets).toBeGreaterThan(detailsBefore))
     await waitFor(() => expect(listGets).toBeGreaterThan(listBefore))
+    await waitFor(() => expect(revisionGets).toBeGreaterThan(revisionsBefore))
     expect(await screen.findAllByText('Analytical Engines, Revisited')).not.toHaveLength(0)
   })
 
