@@ -38,14 +38,43 @@ export default defineConfig({
   build: {
     minify: 'esbuild',
     cssMinify: true,
-    // One entry, one chunk. ~160 kB gzipped is well inside the TTI budget; the
-    // default 500 kB warning is measuring uncompressed bytes.
-    chunkSizeWarningLimit: 700,
+    // Organizer-only routes load on demand; keep a warning aligned with the
+    // public entry-chunk budget so accidental eager imports are visible.
+    chunkSizeWarningLimit: 400,
     rollupOptions: {
       output: {
         chunkFileNames: 'assets/js/[name]-[hash].js',
         entryFileNames: 'assets/js/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return undefined
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/react-router/') ||
+            id.includes('/node_modules/react-router-dom/') ||
+            id.includes('/node_modules/scheduler/')
+          ) {
+            return 'framework'
+          }
+          if (id.includes('/node_modules/@clerk/') || id.includes('/node_modules/swr/')) {
+            return 'auth'
+          }
+          if (id.includes('/node_modules/@tanstack/')) return 'query'
+          if (id.includes('/node_modules/date-fns/')) return 'dates'
+          if (
+            id.includes('/node_modules/@radix-ui/') ||
+            id.includes('/node_modules/@floating-ui/') ||
+            id.includes('/node_modules/react-remove-scroll') ||
+            id.includes('/node_modules/aria-hidden/') ||
+            id.includes('/node_modules/use-callback-ref/') ||
+            id.includes('/node_modules/use-sidecar/') ||
+            id.includes('/node_modules/react-style-singleton/')
+          ) {
+            return 'ui'
+          }
+          return 'vendor'
+        },
       },
     },
   },

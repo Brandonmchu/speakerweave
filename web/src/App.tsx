@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 
 import { peekToken, subscribeToken } from '@/lib/api'
@@ -11,19 +11,12 @@ import {
   SignUpPage,
 } from '@/auth/clerk'
 import { AppShell } from '@/shell/AppShell'
-import { Agenda } from '@/pages/Agenda'
-import { ApiDocs } from '@/pages/ApiDocs'
 import { Comms } from '@/pages/Comms'
-import { ContentLibrary } from '@/pages/ContentLibrary'
 import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
-import { Directory } from '@/pages/Directory'
-import { Pipeline } from '@/pages/Pipeline'
 import { Home } from '@/pages/Home'
-import { Evaluation } from '@/pages/Evaluation'
 import { FormEditor } from '@/pages/FormEditor'
 import { Forms } from '@/pages/Forms'
-import { Inbox } from '@/pages/Inbox'
 import { Onboarding } from '@/pages/Onboarding'
 import { Portal } from '@/pages/Portal'
 import { PublicForm } from '@/pages/PublicForm'
@@ -32,9 +25,45 @@ import { SpeakerSignin } from '@/pages/SpeakerSignin'
 import { PublicSchedule } from '@/pages/PublicSchedule'
 import { PublicSpeakers } from '@/pages/PublicSpeakers'
 import { Review } from '@/pages/Review'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { Speakers } from '@/pages/Speakers'
 import { Toaster } from '@/ui/toaster'
+
+const LazyAgenda = lazy(() => import('@/pages/Agenda').then(({ Agenda }) => ({ default: Agenda })))
+const LazyApiDocs = lazy(() =>
+  import('@/pages/ApiDocs').then(({ ApiDocs }) => ({ default: ApiDocs })),
+)
+const LazyContentLibrary = lazy(() =>
+  import('@/pages/ContentLibrary').then(({ ContentLibrary }) => ({ default: ContentLibrary })),
+)
+const LazyDirectory = lazy(() =>
+  import('@/pages/Directory').then(({ Directory }) => ({ default: Directory })),
+)
+const LazyEvaluation = lazy(() =>
+  import('@/pages/Evaluation').then(({ Evaluation }) => ({ default: Evaluation })),
+)
+const LazyInbox = lazy(() => import('@/pages/Inbox').then(({ Inbox }) => ({ default: Inbox })))
+const LazyPipeline = lazy(() =>
+  import('@/pages/Pipeline').then(({ Pipeline }) => ({ default: Pipeline })),
+)
+const LazySettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })),
+)
+const LazySpeakers = lazy(() =>
+  import('@/pages/Speakers').then(({ Speakers }) => ({ default: Speakers })),
+)
+
+function DeferredPage({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div role="status" className="px-4 py-6 text-sm text-muted-foreground md:px-8">
+          Loading…
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
+}
 
 /**
  * Gate for the admin surface. Today it only checks that a dev token exists —
@@ -115,7 +144,14 @@ export default function App() {
         {/* /demo is the one-click demo entrance — always the landing, even when
             already signed in, so re-entering the demo stays possible. */}
         <Route path="/demo" element={<Home />} />
-        <Route path="/developers" element={<ApiDocs />} />
+        <Route
+          path="/developers"
+          element={
+            <DeferredPage>
+              <LazyApiDocs />
+            </DeferredPage>
+          }
+        />
         <Route path="/e/:slug/schedule" element={<PublicSchedule />} />
         <Route path="/e/:slug/speakers" element={<PublicSpeakers />} />
 
@@ -158,17 +194,59 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/submissions" element={<Inbox />} />
+          <Route
+            path="/submissions"
+            element={
+              <DeferredPage>
+                <LazyInbox />
+              </DeferredPage>
+            }
+          />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/content" element={<ContentLibrary />} />
+          <Route
+            path="/content"
+            element={
+              <DeferredPage>
+                <LazyContentLibrary />
+              </DeferredPage>
+            }
+          />
           <Route path="/forms" element={<Forms />} />
           <Route path="/forms/:formId" element={<FormEditor />} />
-          <Route path="/evaluation" element={<Evaluation />} />
+          <Route
+            path="/evaluation"
+            element={
+              <DeferredPage>
+                <LazyEvaluation />
+              </DeferredPage>
+            }
+          />
           <Route path="/comms" element={<Comms />} />
           {/* Org-level CRM: above events, not inside one. */}
-          <Route path="/directory" element={<Directory />} />
-          <Route path="/pipeline" element={<Pipeline />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route
+            path="/directory"
+            element={
+              <DeferredPage>
+                <LazyDirectory />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="/pipeline"
+            element={
+              <DeferredPage>
+                <LazyPipeline />
+              </DeferredPage>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <DeferredPage>
+                <LazySettingsPage />
+              </DeferredPage>
+            }
+          />
           {/* First run: no event yet. Forms/Settings redirect here. */}
           <Route path="/onboarding" element={<Onboarding />} />
         </Route>
@@ -183,7 +261,14 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/agenda" element={<Agenda />} />
+          <Route
+            path="/agenda"
+            element={
+              <DeferredPage>
+                <LazyAgenda />
+              </DeferredPage>
+            }
+          />
         </Route>
         <Route
           element={
@@ -192,7 +277,14 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/speakers" element={<Speakers />} />
+          <Route
+            path="/speakers"
+            element={
+              <DeferredPage>
+                <LazySpeakers />
+              </DeferredPage>
+            }
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

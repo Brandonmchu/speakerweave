@@ -3,8 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   CalendarDays,
+  Check,
   ClipboardList,
   Code2,
+  Copy,
+  ExternalLink,
   MessagesSquare,
   Star,
   Users,
@@ -19,6 +22,8 @@ import {
   featuredSpeakersUrl,
 } from '@/lib/featuredEvent'
 import { Button } from '@/ui/button'
+
+export const REPO_URL = '#'
 
 const HIGHLIGHTS = [
   {
@@ -47,6 +52,38 @@ const EXPLORE = [
   { icon: Code2, label: 'Developers / API', to: DEVELOPERS_URL },
 ]
 
+const STACK = [
+  { name: 'FastAPI', role: 'typed API and hosted MCP server' },
+  { name: 'React + Vite', role: 'fast, focused web interface' },
+  { name: 'Supabase (Postgres)', role: 'durable program data' },
+  { name: 'Clerk', role: 'organizer authentication' },
+  { name: 'Resend', role: 'transactional speaker email' },
+  { name: 'Railway', role: 'application hosting' },
+]
+
+function CopyConfigButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/15 active:scale-[0.98]"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value)
+          setCopied(true)
+        } catch {
+          // The code block remains selectable when the Clipboard API is unavailable.
+        }
+      }}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  )
+}
+
 /**
  * Public marketing landing (routes: `/` when unauthenticated, and `/demo`).
  *
@@ -63,6 +100,47 @@ export function Home() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const mcpEndpoint = `${window.location.origin}/mcp`
+  const aiApps = [
+    {
+      title: 'Add to Claude',
+      steps: [
+        'Create an API token in Settings.',
+        'Add this remote server to your Claude MCP configuration.',
+        'Restart Claude and ask it to list your events.',
+      ],
+      config: JSON.stringify(
+        {
+          mcpServers: {
+            speakerweave: {
+              type: 'http',
+              url: mcpEndpoint,
+              headers: { Authorization: 'Bearer YOUR_API_TOKEN' },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      title: 'Add to ChatGPT',
+      steps: [
+        'Create an API token in Settings.',
+        'Add a custom MCP connector with the URL and header below.',
+        'Enable it in a chat and work with your conference.',
+      ],
+      config: JSON.stringify(
+        {
+          name: 'SpeakerWeave',
+          url: mcpEndpoint,
+          headers: { Authorization: 'Bearer YOUR_API_TOKEN' },
+        },
+        null,
+        2,
+      ),
+    },
+  ]
 
   async function enterDemo() {
     if (loading) return
@@ -202,6 +280,132 @@ export function Home() {
               </Link>
             ))}
           </div>
+        </section>
+
+        {/* ── open source ───────────────────────────────────────────────── */}
+        <section
+          data-testid="open-source-section"
+          className="mt-20 grid gap-6 border-y border-border py-10 sm:grid-cols-[1fr_1.45fr] sm:items-start"
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Community built
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+              Open source
+            </h2>
+          </div>
+          <div>
+            <p className="text-base leading-relaxed text-foreground">
+              SpeakerWeave is open source, so organizers and builders can inspect it, extend it,
+              and help shape what comes next.
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              License posture: source-available for the community.
+            </p>
+            <a
+              href={REPO_URL}
+              aria-label="SpeakerWeave source repository"
+              className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
+            >
+              View the repository
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          </div>
+        </section>
+
+        {/* ── stack ─────────────────────────────────────────────────────── */}
+        <section data-testid="stack-section" className="mt-20">
+          <div className="grid gap-4 sm:grid-cols-[1fr_2fr] sm:items-end">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                Architecture
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                The stack
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              A compact, production-ready foundation with explicit boundaries between the product
+              and its infrastructure.
+            </p>
+          </div>
+
+          <dl className="mt-6 grid border-y border-border sm:grid-cols-2">
+            {STACK.map(({ name, role }, index) => (
+              <div
+                key={name}
+                className={`grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 border-border px-1 py-3.5 sm:py-4 ${
+                  index > 0 ? 'border-t' : ''
+                } ${index === 1 ? 'sm:border-t-0' : ''} ${
+                  index % 2 === 1 ? 'sm:border-l sm:pl-5' : 'sm:pr-5'
+                }`}
+              >
+                <dt className="text-sm font-semibold text-foreground">{name}</dt>
+                <dd className="text-sm text-muted-foreground">{role}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-5 rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+            <span className="font-semibold text-foreground">Bring your own.</span> Auth (Clerk),
+            email (Resend), and hosting meet the app at clear interfaces—swap them without touching
+            the domain core.
+          </div>
+        </section>
+
+        {/* ── MCP clients ───────────────────────────────────────────────── */}
+        <section data-testid="ai-apps-section" className="mt-20">
+          <div className="grid gap-4 sm:grid-cols-[1fr_2fr] sm:items-end">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">AI apps</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                Use it from your AI
+              </h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              SpeakerWeave ships a hosted MCP server at{' '}
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
+                {mcpEndpoint}
+              </code>
+              . Claude and ChatGPT use the same endpoint.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            {aiApps.map(({ title, steps, config }) => (
+              <article key={title} className="rounded-xl border border-border bg-card p-5 shadow-soft">
+                <h3 className="text-base font-semibold text-foreground">{title}</h3>
+                <ol className="mt-3 space-y-1.5 text-sm text-muted-foreground">
+                  {steps.map((step, index) => (
+                    <li key={step} className="flex gap-2.5">
+                      <span className="font-mono text-xs font-semibold text-primary">{index + 1}.</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+                <div className="relative mt-5 overflow-hidden rounded-lg bg-foreground">
+                  <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                    <span className="font-mono text-[11px] uppercase tracking-wider text-white/60">
+                      MCP config
+                    </span>
+                    <CopyConfigButton value={config} label={`Copy ${title} MCP configuration`} />
+                  </div>
+                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-primary-subtle">
+                    <code>{config}</code>
+                  </pre>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <Link
+            to="/developers"
+            className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
+          >
+            See the full MCP tool list
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </section>
 
         {/* ── real-account sign in ───────────────────────────────────────── */}

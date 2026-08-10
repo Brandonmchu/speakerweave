@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 SPEAKER_ROLE = "speaker"
 SUBMITTER_ROLE = "submitter"
+PUBLIC_READ_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300"
 
 # The tiny, dependency-free embed loader. Generic across events: it reads the
 # slug and widget from its own <script> tag's data-* attributes rather than
@@ -333,7 +334,9 @@ async def _speakers_by_session(
 
 @router.get("/{event_slug}/schedule")
 @limiter.limit(RATE_PUBLIC_DEFAULT)
-async def get_schedule(request: Request, event_slug: str, tz: str | None = None):
+async def get_schedule(
+    request: Request, response: Response, event_slug: str, tz: str | None = None
+):
     """The published programme, grouped by day and ordered by time then room.
 
     Only ``accepted`` sessions that are scheduled (``starts_at`` set) *and placed
@@ -342,6 +345,7 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
     conference day, so publishing it would invent one. Days and times are grouped
     in ``tz`` (an IANA name) when given, else the event's own timezone.
     """
+    response.headers["Cache-Control"] = PUBLIC_READ_CACHE_CONTROL
     event = await _load_event(event_slug)
     org_id, event_id = event["org_id"], event["id"]
 
@@ -407,9 +411,10 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
 
 @router.get("/{event_slug}/speakers")
 @limiter.limit(RATE_PUBLIC_DEFAULT)
-async def get_speakers(request: Request, event_slug: str):
+async def get_speakers(request: Request, response: Response, event_slug: str):
     """The speaker gallery: every distinct speaker on an accepted session,
     alphabetical by last name, each with their sessions and public bio."""
+    response.headers["Cache-Control"] = PUBLIC_READ_CACHE_CONTROL
     event = await _load_event(event_slug)
     org_id, event_id = event["org_id"], event["id"]
 
@@ -547,7 +552,9 @@ async def get_calendar_feed(request: Request, event_slug: str):
 
 @router.get("/{event_slug}/session/{session_id}")
 @limiter.limit(RATE_PUBLIC_DEFAULT)
-async def get_session_detail(request: Request, event_slug: str, session_id: str):
+async def get_session_detail(
+    request: Request, response: Response, event_slug: str, session_id: str
+):
     """One accepted session's public detail, for the schedule's detail modal.
 
     The schedule list clamps its cards; this returns the *full* description plus
@@ -555,6 +562,7 @@ async def get_session_detail(request: Request, event_slug: str, session_id: str)
     sessions of this event resolve — anything else (wrong org, pending, unknown
     id) is a 404, never a peek at another event's programme.
     """
+    response.headers["Cache-Control"] = PUBLIC_READ_CACHE_CONTROL
     event = await _load_event(event_slug)
     org_id, event_id = event["org_id"], event["id"]
 

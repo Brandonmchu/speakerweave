@@ -273,6 +273,22 @@ def test_unknown_slug_404s(program_client, program_db):
     assert program_client.get("/public/program/nope/speakers").status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/public/program/{SLUG}/schedule",
+        f"/public/program/{SLUG}/speakers",
+        f"/public/program/{SLUG}/session/{S1}",
+    ],
+)
+def test_public_program_reads_have_short_shared_cache(program_client, program_db, path):
+    response = program_client.get(path)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == (
+        "public, max-age=60, stale-while-revalidate=300"
+    )
+
+
 # ── calendar feed ───────────────────────────────────────────────────────────
 
 

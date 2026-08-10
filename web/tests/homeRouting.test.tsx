@@ -76,6 +76,12 @@ describe('Home + public-alias routing', () => {
     expect(pathname()).toBe('/e/some-conf/schedule')
   })
 
+  it('loads the deferred developer reference route', async () => {
+    renderApp('/developers')
+    expect(await screen.findByRole('heading', { name: 'dais API' })).toBeInTheDocument()
+    expect(pathname()).toBe('/developers')
+  })
+
   it('sends an unauthenticated /agenda guesser to the public schedule', async () => {
     renderApp('/agenda')
     await screen.findByTestId('pathname')

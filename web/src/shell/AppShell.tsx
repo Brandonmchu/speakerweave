@@ -25,8 +25,8 @@ import {
 
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
+import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
 import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
-import { fromDateInput, localTimezone, timezoneOptions } from '@/pages/SettingsPage'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'

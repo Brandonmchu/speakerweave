@@ -5,7 +5,7 @@ import { CalendarDays, Sparkles } from 'lucide-react'
 
 import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
-import { fromDateInput, localTimezone, timezoneOptions } from '@/pages/SettingsPage'
+import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
