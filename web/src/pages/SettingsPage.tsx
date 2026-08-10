@@ -549,7 +549,7 @@ function formatUsed(value?: string | null): string {
   return `Last used ${new Date(t).toLocaleDateString()}`
 }
 
-/** Keys for the read-only public /v1 API. The raw key is shown once, right
+/** Keys for the org-scoped public /v1 and MCP APIs. The raw key is shown once, right
  *  after creation; the list only ever holds metadata. */
 function ApiTokensSection() {
   const queryClient = useQueryClient()
@@ -594,7 +594,7 @@ function ApiTokensSection() {
           <div>
             <h2 className="text-base font-semibold text-foreground">API tokens</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Keys for the read-only public API.{' '}
+              Keys for the public REST and MCP integration APIs.{' '}
               <Link to="/developers" className="text-primary hover:underline">
                 Read the API docs
               </Link>

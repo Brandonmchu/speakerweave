@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Recognisable, greppable, and unlikely to collide with a JWT.
 KEY_PREFIX = "dais_"
 
-# A single read scope is enough for every /v1 endpoint today. Writes are out of
-# scope for the public API, so a token that only carries "read" can still do
-# everything the API exposes — the scope is recorded for the day writes land.
+# Scope enforcement predates neither the read nor write integration surface;
+# existing tokens carry this legacy scope value and remain valid for all /v1
+# and MCP operations. The scope is retained for backward-compatible metadata.
 DEFAULT_SCOPES: tuple[str, ...] = ("read",)
 
 

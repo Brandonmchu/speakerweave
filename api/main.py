@@ -1,6 +1,6 @@
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,26 +35,42 @@ from services import outbox_worker
 setup_logging(default_level=settings.log_level)
 logger = get_logger(__name__)
 
+try:
+    from mcp_server import mcp_app
+    from mcp_server import mcp_server as hosted_mcp_server
+except ModuleNotFoundError as exc:
+    # Keep basic app/test workflows usable before a local environment has run
+    # `pip install -r requirements.txt`; deployed builds install the pinned SDK.
+    if not (exc.name or "").startswith(("mcp", "httpx2")):
+        raise
+    mcp_app = None
+    hosted_mcp_server = None
+    logger.warning("MCP SDK is not installed; /mcp is unavailable")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the email_outbox drain loop where enabled (prod), stop it on
     shutdown. Off by default so the test suite runs without a background task."""
     task = None
-    if outbox_worker.is_enabled():
-        task = asyncio.create_task(outbox_worker.run_forever())
-        logger.info("outbox worker enabled")
-    else:
-        logger.info("outbox worker disabled (set OUTBOX_WORKER_ENABLED=1 to enable)")
-    try:
-        yield
-    finally:
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+    async with AsyncExitStack() as stack:
+        if hosted_mcp_server is not None:
+            await stack.enter_async_context(hosted_mcp_server.session_manager.run())
+            logger.info("hosted MCP server enabled at /mcp")
+        if outbox_worker.is_enabled():
+            task = asyncio.create_task(outbox_worker.run_forever())
+            logger.info("outbox worker enabled")
+        else:
+            logger.info("outbox worker disabled (set OUTBOX_WORKER_ENABLED=1 to enable)")
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 app = FastAPI(
@@ -75,7 +91,14 @@ app.add_middleware(SecurityHeadersMiddleware)
 _CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 # Explicit, not wildcard. Any NEW browser-sent custom header must be added
 # here in the same change, or the whole preflight 400s — not just that header.
-_CORS_ALLOW_HEADERS = ["Authorization", "Content-Type"]
+_CORS_ALLOW_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Last-Event-ID",
+    "Mcp-Protocol-Version",
+    "Mcp-Session-Id",
+    "x-access-token",
+]
 
 logger.info("CORS allowed origins: %s", settings.cors_allowed_origins)
 app.add_middleware(
@@ -84,7 +107,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=_CORS_ALLOW_METHODS,
     allow_headers=_CORS_ALLOW_HEADERS,
-    expose_headers=["retry-after"],
+    expose_headers=["retry-after", "Mcp-Session-Id"],
 )
 
 app.include_router(health_router)
@@ -107,6 +130,8 @@ app.include_router(comms_router)
 app.include_router(crm_router)
 app.include_router(v1_router)
 app.include_router(api_key_admin_router)
+if mcp_app is not None:
+    app.mount("/mcp", mcp_app, name="mcp")
 
 
 if __name__ == "__main__":

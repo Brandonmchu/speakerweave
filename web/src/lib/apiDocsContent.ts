@@ -1,188 +1,194 @@
-/**
- * Content for the public API docs page (route: /developers).
- *
- * Kept as data (not JSX) so the page is a thin renderer and the examples stay
- * copy-pasteable and easy to keep in sync with the backend's `/v1` serializers
- * in api/routes/v1_routes.py. This is the "dais speaks Sessionboard's protocol"
- * reference: base path, the x-access-token header, the list + /search variants,
- * the {data, page, pageSize, total} envelope, friendly IDs and pagination.
- */
+/** Copy and structured reference data for the public Developers page. */
 
 export const API_BASE_PATH = '/v1'
 export const AUTH_HEADER = 'x-access-token'
 
-export interface DocParam {
-  name: string
-  type: string
-  description: string
-}
+export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
-export interface DocEndpoint {
-  /** Anchor id + nav label. */
-  id: string
-  method: 'GET' | 'POST'
+export interface RestEndpoint {
+  method: HttpMethod
   path: string
+  description: string
+}
+
+export interface CurlExample {
   title: string
   description: string
-  params?: DocParam[]
-  /** A ready-to-run curl example. */
-  request: string
-  /** The JSON body a successful call returns. */
-  response: string
+  code: string
 }
 
-export interface DocSection {
-  id: string
-  title: string
-  endpoints: DocEndpoint[]
+export interface McpTool {
+  name: string
+  description: string
 }
 
-const PAGINATION_PARAMS: DocParam[] = [
-  { name: 'page', type: 'integer', description: '1-based page number (1–999). Defaults to 1.' },
+export const AUTH_EXAMPLE = `curl https://your-dais-host${API_BASE_PATH}/events \\
+  -H "${AUTH_HEADER}: dais_your_api_token"`
+
+export const REST_ENDPOINTS: RestEndpoint[] = [
+  { method: 'GET', path: '/events', description: 'List the organization’s events.' },
+  { method: 'GET', path: '/events/{event_id}', description: 'Get one event.' },
   {
-    name: 'pageSize',
-    type: 'integer',
-    description: 'Items per page. Defaults to 25, maximum 100.',
+    method: 'GET',
+    path: '/events/{event_id}/submissions',
+    description: 'List submissions; filter by status or track.',
+  },
+  {
+    method: 'POST',
+    path: '/events/{event_id}/submissions/search',
+    description: 'Search submissions with filters in a JSON body.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/sessions',
+    description: 'Sessionboard-compatible alias for submissions.',
+  },
+  {
+    method: 'POST',
+    path: '/events/{event_id}/sessions/search',
+    description: 'Sessionboard-compatible submission search alias.',
+  },
+  { method: 'GET', path: '/submissions/{submission_id}', description: 'Get one submission.' },
+  {
+    method: 'POST',
+    path: '/events/{event_id}/submissions',
+    description: 'Create a submission and its submitter contact.',
+  },
+  {
+    method: 'PATCH',
+    path: '/submissions/{submission_id}',
+    description: 'Update status, title, or abstract.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/speakers',
+    description: 'List speakers; filter by status or text.',
+  },
+  { method: 'GET', path: '/speakers/{speaker_id}', description: 'Get one speaker.' },
+  {
+    method: 'POST',
+    path: '/events/{event_id}/speakers',
+    description: 'Create a speaker, including status and logistics.',
+  },
+  {
+    method: 'PATCH',
+    path: '/speakers/{speaker_id}',
+    description: 'Update profile, speaker status, or logistics.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/contacts',
+    description: 'Sessionboard-compatible speaker directory.',
+  },
+  {
+    method: 'POST',
+    path: '/events/{event_id}/contacts/search',
+    description: 'Sessionboard-compatible speaker directory search.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/schedule',
+    description: 'Get the complete schedule, rooms, and tracks.',
+  },
+  {
+    method: 'PUT',
+    path: '/sessions/{submission_id}/schedule',
+    description: 'Place a session in a room at a start time.',
+  },
+  {
+    method: 'DELETE',
+    path: '/sessions/{submission_id}/schedule',
+    description: 'Remove a session from the schedule.',
+  },
+  { method: 'GET', path: '/events/{event_id}/tracks', description: 'List event tracks.' },
+  { method: 'GET', path: '/events/{event_id}/formats', description: 'List event formats.' },
+  { method: 'GET', path: '/events/{event_id}/rooms', description: 'List event rooms.' },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/content-items',
+    description: 'List content deliverables; filter by type or status.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/content-status',
+    description: 'Read deliverable counts and outstanding speakers.',
+  },
+  {
+    method: 'GET',
+    path: '/events/{event_id}/evaluation-plans',
+    description: 'List evaluation plans and review progress.',
+  },
+  {
+    method: 'GET',
+    path: '/evaluation-plans/{plan_id}/summary',
+    description: 'Read aggregate and per-submission scores.',
   },
 ]
 
-const STATUS_PARAM: DocParam = {
-  name: 'status',
-  type: 'string',
-  description:
-    'Optional. One of draft, pending, accept_queue, accepted, decline_queue, declined, withdrawn.',
-}
-
-const SESSIONS_RESPONSE = `{
-  "data": [
-    {
-      "id": "b1e5c2a0-6d3f-4e9a-9f21-0a2b3c4d5e6f",
-      "friendly_id": "SESS-8",
-      "title": "Scaling Vector Search to a Billion Embeddings",
-      "description": "<p>A deep dive into ANN indexes…</p>",
-      "status": "accepted",
-      "starts_at": "2026-09-14T17:00:00+00:00",
-      "ends_at": "2026-09-14T17:45:00+00:00",
-      "is_abstract": false,
-      "room": { "id": "9c1…", "name": "Main Hall", "capacity": 300 },
-      "track": { "id": "3af…", "name": "AI Infrastructure", "color": "#4962E2" },
-      "speakers": [
-        { "id": "7d2…", "full_name": "Grace Hopper", "email": "grace@example.com" }
-      ]
-    }
-  ],
-  "page": 1,
-  "pageSize": 25,
-  "total": 1
-}`
-
-const CONTACTS_RESPONSE = `{
-  "data": [
-    {
-      "id": "7d2f9b10-2c44-4a1e-8b3d-9e0f1a2b3c4d",
-      "full_name": "Ada Lovelace",
-      "email": "ada@example.com",
-      "company_name": "Analytical Engines",
-      "title": "Principal Engineer",
-      "about": "Works on compilers and program synthesis."
-    }
-  ],
-  "page": 1,
-  "pageSize": 25,
-  "total": 1
-}`
-
-export const AUTH_EXAMPLE = `curl https://your-dais-host${API_BASE_PATH}/events \\
-  -H "${AUTH_HEADER}: dais_9f8c7b6a5d4e3f2a1b0c9d8e7f6a5b4c"`
-
-export const DOC_SECTIONS: DocSection[] = [
+export const CURL_EXAMPLES: CurlExample[] = [
   {
-    id: 'events',
-    title: 'Events',
-    endpoints: [
-      {
-        id: 'list-events',
-        method: 'GET',
-        path: `${API_BASE_PATH}/events`,
-        title: 'List events',
-        description: "Every event in the token's organization, newest first.",
-        request: `curl https://your-dais-host${API_BASE_PATH}/events \\
-  -H "${AUTH_HEADER}: $DAIS_API_KEY"`,
-        response: `{
-  "data": [
-    {
-      "id": "11111111-1111-1111-1111-111111111111",
-      "name": "AI Builders Summit",
-      "slug": "ai-builders-summit",
-      "starts_at": "2026-09-14T16:00:00+00:00",
-      "ends_at": "2026-09-16T02:00:00+00:00",
-      "timezone": "America/Los_Angeles"
-    }
-  ]
-}`,
-      },
-    ],
+    title: 'Filter submissions',
+    description: 'Status and track accept their ids or natural names where applicable.',
+    code: `curl "https://your-dais-host/v1/events/{event_id}/submissions?status=pending&track=AI&page=1&pageSize=25" \\
+  -H "x-access-token: dais_your_api_token"`,
   },
   {
-    id: 'sessions',
-    title: 'Sessions',
-    endpoints: [
-      {
-        id: 'list-sessions',
-        method: 'GET',
-        path: `${API_BASE_PATH}/events/{event_id}/sessions`,
-        title: 'List sessions',
-        description:
-          "Sessions for an event, with their room, track and speakers nested inline. Unscheduled sessions sort last.",
-        params: [STATUS_PARAM, ...PAGINATION_PARAMS],
-        request: `curl "https://your-dais-host${API_BASE_PATH}/events/{event_id}/sessions?status=accepted&pageSize=25" \\
-  -H "${AUTH_HEADER}: $DAIS_API_KEY"`,
-        response: SESSIONS_RESPONSE,
-      },
-      {
-        id: 'search-sessions',
-        method: 'POST',
-        path: `${API_BASE_PATH}/events/{event_id}/sessions/search`,
-        title: 'Search sessions',
-        description:
-          "The POST twin of the list endpoint — same result envelope, filters in a JSON body (Sessionboard's POST /resource = search convention).",
-        params: [STATUS_PARAM, ...PAGINATION_PARAMS],
-        request: `curl -X POST https://your-dais-host${API_BASE_PATH}/events/{event_id}/sessions/search \\
-  -H "${AUTH_HEADER}: $DAIS_API_KEY" \\
+    title: 'Create a submission',
+    description: 'The submitter contact is reused by normalized email when it already exists.',
+    code: `curl -X POST "https://your-dais-host/v1/events/{event_id}/submissions" \\
+  -H "x-access-token: dais_your_api_token" \\
   -H "Content-Type: application/json" \\
-  -d '{ "status": "accepted", "page": 1, "pageSize": 25 }'`,
-        response: SESSIONS_RESPONSE,
-      },
-    ],
+  -d '{
+    "title": "Agents that plan conferences",
+    "abstract": "A practical field report.",
+    "submitter_email": "speaker@example.com",
+    "submitter_first_name": "Ada",
+    "submitter_last_name": "Lovelace"
+  }'`,
   },
   {
-    id: 'contacts',
-    title: 'Contacts',
-    endpoints: [
-      {
-        id: 'list-contacts',
-        method: 'GET',
-        path: `${API_BASE_PATH}/events/{event_id}/contacts`,
-        title: 'List contacts',
-        description: 'Speakers and people attached to an event, sorted by name.',
-        params: PAGINATION_PARAMS,
-        request: `curl "https://your-dais-host${API_BASE_PATH}/events/{event_id}/contacts?pageSize=25" \\
-  -H "${AUTH_HEADER}: $DAIS_API_KEY"`,
-        response: CONTACTS_RESPONSE,
-      },
-      {
-        id: 'search-contacts',
-        method: 'POST',
-        path: `${API_BASE_PATH}/events/{event_id}/contacts/search`,
-        title: 'Search contacts',
-        description: 'The POST twin of the contacts list — same envelope, paging in a JSON body.',
-        params: PAGINATION_PARAMS,
-        request: `curl -X POST https://your-dais-host${API_BASE_PATH}/events/{event_id}/contacts/search \\
-  -H "${AUTH_HEADER}: $DAIS_API_KEY" \\
+    title: 'Decide and edit a submission',
+    description: 'Patch any combination of status, title, and abstract.',
+    code: `curl -X PATCH "https://your-dais-host/v1/submissions/{submission_id}" \\
+  -H "x-access-token: dais_your_api_token" \\
   -H "Content-Type: application/json" \\
-  -d '{ "page": 1, "pageSize": 25 }'`,
-        response: CONTACTS_RESPONSE,
-      },
-    ],
+  -d '{ "status": "accepted", "title": "Agents that run conferences" }'`,
   },
+  {
+    title: 'Place a session',
+    description: 'Room may be a room id or its exact name; start is ISO-8601.',
+    code: `curl -X PUT "https://your-dais-host/v1/sessions/{submission_id}/schedule" \\
+  -H "x-access-token: dais_your_api_token" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "room": "Main Hall", "start": "2026-09-14T17:00:00Z" }'`,
+  },
+]
+
+export const MCP_TOOLS: McpTool[] = [
+  { name: 'list_events', description: 'List events in the authenticated organization.' },
+  {
+    name: 'list_submissions',
+    description: 'List submissions with optional event, status, and track filters.',
+  },
+  { name: 'get_submission', description: 'Get one submission and its related program data.' },
+  {
+    name: 'decide_submission',
+    description: 'Accept, decline, or queue a submission with optional feedback.',
+  },
+  { name: 'list_speakers', description: 'List and search the speaker directory.' },
+  { name: 'get_speaker', description: 'Get a speaker’s profile, status, and logistics.' },
+  { name: 'invite_speaker_to_portal', description: 'Queue a speaker portal invitation.' },
+  { name: 'list_schedule', description: 'Read an event’s complete schedule.' },
+  { name: 'place_session', description: 'Place a session into a room and time.' },
+  { name: 'unschedule_session', description: 'Remove a session from the schedule.' },
+  { name: 'content_status', description: 'Read content deliverables and outstanding counts.' },
+  {
+    name: 'remind_outstanding_content',
+    description: 'Queue deduplicated reminders for missing content.',
+  },
+  {
+    name: 'evaluation_summary',
+    description: 'List evaluation plans or read one plan’s score summary.',
+  },
+  { name: 'ai_triage', description: 'Run AI first-pass triage for an evaluation plan.' },
 ]

@@ -26,23 +26,37 @@ describe('ApiDocs page', () => {
     expect(screen.getAllByText(/\/v1/).length).toBeGreaterThan(0)
   })
 
-  it('lists the events, sessions and contacts endpoints with both list and search', () => {
+  it('lists the broadened REST surface in an endpoint table', () => {
     renderDocs()
-    expect(screen.getByRole('heading', { name: 'List events' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'List sessions' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Search sessions' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'List contacts' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Search contacts' })).toBeInTheDocument()
-    // GET/POST method tags are present.
+    expect(screen.getByRole('heading', { name: 'REST endpoints' })).toBeInTheDocument()
+    expect(screen.getAllByText('/v1/events/{event_id}/submissions').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('/v1/speakers/{speaker_id}').length).toBeGreaterThan(0)
+    expect(screen.getByText('/v1/events/{event_id}/schedule')).toBeInTheDocument()
+    expect(screen.getByText('/v1/events/{event_id}/content-items')).toBeInTheDocument()
+    expect(screen.getByText('/v1/events/{event_id}/content-status')).toBeInTheDocument()
+    expect(screen.getByText('/v1/evaluation-plans/{plan_id}/summary')).toBeInTheDocument()
     expect(screen.getAllByText('GET').length).toBeGreaterThan(0)
     expect(screen.getAllByText('POST').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('PATCH').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('PUT').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('DELETE').length).toBeGreaterThan(0)
   })
 
-  it('documents pagination and friendly IDs', () => {
+  it('documents pagination, filters, and errors', () => {
     renderDocs()
     expect(screen.getByText('Pagination')).toBeInTheDocument()
-    expect(screen.getByText('Friendly IDs')).toBeInTheDocument()
-    expect(screen.getAllByText(/SESS-8/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Filtering')).toBeInTheDocument()
+    expect(screen.getByText('Errors & fields')).toBeInTheDocument()
+  })
+
+  it('documents the hosted MCP endpoint, auth, resources, and tools', () => {
+    renderDocs()
+    expect(screen.getByRole('heading', { name: 'MCP server' })).toBeInTheDocument()
+    expect(screen.getByText(`${window.location.origin}/mcp`)).toBeInTheDocument()
+    expect(screen.getAllByText(/Bearer dais_your_api_token/).length).toBeGreaterThan(0)
+    expect(screen.getByText('list_submissions')).toBeInTheDocument()
+    expect(screen.getByText('remind_outstanding_content')).toBeInTheDocument()
+    expect(screen.getByText('ai_triage')).toBeInTheDocument()
   })
 
   it('exposes copy buttons on code blocks', () => {

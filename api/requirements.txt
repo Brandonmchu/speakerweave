@@ -15,6 +15,8 @@ anthropic
 python-multipart
 slowapi
 anyio
+# Official Model Context Protocol SDK for the hosted /mcp endpoint.
+mcp==2.0.0
 # zoneinfo needs a tz database; slim container images often ship without one,
 # and invite emails render local times (services/ics.py falls back to UTC).
 tzdata
