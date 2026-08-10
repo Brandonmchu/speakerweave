@@ -175,6 +175,29 @@ def ensure_review_window_open(plan: dict, *, now: datetime | None = None) -> Non
         )
 
 
+def review_open_state(plan: dict, *, now: datetime | None = None) -> tuple[bool, str | None]:
+    """``(can a reviewer write, why not)`` — the reviewer portal's closed-state.
+
+    The portal used to decide this itself from ``plan.status`` alone, which
+    disagreed with the server in both directions: a plan the organizer had not
+    opened yet showed a bare "Review closed" over a window that was plainly
+    valid, and a plan whose window had run out still showed open controls that
+    403'd on save. This is the single verdict, derived from exactly what
+    :func:`save_review` enforces, and it carries the reason so the portal can
+    say which of the two it is instead of contradicting the dates beside it.
+    """
+    status = plan.get("status")
+    if status != "open":
+        if status == "closed":
+            return False, "This review round has been closed by the organizer."
+        return False, "This review round hasn't opened yet — the organizer still has it in draft."
+    try:
+        ensure_review_window_open(plan, now=now)
+    except HTTPException as exc:
+        return False, str(exc.detail)
+    return True, None
+
+
 # ── multi-track helpers (migration 004) ────────────────────────────────────
 # A session's tracks live in `session_tracks`; `sessions.track_id` remains the
 # PRIMARY track (the first one selected) and is still written by every writer,
@@ -1969,13 +1992,38 @@ async def _speaker_map(session_ids: list[str], org_id: str) -> dict[str, list[di
     contacts_by_id = {row["id"]: row for row in contacts}
     result: dict[str, list[dict]] = {session_id: [] for session_id in session_ids}
     participants.sort(key=lambda row: (not bool(row.get("is_primary")), str(row.get("role"))))
+
+    # One entry per PERSON, not per participant row. A CFP submitter is stored
+    # twice on purpose — once as 'speaker', once as 'submitter' — so that adding
+    # a co-speaker can't drop them from the program. Handing both rows to the
+    # reviewer printed "Presented by Priya Raman, Priya Raman". The roles are
+    # merged onto the single entry instead, so nothing is lost.
+    seen: dict[tuple[str, str], dict] = {}
     for participant in participants:
         contact = contacts_by_id.get(participant.get("contact_id"))
         if not contact:
             continue
-        result.setdefault(participant["session_id"], []).append(
-            {**contact, "role": participant.get("role"), "is_primary": participant.get("is_primary")}
-        )
+        session_id = participant["session_id"]
+        key = (str(session_id), str(contact["id"]))
+        role = participant.get("role")
+        existing = seen.get(key)
+        if existing:
+            if role and role not in existing["roles"]:
+                existing["roles"].append(role)
+            existing["is_primary"] = bool(existing.get("is_primary")) or bool(
+                participant.get("is_primary")
+            )
+            continue
+        entry = {
+            **contact,
+            # `role` stays the first (most primary) role for every existing
+            # reader; `roles` is the full set for anything that wants to label.
+            "role": role,
+            "roles": [role] if role else [],
+            "is_primary": bool(participant.get("is_primary")),
+        }
+        seen[key] = entry
+        result.setdefault(session_id, []).append(entry)
     return result
 
 
@@ -2055,21 +2103,28 @@ async def reviewer_home(org_id: str, evaluator_id: str) -> dict:
             }
         )
 
+    review_open, closed_reason = review_open_state(plan)
     return {
         "evaluator": evaluator,
         "plan": {
-            key: plan.get(key)
-            for key in (
-                "id",
-                "name",
-                "instructions",
-                "scale",
-                "criteria",
-                "anonymized",
-                "status",
-                # the reviewer should see their own deadline
-                *WINDOW_FIELDS,
-            )
+            **{
+                key: plan.get(key)
+                for key in (
+                    "id",
+                    "name",
+                    "instructions",
+                    "scale",
+                    "criteria",
+                    "anonymized",
+                    "status",
+                    # the reviewer should see their own deadline
+                    *WINDOW_FIELDS,
+                )
+            },
+            # Whether this reviewer can actually write, decided here rather than
+            # inferred from `status` in the browser — see review_open_state.
+            "review_open": review_open,
+            "closed_reason": closed_reason,
         },
         "assignments": output_assignments,
     }

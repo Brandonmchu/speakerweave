@@ -552,6 +552,10 @@ async def upload_task_file(
                     "mimetype": mimetype,
                     "size": len(content),
                     "version": version,
+                    # Stamped here, not left to the column default: "v2" means
+                    # nothing without a date, and both the portal and the
+                    # organizer's library render this per version.
+                    "created_at": _now_iso(),
                 }
             )
             .execute(),
@@ -630,13 +634,24 @@ async def add_comment(org_id: str, contact_id: str, assignment_id: str, body: st
 
 
 async def set_headshot(org_id: str, contact_id: str, filename: str | None, content: bytes) -> dict:
-    await load_contact(org_id, contact_id)  # ownership gate
+    """The speaker sets their headshot from their portal profile.
+
+    Two things come out of this, not one. ``contacts.photo_url`` is what the
+    profile and the public speaker pages render — but a bare URL on the contact
+    row is invisible to the organizer's content library, which reads collected
+    deliverables out of ``files``. So the upload is ALSO recorded as a versioned
+    ``files`` row (contact-scoped, no task assignment), giving it a filename, a
+    size and an upload time the library can show. That is the linkage that used
+    to be missing: an organizer saw a speaker's headshot row with nothing behind
+    it even though the speaker had uploaded one.
+    """
+    contact = await load_contact(org_id, contact_id)  # ownership gate
     try:
         ext, mimetype = validate_upload(filename, content, category="image")
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _, public_url = await store_upload(org_id, contact_id, ext, content, mimetype)
+    bucket_path, public_url = await store_upload(org_id, contact_id, ext, content, mimetype)
     updated = first(
         await db(
             lambda: supabase.table("contacts")
@@ -649,4 +664,66 @@ async def set_headshot(org_id: str, contact_id: str, filename: str | None, conte
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Speaker not found")
-    return {"photo_url": public_url}
+
+    version = await _record_profile_headshot(
+        org_id, contact, bucket_path, filename or f"headshot{ext}", mimetype, len(content)
+    )
+    return {"photo_url": public_url, "version": version}
+
+
+async def _record_profile_headshot(
+    org_id: str,
+    contact: dict,
+    bucket_path: str,
+    filename: str,
+    mimetype: str,
+    size: int,
+) -> int | None:
+    """File the profile headshot as a versioned ``files`` row.
+
+    Same no-overwrite rule as task uploads: each headshot is a new row with the
+    next version number, so the organizer sees a history rather than a single
+    mutable URL. Best-effort — the headshot itself is already saved on the
+    contact, and the library falls back to ``photo_url`` for rows that predate
+    this, so a failure here must not fail the upload the speaker just made.
+    """
+    contact_id = contact.get("id")
+    try:
+        prior = rows(
+            await db(
+                lambda: supabase.table("files")
+                .select("version")
+                .eq("org_id", org_id)
+                .eq("contact_id", contact_id)
+                .is_("task_assignment_id", "null")
+                .execute(),
+                "portal_headshot_versions",
+            )
+        )
+        version = 1 + max((int(f.get("version") or 1) for f in prior), default=0)
+        await db(
+            lambda: supabase.table("files")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "event_id": contact.get("event_id"),
+                    "contact_id": contact_id,
+                    # no task_assignment_id: this is a profile deliverable, and
+                    # that null IS how the library tells the two linkages apart.
+                    "bucket_path": bucket_path,
+                    "filename": filename,
+                    "mimetype": mimetype,
+                    "size": size,
+                    "version": version,
+                    "created_at": _now_iso(),
+                }
+            )
+            .execute(),
+            "portal_headshot_file_insert",
+        )
+        return version
+    except Exception:
+        logger.warning(
+            "portal: could not record headshot file row contact=%s", contact_id, exc_info=True
+        )
+        return None

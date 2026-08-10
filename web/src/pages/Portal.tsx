@@ -555,7 +555,9 @@ function TaskRow({
   const versions = task.versions ?? []
   const priorVersions = versions.filter((v) => !v.is_current)
   const comments = task.comments ?? []
-  const currentVersion = versions.find((v) => v.is_current)?.version ?? task.file?.version
+  const current = versions.find((v) => v.is_current)
+  const currentVersion = current?.version ?? task.file?.version
+  const currentUpload = current?.created_at ?? null
 
   const sendComment = useMutation({
     mutationFn: (body: string) => postPortalComment(task.assignment_id, body),
@@ -645,6 +647,14 @@ function TaskRow({
                     v{currentVersion}
                   </span>
                 ) : null}
+                {currentUpload && (
+                  <span
+                    className="shrink-0 text-xs text-muted-foreground"
+                    data-testid="current-version-time"
+                  >
+                    Uploaded {timestamp(currentUpload)}
+                  </span>
+                )}
               </a>
               {priorVersions.length > 0 && (
                 <div>
@@ -664,7 +674,7 @@ function TaskRow({
                       data-testid="version-history"
                     >
                       {priorVersions.map((version) => (
-                        <li key={version.file_id} className="flex items-center gap-2 text-xs">
+                        <li key={version.file_id} className="flex flex-wrap items-center gap-2 text-xs">
                           <span className="rounded bg-foreground/5 px-1.5 py-0.5 font-medium text-muted-foreground">
                             v{version.version}
                           </span>
@@ -681,6 +691,13 @@ function TaskRow({
                           ) : (
                             <span className="truncate text-muted-foreground">{version.filename}</span>
                           )}
+                          {/* A version without a date is just a number — say when
+                              it landed so "previous" means something. */}
+                          <span className="text-muted-foreground" data-testid="version-time">
+                            {version.created_at
+                              ? `Uploaded ${timestamp(version.created_at)}`
+                              : 'Upload time not recorded'}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -770,6 +787,11 @@ function TaskRow({
                           }
                         >
                           {comment.author_role}
+                        </span>
+                        {/* Feedback with no time is un-actionable: "please
+                            re-upload" reads differently a month later. */}
+                        <span className="text-[11px] text-muted-foreground" data-testid="comment-time">
+                          {comment.created_at ? timestamp(comment.created_at) : 'Time not recorded'}
                         </span>
                       </div>
                       <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
@@ -893,6 +915,15 @@ function initials(name: string): string {
 function formatDate(value: string): string {
   try {
     return format(parseISO(value), 'MMM d, yyyy')
+  } catch {
+    return value
+  }
+}
+
+/** Date AND time — what an upload or a piece of feedback needs to be placed. */
+function timestamp(value: string): string {
+  try {
+    return format(parseISO(value), 'MMM d, yyyy · HH:mm')
   } catch {
     return value
   }

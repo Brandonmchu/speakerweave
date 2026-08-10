@@ -18,10 +18,14 @@ from pydantic import BaseModel, EmailStr, Field
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
 from services import submitter_selfservice
 from services.forms import (
+    abstract_from_answers,
+    classify_taxonomy_fields,
     load_form_layout,
     load_question_rules,
+    resolve_taxonomy_ids,
     sanitize_html,
     to_public_field,
+    with_live_choices,
 )
 from services.question_rules import validate_submission
 from services.supabase_helpers import db, first, rows
@@ -35,11 +39,6 @@ logger = logging.getLogger(__name__)
 # unbounded string is a cheap way to fill the sessions table.
 MAX_ANSWER_KEYS = 100
 MAX_ANSWER_STR_LEN = 10000
-
-# Only a choice question can name a track. Matching every free-text answer
-# against the track list would turn an abstract that mentions "Platform" into a
-# track assignment.
-TRACK_ANSWER_FIELD_TYPES = {"dropdown", "multi_select"}
 
 # A talk can be co-presented. Three is the practical ceiling for a conference
 # session and, more to the point, a bound on how many contacts one anonymous
@@ -107,65 +106,50 @@ def _clean_answers(raw: dict[str, Any], field_ids: set[str]) -> dict[str, Any]:
     return cleaned
 
 
-def _choice_values(value: Any) -> list[str]:
-    """A choice answer as a list. A multi_select posts its picks as one
-    comma-separated string (the answer map is scalar-only by design)."""
-    if value is None or isinstance(value, bool):
-        return []
-    text = str(value).strip()
-    if not text:
-        return []
-    return [part.strip() for part in text.split(",") if part.strip()]
-
-
-async def _tracks_from_answers(
-    org_id: str, event_id: str, fields: list[dict], answers: dict[str, Any]
-) -> list[str]:
-    """Track ids this submission selected, in the order the speaker chose them.
-
-    A talk is submitted to one or more tracks: a choice answer that matches a
-    track's name (or carries its id outright) selects it, and a multi_select
-    can select several at once. The first is the session's PRIMARY track and
-    goes on `sessions.track_id` exactly as a single-track submission always
-    did; the rest join it in `session_tracks`. No match = no track, which is
-    also what happened before this existed.
-    """
-    answered = [
-        field
-        for field in fields
-        if field.get("type") in TRACK_ANSWER_FIELD_TYPES and answers.get(field["id"]) is not None
-    ]
-    if not answered:
-        return []
-
-    tracks = rows(
-        await db(
-            lambda: supabase.table("tracks")
-            .select("id, name")
-            .eq("event_id", event_id)
-            .eq("org_id", org_id)
-            .execute(),
-            "public_submission_tracks",
-        )
+def _ordered_taxonomy(records: list[dict]) -> list[dict]:
+    """`order` then name — the order Settings lists them in (taxonomy_routes)."""
+    return sorted(
+        records,
+        key=lambda row: (
+            row["order"] if isinstance(row.get("order"), int) else 0,
+            str(row.get("name") or "").casefold(),
+        ),
     )
-    if not tracks:
-        return []
-    by_key: dict[str, str] = {}
-    for track in tracks:
-        by_key.setdefault(str(track["id"]).casefold(), track["id"])
-        name = str(track.get("name") or "").strip().casefold()
-        if name:
-            by_key.setdefault(name, track["id"])
 
-    # `fields` is already in page/order order, so "first" is the first choice
-    # on the form, not whatever order the browser serialized.
-    chosen: list[str] = []
-    for field in answered:
-        for value in _choice_values(answers.get(field["id"])):
-            track_id = by_key.get(value.casefold())
-            if track_id and track_id not in chosen:
-                chosen.append(track_id)
-    return chosen
+
+async def _live_taxonomy(org_id: str, event_id: str) -> tuple[list[dict], list[dict]]:
+    """This event's CURRENT tracks and formats, org- and event-scoped.
+
+    The truth behind every Track / Session format question: read at request time
+    so a rename in Settings shows up on the next form load, and so a submitted
+    answer is matched against the names the speaker was actually offered.
+    """
+
+    async def _load(table: str, columns: str) -> list[dict]:
+        try:
+            return _ordered_taxonomy(
+                rows(
+                    await db(
+                        lambda: supabase.table(table)
+                        .select(columns)
+                        .eq("org_id", org_id)
+                        .eq("event_id", event_id)
+                        .execute(),
+                        f"public_live_{table}",
+                    )
+                )
+            )
+        except APIError:
+            # A read that fails costs the live names, not the page: the stored
+            # snapshot still renders and a submission still lands.
+            logger.warning("public: could not read live %s event_id=%s", table, event_id)
+            return []
+
+    return await _load("tracks", "id, name, order"), await _load("formats", "id, name")
+
+
+def _taxonomy_names(records: list[dict]) -> list[str]:
+    return [str(row.get("name")).strip() for row in records if str(row.get("name") or "").strip()]
 
 
 def _clean_co_speakers(
@@ -219,6 +203,23 @@ async def _public_fields(form: dict) -> list[dict]:
     return [to_public_field(entry) for entry in layout]
 
 
+async def _fields_and_taxonomy(
+    form: dict,
+) -> tuple[list[dict], dict[str, str], list[dict], list[dict]]:
+    """The form's public fields plus the live taxonomy they are resolved against.
+
+    One place decides which questions are the Track and Session format ones, so
+    the choices the renderer shows and the rows a submission maps to come from
+    the same verdict.
+    """
+    fields = await _public_fields(form)
+    tracks, formats = await _live_taxonomy(form["org_id"], form["event_id"])
+    classified = classify_taxonomy_fields(
+        fields, _taxonomy_names(tracks), _taxonomy_names(formats)
+    )
+    return fields, classified, tracks, formats
+
+
 @router.get("/forms/{slug}")
 @limiter.limit(RATE_PUBLIC_DEFAULT)
 async def get_public_form(request: Request, slug: str):
@@ -244,6 +245,14 @@ async def get_public_form(request: Request, slug: str):
     if settings.get("confirmation_html"):
         settings["confirmation_html"] = sanitize_html(settings["confirmation_html"])
 
+    # Track / Session format choices come from the event's tables, not from the
+    # snapshot the question was built with: an organizer who renames a track in
+    # Settings must see the new name on the very next load of this form.
+    fields, classified, tracks, formats = await _fields_and_taxonomy(form)
+    fields = with_live_choices(
+        fields, classified, _taxonomy_names(tracks), _taxonomy_names(formats)
+    )
+
     return {
         "form": {
             "id": form["id"],
@@ -254,7 +263,7 @@ async def get_public_form(request: Request, slug: str):
             "settings": settings,
         },
         "event": event,
-        "fields": await _public_fields(form),
+        "fields": fields,
         "question_rules": await load_question_rules(form["id"], form["org_id"]),
     }
 
@@ -350,7 +359,7 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
 
     # Whitelist the answer set to the form's own fields before it touches rule
     # evaluation, and reject an oversized/non-scalar payload outright.
-    fields = await _public_fields(form)
+    fields, classified, tracks, formats = await _fields_and_taxonomy(form)
     field_ids = {field["id"] for field in fields}
     answers_in = _clean_answers(payload.answers, field_ids)
 
@@ -416,14 +425,24 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
     if friendly_id_raw is None:
         raise HTTPException(status_code=500, detail="Could not allocate submission id")
 
-    track_ids = await _tracks_from_answers(org_id, event_id, fields, answers)
+    # Track AND format are resolved against the event's live rows by the name
+    # the speaker was actually offered — so a renamed track still maps, and the
+    # format question stops being answered into a void.
+    track_ids = resolve_taxonomy_ids(fields, classified, "track", answers, tracks)
+    format_ids = resolve_taxonomy_ids(fields, classified, "format", answers, formats)
+
+    # The public form has no separate description input: the abstract is one of
+    # its questions. Fall back to that answer so `sessions.description` holds
+    # the prose the speaker wrote — the submitter's edit form, the reviewer
+    # scorecard and the organizer drawer all read this column.
+    description = payload.description.strip() or abstract_from_answers(fields, answers)
 
     session_payload = {
         "org_id": org_id,
         "event_id": event_id,
         "friendly_id_raw": int(friendly_id_raw),
         "title": payload.title.strip(),
-        "description": payload.description,
+        "description": description,
         "status": "pending",
         "is_abstract": True,
         "source_form_id": form["id"],
@@ -436,6 +455,8 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
         # already knows about track_id (schedule, program, v1, dashboard) sees
         # this submission exactly as it would have seen a single-track one.
         session_payload["track_id"] = track_ids[0]
+    if format_ids:
+        session_payload["format_id"] = format_ids[0]
     session = first(
         await db(
             lambda: supabase.table("sessions")

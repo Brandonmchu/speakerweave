@@ -8,6 +8,7 @@ import {
   getSubmitterSubmissions,
   withdrawSubmitterSubmission,
   type SubmissionStatus,
+  type SubmitterEditInput,
   type SubmitterSubmission,
   type SubmitterTaxonomyItem,
 } from '@/lib/api'
@@ -281,20 +282,26 @@ function EditForm({
   onCancel: () => void
   onSaved: () => Promise<void>
 }) {
-  const [title, setTitle] = useState(submission.title)
-  const [abstract, setAbstract] = useState(submission.abstract)
+  // Every input starts from the stored value — an edit form that opens blank
+  // does not just look wrong, it SAVES that blank over what the speaker wrote.
+  const [title, setTitle] = useState(submission.title ?? '')
+  const [abstract, setAbstract] = useState(submission.abstract ?? '')
   const [trackId, setTrackId] = useState(submission.track_id ?? '')
   const [formatId, setFormatId] = useState(submission.format_id ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: () =>
-      editSubmitterSubmission(submission.id, token, {
-        title: title.trim(),
-        abstract: abstract.trim(),
-        track_id: trackId || null,
-        format_id: formatId || null,
-      }),
+    mutationFn: () => {
+      // PATCH only what actually changed. A field the speaker never touched is
+      // left out of the body entirely, so the server keeps its stored value
+      // instead of being handed this form's idea of it.
+      const patch: SubmitterEditInput = {}
+      if (title.trim() !== (submission.title ?? '').trim()) patch.title = title.trim()
+      if (abstract.trim() !== (submission.abstract ?? '').trim()) patch.abstract = abstract.trim()
+      if ((trackId || null) !== (submission.track_id ?? null)) patch.track_id = trackId || null
+      if ((formatId || null) !== (submission.format_id ?? null)) patch.format_id = formatId || null
+      return editSubmitterSubmission(submission.id, token, patch)
+    },
     onSuccess: () => onSaved(),
   })
 

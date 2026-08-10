@@ -874,3 +874,186 @@ def test_a_second_email_token_cannot_read_the_first_submitters_talks(client, pub
     ]
     assert ada_titles == ["Ada's talk"]
     assert grace_titles == ["Grace's talk"]
+
+
+# ── the form's taxonomy choices are LIVE, not a snapshot ────────────────────
+# fields.options.choices froze the track/format names as they were when the
+# question was built. Renaming a track in Settings left the CFP offering names
+# that no longer existed — and answers to them mapped to no track at all.
+
+F_FORMAT = "55555555-5555-5555-5555-555555555509"
+FORMAT_TALK = "88888888-8888-8888-8888-888888888801"
+FORMAT_WORKSHOP = "88888888-8888-8888-8888-888888888802"
+
+
+def add_format_question(db) -> None:
+    db.seed(
+        "fields",
+        {
+            "id": F_FORMAT,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Session format",
+            "field_type": "dropdown",
+            "options": {"choices": ["Talk", "Workshop"]},
+            "required": False,
+        },
+    )
+    db.seed(
+        "form_fields",
+        {
+            "id": "ff5",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_FORMAT,
+            "page": 1,
+            "order": 4,
+            "required": False,
+        },
+    )
+
+
+def add_formats(db) -> None:
+    db.seed(
+        "formats",
+        {
+            "id": FORMAT_TALK,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Talk",
+            "default_duration_min": 30,
+        },
+        {
+            "id": FORMAT_WORKSHOP,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Workshop",
+            "default_duration_min": 90,
+        },
+        # another org's format on the same event id — never offered, never mapped
+        {
+            "id": "foreign-format",
+            "org_id": OTHER_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Fireside",
+            "default_duration_min": 20,
+        },
+    )
+
+
+def _field(body: dict, field_id: str) -> dict:
+    return next(field for field in body["fields"] if field["id"] == field_id)
+
+
+def test_track_choices_come_from_the_event_not_the_snapshot(client, public_db):
+    add_track_question(public_db)
+    add_tracks(public_db)
+    # the organizer renames a track in Settings; the form's snapshot is stale
+    public_db.rows("tracks")[0]["name"] = "Platform Engineering"
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert _field(body, F_TRACK)["options"]["choices"] == ["Platform Engineering", "AI"]
+
+
+def test_format_choices_come_from_the_event_too(client, public_db):
+    add_format_question(public_db)
+    add_formats(public_db)
+    public_db.rows("formats")[1]["name"] = "Workshop (120 min)"
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert _field(body, F_FORMAT)["options"]["choices"] == ["Talk", "Workshop (120 min)"]
+
+
+def test_live_choices_never_cross_the_org_boundary(client, public_db):
+    add_format_question(public_db)
+    add_formats(public_db)
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert "Fireside" not in _field(body, F_FORMAT)["options"]["choices"]
+
+
+def test_the_snapshot_still_renders_when_the_event_has_no_such_taxonomy(client, public_db):
+    """An event with no formats keeps the question the organizer built."""
+    add_format_question(public_db)
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert _field(body, F_FORMAT)["options"]["choices"] == ["Talk", "Workshop"]
+
+
+def test_a_renamed_track_still_maps_the_answer_it_was_offered_under(client, public_db):
+    add_track_question(public_db)
+    add_tracks(public_db)
+    public_db.rows("tracks")[0]["name"] = "Platform Engineering"
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_TRACK: "Platform Engineering"}),
+    )
+
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0]["track_id"] == TRACK_PLATFORM
+
+
+def test_a_format_answer_lands_on_the_session(client, public_db):
+    """It never did: format_id was simply never derived from the answers."""
+    add_format_question(public_db)
+    add_formats(public_db)
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_FORMAT: "Workshop"}),
+    )
+
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0]["format_id"] == FORMAT_WORKSHOP
+
+
+def test_a_format_answer_is_not_read_as_a_track(client, public_db):
+    add_track_question(public_db)
+    add_tracks(public_db)
+    add_format_question(public_db)
+    add_formats(public_db)
+
+    client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={F_ABSTRACT: "A tour.", F_TRACK: "AI", F_FORMAT: "Workshop"}
+        ),
+    )
+
+    session = public_db.rows("sessions")[0]
+    assert session["track_id"] == TRACK_AI
+    assert session["format_id"] == FORMAT_WORKSHOP
+
+
+# ── the abstract the speaker typed reaches sessions.description ─────────────
+# The public form has no separate description input — the abstract is a form
+# QUESTION. Storing only the answer left `description` empty, which is what the
+# submitter's own edit form (and the reviewer's scorecard) render.
+
+
+def test_the_abstract_answer_becomes_the_session_description(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(description="", answers={F_ABSTRACT: "One paragraph, as asked."}),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+    assert session["description"] == "One paragraph, as asked."
+    # the answer is still stored verbatim; nothing moved, it was copied
+    assert session["form_answers"][F_ABSTRACT] == "One paragraph, as asked."
+
+
+def test_an_explicit_description_still_wins(client, public_db):
+    """A caller that posts its own description is not overwritten."""
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(description="Posted directly.", answers={F_ABSTRACT: "The answer."}),
+    )
+
+    assert response.status_code == 201
+    assert public_db.rows("sessions")[0]["description"] == "Posted directly."

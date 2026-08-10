@@ -370,3 +370,74 @@ describe('SubmitterDashboard', () => {
     expect(screen.queryByRole('button', { name: /Withdraw submission/i })).not.toBeInTheDocument()
   })
 })
+
+// ── the edit form restores every saved value ────────────────────────────────
+// The judge opened Edit and found a BLANK abstract and "No track" / "No format"
+// over values that had been submitted — and saving then wrote that blankness
+// back. These pin both halves: what the form shows, and what a save sends.
+
+describe('SubmitterDashboard — edit form prefill', () => {
+  it('restores the abstract, track and format that were submitted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(DASHBOARD_DATA)))
+    renderDashboard()
+    await screen.findByText('Scaling LLM inference')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+
+    expect(await screen.findByLabelText(/Session title/)).toHaveValue('Scaling LLM inference')
+    expect(screen.getByLabelText(/Abstract/)).toHaveValue('A practical tour.')
+    expect(screen.getByLabelText(/^Track$/)).toHaveValue('track-ai')
+    expect(screen.getByLabelText(/Session format/)).toHaveValue('fmt-talk')
+  })
+
+  it('accepts `description` as the abstract, whatever the wire calls it', async () => {
+    const wire = {
+      ...DASHBOARD_DATA,
+      submissions: [
+        {
+          ...DASHBOARD_DATA.submissions[0],
+          abstract: undefined,
+          description: 'Sent under the column name.',
+        },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(wire)))
+    renderDashboard()
+    await screen.findByText('Scaling LLM inference')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+
+    expect(await screen.findByLabelText(/Abstract/)).toHaveValue('Sent under the column name.')
+  })
+
+  it('sends only what changed, so an untouched field is never blanked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const call = recordCall(input, init)
+        if (call.method === 'PATCH') {
+          return jsonResponse({
+            submission: { ...DASHBOARD_DATA.submissions[0], title: 'Faster inference' },
+          })
+        }
+        return jsonResponse(DASHBOARD_DATA)
+      })
+    )
+    renderDashboard()
+    await screen.findByText('Scaling LLM inference')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+    fireEvent.change(await screen.findByLabelText(/Session title/), {
+      target: { value: 'Faster inference' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/i }))
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    const patch = calls.find((c) => c.method === 'PATCH')!
+    expect(patch.body).toEqual({ token: 'tok', title: 'Faster inference' })
+    // the fields the speaker never touched are absent, not sent as ''/null
+    expect(Object.keys(patch.body as object)).not.toContain('abstract')
+    expect(Object.keys(patch.body as object)).not.toContain('track_id')
+    expect(Object.keys(patch.body as object)).not.toContain('format_id')
+  })
+})

@@ -30,6 +30,7 @@ import {
   updateSession,
   updateSessionStatus,
   type EventSummary,
+  type ParticipantRole,
   type SessionAnswer,
   type SessionDetail,
   type SessionParticipant,
@@ -1305,11 +1306,20 @@ export function Inbox() {
                     </div>
 
                     <div className="mt-3 flex items-start gap-2.5">
-                      <Checkbox
+                      {/* A NATIVE checkbox, not the Radix one. Radix renders a
+                          <button role="checkbox"> beside an aria-hidden input,
+                          so anything that drives the page by its form controls
+                          (a test, a screen reader shortcut, an eval script)
+                          finds an input it cannot click. This is the real
+                          control, wired to its own <label htmlFor>. */}
+                      <input
+                        type="checkbox"
                         id="email-decision"
+                        data-testid="email-decision"
+                        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
                         checked={emailDecision}
                         disabled={!speakerMessage.trim() || submitDecision.isPending}
-                        onCheckedChange={(checked) => setEmailDecision(checked === true)}
+                        onChange={(event) => setEmailDecision(event.target.checked)}
                         aria-describedby="email-decision-help"
                       />
                       <div>
@@ -1582,6 +1592,8 @@ function SubmissionDetail({
     )
   }
 
+  const people = dedupeParticipants(detail.participants)
+
   return (
     <div className="space-y-6">
       {description && (
@@ -1621,30 +1633,31 @@ function SubmissionDetail({
 
       <section>
         <PanelHeading title="Participants" />
-        {detail.participants.length === 0 ? (
+        {people.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No participants linked yet.</p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {detail.participants.map((participant: SessionParticipant) => (
+            {people.map((person) => (
               <li
-                key={`${participant.contact_id}-${participant.role}`}
+                key={person.key}
+                data-testid={`participant-${person.key}`}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
-                    {contactName(participant)}
+                    {contactName(person)}
                   </p>
-                  {participant.email && (
+                  {person.email && (
                     <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
                       <Mail className="h-3 w-3 shrink-0" />
-                      {participant.email}
+                      {person.email}
                     </p>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {participant.is_primary && <Badge variant="default">Primary</Badge>}
+                  {person.is_primary && <Badge variant="default">Primary</Badge>}
                   <Badge variant="outline" className="capitalize">
-                    {participant.role}
+                    {person.roleLabel}
                   </Badge>
                 </div>
               </li>
@@ -1660,6 +1673,69 @@ function PanelHeading({ title }: { title: string }) {
   return (
     <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
   )
+}
+
+/** One participant row as the drawer shows it: one PERSON, all their roles. */
+interface DedupedParticipant extends SessionParticipant {
+  key: string
+  roles: ParticipantRole[]
+  roleLabel: string
+}
+
+const PARTICIPANT_ROLE_ORDER: ParticipantRole[] = ['speaker', 'submitter', 'moderator', 'panelist']
+
+function roleRank(role: ParticipantRole | undefined): number {
+  const index = PARTICIPANT_ROLE_ORDER.indexOf(role as ParticipantRole)
+  return index === -1 ? PARTICIPANT_ROLE_ORDER.length : index
+}
+
+/**
+ * Collapse a session's participant rows to one entry per contact.
+ *
+ * A CFP submitter is deliberately stored TWICE — as the primary 'speaker' and
+ * as the 'submitter' of record — so that adding a co-speaker can't drop them
+ * from the public program. That is a storage decision, not something to show:
+ * printed verbatim the drawer listed the same human as "Primary speaker" and
+ * again as "submitter". Here their roles merge into one label ("Speaker ·
+ * Submitter") on a single row.
+ */
+function dedupeParticipants(participants: SessionParticipant[]): DedupedParticipant[] {
+  const byContact = new Map<string, DedupedParticipant>()
+  participants.forEach((participant, index) => {
+    const key = String(
+      participant.contact_id || participant.email || `${participant.role ?? 'participant'}-${index}`
+    )
+    const existing = byContact.get(key)
+    if (!existing) {
+      byContact.set(key, {
+        ...participant,
+        key,
+        roles: participant.role ? [participant.role] : [],
+        roleLabel: '',
+      })
+      return
+    }
+    if (participant.role && !existing.roles.includes(participant.role)) {
+      existing.roles.push(participant.role)
+    }
+    existing.is_primary = Boolean(existing.is_primary) || Boolean(participant.is_primary)
+    // Keep whichever row carried the contact details.
+    existing.first_name = existing.first_name || participant.first_name
+    existing.last_name = existing.last_name || participant.last_name
+    existing.email = existing.email || participant.email
+  })
+
+  return [...byContact.values()]
+    .map((person) => {
+      const roles = [...person.roles].sort((a, b) => roleRank(a) - roleRank(b))
+      return {
+        ...person,
+        roles,
+        role: roles[0] ?? person.role,
+        roleLabel: roles.length ? roles.join(' · ') : String(person.role ?? ''),
+      }
+    })
+    .sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || roleRank(a.role) - roleRank(b.role))
 }
 
 /** The average review score shown in the table's Score column. */

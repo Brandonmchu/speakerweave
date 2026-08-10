@@ -799,6 +799,137 @@ def build_outbox() -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# COLLECTED CONTENT (files behind the delivered onboarding items)
+# ═══════════════════════════════════════════════════════════════════════════
+# A task_assignment status is a CLAIM ("we have their headshot"); the files row
+# is the evidence. Seeding the claim without the evidence produced a content
+# library that said "Received" over a detail panel reading "Nothing uploaded
+# yet" — so every delivered item below gets a real object in the bucket, a real
+# files row, and the assignment pointer that makes it current.
+#
+# contact_idx -> how many versions that speaker uploaded of task 4's headshot.
+# Two versions on one of them so version history / restore has something to show.
+CONTENT_TASK_IDX = 4  # "Finalize bio/photos" — the one file_request task
+_CONTENT_FILES = {1: 1, 2: 1, 4: 2, 8: 1, 10: 1}
+# Tint per speaker so the seeded headshots are visibly different files.
+_CONTENT_TINTS = {1: (74, 98, 226), 2: (16, 152, 118), 4: (206, 96, 54), 8: (140, 84, 196), 10: (35, 130, 190)}
+
+
+def _png(rgb: tuple[int, int, int], size: int = 240) -> bytes:
+    """A small solid-colour PNG — a stand-in headshot with real image bytes.
+
+    Written by hand (zlib + struct) so the seeder needs no image dependency and
+    the bytes still pass the upload validator's magic-byte sniff.
+    """
+    import struct
+    import zlib
+
+    raw = b"".join(b"\x00" + bytes(rgb) * size for _ in range(size))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def seed_content_files() -> int:
+    """Give every delivered content item a real file, version history and pointer.
+
+    Idempotent: an assignment that already has files is left alone, and the
+    storage upload upserts, so re-running never duplicates a version.
+    """
+    task_id = _task_id(CONTENT_TASK_IDX)
+    assignments = (
+        supabase.table("task_assignments")
+        .select("id, contact_id, status, file_id")
+        .eq("org_id", ORG)
+        .eq("task_id", task_id)
+        .execute()
+        .data
+        or []
+    )
+    by_contact = {a.get("contact_id"): a for a in assignments}
+
+    written = 0
+    for contact_idx, version_count in _CONTENT_FILES.items():
+        contact_id = _contact_id(contact_idx)
+        assignment = by_contact.get(contact_id)
+        if not assignment:
+            continue
+        existing = (
+            supabase.table("files")
+            .select("id")
+            .eq("org_id", ORG)
+            .eq("task_assignment_id", assignment["id"])
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            continue
+
+        current_id = None
+        for version in range(1, version_count + 1):
+            path = f"{ORG}/{contact_id}/demo-headshot-v{version}.png"
+            data = _png(_CONTENT_TINTS.get(contact_idx, (90, 90, 110)))
+            supabase.storage.from_("portal-files").upload(
+                path, data, {"content-type": "image/png", "upsert": "true"}
+            )
+            row = (
+                supabase.table("files")
+                .insert(
+                    {
+                        "org_id": ORG,
+                        "event_id": EVENT,
+                        "contact_id": contact_id,
+                        "task_assignment_id": assignment["id"],
+                        "bucket_path": path,
+                        "filename": f"headshot-v{version}.png",
+                        "mimetype": "image/png",
+                        "size": len(data),
+                        "version": version,
+                        "created_at": _ago(days=version_count - version + 2),
+                    }
+                )
+                .execute()
+                .data
+            )
+            if row:
+                current_id = row[0]["id"]
+                written += 1
+
+        if current_id:
+            supabase.table("task_assignments").update({"file_id": current_id}).eq(
+                "id", assignment["id"]
+            ).eq("org_id", ORG).execute()
+
+        # The denied item is only a story if the speaker can read WHY.
+        if assignment.get("status") == "denied":
+            supabase.table("content_comments").insert(
+                {
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "task_assignment_id": assignment["id"],
+                    "contact_id": contact_id,
+                    "author_role": "organizer",
+                    "author_label": "Organizer",
+                    "body": (
+                        "Thanks! This one is a little low-res for the printed program — "
+                        "could you send a version at least 1200px wide?"
+                    ),
+                    "created_at": _ago(days=1),
+                }
+            ).execute()
+    return written
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # RESET / SEED
 # ═══════════════════════════════════════════════════════════════════════════
 _ALL_CONTACT_IDS = [_contact_id(i) for i in range(1, len(_CONTACT_SPEC) + 1)]
@@ -879,6 +1010,7 @@ def seed() -> dict:
     counts["tasks"] = _insert("tasks", build_tasks())
     counts["task_assignments"] = _insert("task_assignments", build_task_assignments())
     counts["task_assignments"] += asyncio.run(_provision_accepted_speakers())
+    counts["files"] = seed_content_files()
     counts["evaluation_plans"] = _insert("evaluation_plans", [build_plan()])
     counts["evaluators"] = _insert("evaluators", build_evaluators())
     assignments, reviews = build_assignments_and_reviews()
@@ -899,8 +1031,14 @@ def main(argv: list[str]) -> int:
         reset()
     elif cmd == "seed":
         seed()
+    elif cmd == "content":
+        # Backfill just the collected files onto an already-seeded database.
+        print(f"content: {seed_content_files()} file version(s) written")
     else:
-        print(f"usage: python -m scripts.seed_demo [seed|reset]  (got {cmd!r})", file=sys.stderr)
+        print(
+            f"usage: python -m scripts.seed_demo [seed|reset|content]  (got {cmd!r})",
+            file=sys.stderr,
+        )
         return 2
     return 0
 

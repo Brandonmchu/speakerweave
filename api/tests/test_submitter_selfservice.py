@@ -401,3 +401,130 @@ def test_withdraw_of_a_foreign_submission_404s(client, selfservice_db):
 def test_withdraw_requires_a_token(client, selfservice_db):
     resp = client.post(f"/public/submissions/{SESSION_ID}/withdraw", json={})
     assert resp.status_code == 401
+
+
+# ── the manage page prefills what the speaker actually submitted ────────────
+# The edit form binds straight to this payload. A CFP submission stores its
+# abstract as a form ANSWER and (before the mapping fix) never resolved a
+# format at all, so the form opened with a blank abstract and "No track" / "No
+# format" over values the speaker had given — and saving wrote that blankness.
+
+F_ABSTRACT = "55555555-5555-5555-5555-555555555501"
+F_TRACK = "55555555-5555-5555-5555-555555555502"
+F_FORMAT = "55555555-5555-5555-5555-555555555503"
+
+
+def seed_cfp_questions(db) -> None:
+    db.seed(
+        "fields",
+        {
+            "id": F_ABSTRACT,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Abstract",
+            "field_type": "textarea",
+            "options": {"max_length": 2000},
+            "required": True,
+        },
+        {
+            "id": F_TRACK,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Track",
+            "field_type": "dropdown",
+            "options": {"choices": ["Platform"]},
+            "required": False,
+        },
+        {
+            "id": F_FORMAT,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Session format",
+            "field_type": "dropdown",
+            "options": {"choices": ["Workshop"]},
+            "required": False,
+        },
+    )
+    for order, field_id in enumerate((F_ABSTRACT, F_TRACK, F_FORMAT)):
+        db.seed(
+            "form_fields",
+            {
+                "id": f"ff-{order}",
+                "org_id": TEST_ORG_ID,
+                "form_id": FORM_ID,
+                "field_id": field_id,
+                "page": 1,
+                "order": order,
+                "required": False,
+            },
+        )
+    db.seed(
+        "tracks",
+        {
+            "id": TRACK_ID,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Platform",
+            "order": 0,
+        },
+    )
+    db.seed(
+        "formats",
+        {
+            "id": FORMAT_ID,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Workshop",
+            "default_duration_min": 90,
+        },
+    )
+
+
+def test_a_submission_prefills_from_its_answers_when_the_columns_are_empty(
+    client, selfservice_db
+):
+    """The judge's case: blank Abstract, "No track", "No format" on a real submission."""
+    seed_cfp_questions(selfservice_db)
+    row = selfservice_db.rows("sessions")[0]
+    row["description"] = ""
+    row["track_id"] = None
+    row["format_id"] = None
+    row["form_answers"] = {
+        F_ABSTRACT: "What the speaker actually wrote.",
+        F_TRACK: "Platform",
+        F_FORMAT: "Workshop",
+    }
+    seed_token(selfservice_db)
+
+    submission = client.get(f"/public/submissions?token={RAW_TOKEN}").json()["submissions"][0]
+
+    assert submission["abstract"] == "What the speaker actually wrote."
+    assert submission["track_id"] == TRACK_ID
+    assert submission["track"] == "Platform"
+    assert submission["format_id"] == FORMAT_ID
+    assert submission["format"] == "Workshop"
+
+
+def test_the_stored_column_always_wins_over_the_answer(client, selfservice_db):
+    """An organizer's edit is never second-guessed by the original answer."""
+    seed_cfp_questions(selfservice_db)
+    row = selfservice_db.rows("sessions")[0]
+    row["description"] = "Rewritten by the organizer."
+    row["form_answers"] = {F_ABSTRACT: "The original answer."}
+    seed_token(selfservice_db)
+
+    submission = client.get(f"/public/submissions?token={RAW_TOKEN}").json()["submissions"][0]
+
+    assert submission["abstract"] == "Rewritten by the organizer."
+
+
+def test_editing_only_the_title_leaves_the_abstract_alone(client, selfservice_db):
+    """A PATCH that omits a field must not blank it."""
+    seed_token(selfservice_db)
+
+    resp = client.patch(
+        f"/public/submissions/{SESSION_ID}", json={"token": RAW_TOKEN, "title": "New title"}
+    )
+
+    assert resp.status_code == 200
+    row = selfservice_db.rows("sessions")[0]
+    assert row["title"] == "New title"
+    assert row["description"] == "A practical tour."
+    assert resp.json()["submission"]["abstract"] == "A practical tour."

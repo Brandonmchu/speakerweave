@@ -491,17 +491,23 @@ function ItemDialog({
                           v{version.version}
                           {version.is_current ? ' · current' : ''}
                         </Badge>
-                        {version.created_at && (
-                          <span
-                            className="shrink-0 text-xs text-muted-foreground"
-                            title={absolute(version.created_at)}
-                          >
-                            Uploaded {relative(version.created_at)}
-                          </span>
+                        {version.source === 'profile' && (
+                          <Badge variant="outline" data-testid="version-source-profile">
+                            From portal profile
+                          </Badge>
                         )}
+                        <span
+                          className="shrink-0 text-xs text-muted-foreground"
+                          data-testid="version-timestamp"
+                          title={absolute(version.created_at)}
+                        >
+                          {version.created_at
+                            ? `Uploaded ${absolute(version.created_at)} (${relative(version.created_at)})`
+                            : 'Upload time not recorded'}
+                        </span>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        {!version.is_current && (
+                        {!version.is_current && version.source !== 'profile' && (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -551,9 +557,15 @@ function ItemDialog({
                         <Badge variant={c.author_role === 'organizer' ? 'default' : 'outline'}>
                           {c.author_role}
                         </Badge>
-                        {c.created_at && (
-                          <span className="text-xs text-muted-foreground">{relative(c.created_at)}</span>
-                        )}
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid="comment-timestamp"
+                          title={absolute(c.created_at)}
+                        >
+                          {c.created_at
+                            ? `${absolute(c.created_at)} · ${relative(c.created_at)}`
+                            : 'Time not recorded'}
+                        </span>
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{c.body}</p>
                     </li>
@@ -633,16 +645,18 @@ function relative(value: string): ReactNode {
   try {
     return formatDistanceToNow(parseISO(value), { addSuffix: true })
   } catch {
-    return ''
+    // An unparseable stamp still tells the reader more than a blank does.
+    return value
   }
 }
 
-/** The exact timestamp, for the hover title on a history row. */
-function absolute(value: string): string {
+/** The exact timestamp — a version row and a comment both say WHEN, not just what. */
+function absolute(value: string | null | undefined): string {
+  if (!value) return ''
   try {
     return formatDate(parseISO(value), "d MMM yyyy 'at' HH:mm")
   } catch {
-    return ''
+    return value
   }
 }
 

@@ -139,13 +139,37 @@ async def _queue_email(
 
 @router.get("/events/{event_id}/speakers")
 async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
-    """Distinct speakers on an event's sessions, with onboarding progress.
+    """The event's whole speaker roster, with sessions + onboarding progress.
+
+    The roster is every CONTACT on the event, not only the ones already booked
+    onto a session. A speaker added by hand or imported from a CSV has no
+    session and no task yet; keying the roster off session_participants made
+    those people invisible, so "Add speaker" and "Import CSV" both reported
+    success onto a list that never changed. Contacts are event-scoped rows, so
+    the event's contacts ARE its roster; sessions and tasks are progress
+    columns on top, and read as zeros for someone who has neither yet.
 
     A flat handful of grouped queries — never one per speaker — so the roster
     stays cheap as the event grows.
     """
     _user_id, org_id = auth
     event = await fetch_event(event_id, org_id, columns="id, org_id, name")
+
+    contacts = rows(
+        await db(
+            lambda: supabase.table("contacts")
+            .select(
+                "id, first_name, last_name, email, company_name, title, photo_url, "
+                "last_portal_access_at"
+            )
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .execute(),
+            "speakers_contacts",
+        )
+    )
+    contact_ids = sorted({c["id"] for c in contacts if c.get("id")})
+    roster_ids = set(contact_ids)
 
     sessions = rows(
         await db(
@@ -160,7 +184,7 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
     session_ids = sorted({s["id"] for s in sessions if s.get("id")})
 
     participants: list[dict] = []
-    if session_ids:
+    if session_ids and contact_ids:
         participants = rows(
             await db(
                 lambda: supabase.table("session_participants")
@@ -177,23 +201,8 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
     for participant in participants:
         contact_id = participant.get("contact_id")
         session_id = participant.get("session_id")
-        if contact_id and session_id:
+        if contact_id in roster_ids and session_id:
             sessions_by_contact[contact_id].add(session_id)
-    contact_ids = sorted(sessions_by_contact)
-
-    contacts: list[dict] = []
-    if contact_ids:
-        contacts = rows(
-            await db(
-                lambda: supabase.table("contacts")
-                .select("id, first_name, last_name, email, photo_url, last_portal_access_at")
-                .eq("org_id", org_id)
-                .eq("event_id", event_id)
-                .in_("id", contact_ids)
-                .execute(),
-                "speakers_contacts",
-            )
-        )
 
     # task progress: the event's tasks, then those tasks' assignments to these
     # contacts — two grouped queries, aggregated in memory.
@@ -233,7 +242,7 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
     done_by_contact: dict[str, int] = defaultdict(int)
     for assignment in assignments:
         contact_id = assignment.get("contact_id")
-        if contact_id not in sessions_by_contact:
+        if contact_id not in roster_ids:
             continue
         total_by_contact[contact_id] += 1
         if assignment.get("status") in DONE_STATUSES:
@@ -267,6 +276,8 @@ async def list_speakers(event_id: str, auth: tuple = Depends(get_current_user_an
                 "contact_id": contact_id,
                 "name": _contact_name(contact),
                 "email": contact.get("email"),
+                "company_name": contact.get("company_name"),
+                "title": contact.get("title"),
                 "photo_url": contact.get("photo_url"),
                 "session_count": len(sessions_by_contact.get(contact_id, set())),
                 "last_portal_access_at": contact.get("last_portal_access_at"),
@@ -612,7 +623,10 @@ async def remind_outstanding(
     """Queue one reminder email to each speaker missing required content. Returns
     how many were reminded."""
     _user_id, org_id = auth
-    event = await fetch_event(event_id, org_id, columns="id, name")
+    # `org_id` MUST be in the projection: fetch_event verifies the row's org
+    # against the caller's, so leaving it out 404s an event you own. That typo
+    # is what made this endpoint answer "Event not found" for every valid id.
+    event = await fetch_event(event_id, org_id, columns="id, org_id, name")
     groups = await content_pipeline.outstanding_by_contact(
         org_id, event_id, required_only=payload.required_only, item_type=payload.item_type
     )

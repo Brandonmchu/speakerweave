@@ -28,6 +28,13 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.core.settings import settings
+from services.forms import (
+    abstract_from_answers,
+    classify_taxonomy_fields,
+    load_form_layout,
+    resolve_taxonomy_ids,
+    to_public_field,
+)
 from services.magic_links import generate_token, hash_token
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
@@ -529,6 +536,8 @@ async def _enrich(
 
     form_ids = {s.get("source_form_id") for s in sessions if s.get("source_form_id")}
     close_by_form: dict[str, datetime | None] = {}
+    fields_by_form: dict[str, list[dict]] = {}
+    classified_by_form: dict[str, dict[str, str]] = {}
     if form_ids:
         forms = rows(
             await db(
@@ -542,6 +551,17 @@ async def _enrich(
         )
         for form in forms:
             close_by_form[form["id"]] = _parse_dt((form.get("settings") or {}).get("close_at"))
+        # The form's own questions, so a submission that predates track/format
+        # mapping (or whose abstract only ever lived in an answer) can still be
+        # shown — and edited — with the values the speaker actually gave.
+        for form_id in form_ids:
+            layout = [to_public_field(entry) for entry in await load_form_layout(form_id, org_id)]
+            fields_by_form[form_id] = layout
+            classified_by_form[form_id] = classify_taxonomy_fields(
+                layout,
+                [str(t.get("name") or "") for t in tracks],
+                [str(f.get("name") or "") for f in formats],
+            )
 
     feedback_by_title = await _decision_feedback(org_id, contact_id)
 
@@ -551,16 +571,35 @@ async def _enrich(
         close_at = close_by_form.get(session.get("source_form_id"))
         editable = status == "pending" and (close_at is None or close_at > now)
         decided = status in DECIDED_STATUSES
+        form_id = session.get("source_form_id")
+        fields = fields_by_form.get(form_id) or []
+        classified = classified_by_form.get(form_id) or {}
+        answers = session.get("form_answers") or {}
+
+        # Read-time fallbacks, never writes: the persisted column wins whenever
+        # it holds something, so an organizer's edit is never second-guessed.
+        abstract = str(session.get("description") or "").strip()
+        if not abstract and fields:
+            abstract = abstract_from_answers(fields, answers)
+        track_id = session.get("track_id")
+        if not track_id and fields:
+            matched = resolve_taxonomy_ids(fields, classified, "track", answers, tracks)
+            track_id = matched[0] if matched else None
+        format_id = session.get("format_id")
+        if not format_id and fields:
+            matched = resolve_taxonomy_ids(fields, classified, "format", answers, formats)
+            format_id = matched[0] if matched else None
+
         out.append(
             {
                 "id": session.get("id"),
                 "friendly_id": session.get("friendly_id"),
                 "title": session.get("title") or "",
-                "abstract": session.get("description") or "",
-                "track": track_names.get(session.get("track_id")),
-                "track_id": session.get("track_id"),
-                "format": format_names.get(session.get("format_id")),
-                "format_id": session.get("format_id"),
+                "abstract": abstract,
+                "track": track_names.get(track_id),
+                "track_id": track_id,
+                "format": format_names.get(format_id),
+                "format_id": format_id,
                 "status": status,
                 "submitted_at": session.get("submitted_at"),
                 "editable": editable,

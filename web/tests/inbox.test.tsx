@@ -6,7 +6,7 @@
  * Yes/No), that participants show their roles, and that the minimum review
  * decision flow confirms and POSTs optional speaker feedback.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -296,5 +296,107 @@ describe('Inbox session editor', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.getByText('A session needs a title.')).toBeInTheDocument()
     expect(patches).toHaveLength(0)
+  })
+})
+
+/**
+ * Participants read as PEOPLE, and the decision checkbox is a real checkbox.
+ *
+ * A CFP submitter is stored twice on purpose — primary 'speaker' plus
+ * 'submitter' of record — so a co-speaker can't push them off the program.
+ * Rendered verbatim the drawer listed the same human twice. And the send-email
+ * control was a Radix checkbox: a <button role="checkbox"> beside an
+ * aria-hidden <input>, so anything driving the page by its form controls found
+ * an input it could not click.
+ */
+const DUAL_ROLE_DETAIL = {
+  ...DETAIL,
+  participants: [
+    {
+      contact_id: 'c1',
+      role: 'speaker',
+      is_primary: true,
+      first_name: 'Priya',
+      last_name: 'Raman',
+      email: 'priya@example.com',
+    },
+    {
+      contact_id: 'c1',
+      role: 'submitter',
+      is_primary: false,
+      first_name: 'Priya',
+      last_name: 'Raman',
+      email: 'priya@example.com',
+    },
+    {
+      contact_id: 'c2',
+      role: 'speaker',
+      is_primary: false,
+      first_name: 'Omar',
+      last_name: 'Haddad',
+      email: 'omar@example.com',
+    },
+  ],
+}
+
+describe('Inbox participants and decision controls', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('dais.token', 'test-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (init?.method === 'POST' && url.endsWith('/decision')) {
+          return jsonResponse({ session: SUBMISSION, onboarding: { tasks_assigned: 0 } })
+        }
+        if (url.endsWith('/api/events')) return jsonResponse({ events: [EVENT] })
+        if (url.includes('/submissions')) {
+          return jsonResponse({ event: EVENT, submissions: [SUBMISSION], count: 1 })
+        }
+        if (url.includes('/api/sessions/')) return jsonResponse(DUAL_ROLE_DETAIL)
+        return jsonResponse({}, 404)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it('lists one row per contact with the roles combined', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByText('Analytical Engines'))
+
+    const priya = await screen.findByTestId('participant-c1')
+    expect(within(priya).getByText('Priya Raman')).toBeInTheDocument()
+    expect(within(priya).getByText('speaker · submitter')).toBeInTheDocument()
+    expect(within(priya).getByText('Primary')).toBeInTheDocument()
+    // ...once. Not "Primary speaker" AND a second "submitter" row.
+    expect(screen.getAllByText('Priya Raman')).toHaveLength(1)
+    // a genuine co-speaker is still a row of their own
+    expect(within(screen.getByTestId('participant-c2')).getByText('Omar Haddad')).toBeInTheDocument()
+  })
+
+  it('the send-email control is a native, clickable checkbox', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByText('Analytical Engines'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
+
+    const checkbox = screen.getByTestId('email-decision') as HTMLInputElement
+    expect(checkbox.tagName).toBe('INPUT')
+    expect(checkbox.type).toBe('checkbox')
+    expect(checkbox).not.toHaveAttribute('aria-hidden')
+    // ...and it is the same control the label points at.
+    expect(screen.getByLabelText('Email this decision to the speaker')).toBe(checkbox)
+
+    // Disabled until there is a message, then a plain click toggles it.
+    expect(checkbox.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Message to speaker (optional)'), {
+      target: { value: 'Congratulations!' },
+    })
+    expect(checkbox.disabled).toBe(false)
+    fireEvent.click(checkbox)
+    expect(checkbox.checked).toBe(true)
   })
 })

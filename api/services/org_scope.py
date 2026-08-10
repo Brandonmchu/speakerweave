@@ -13,6 +13,26 @@ from services.supabase_helpers import db, first
 from supabase_client import supabase
 
 
+def with_org_id(columns: str) -> str:
+    """Guarantee the projection contains the column the verify step reads.
+
+    ``verify_org_access`` 404s on ``row.get("org_id") != org_id``, so a caller
+    that projects a narrow column list and forgets ``org_id`` turns every lookup
+    into "not found" — a row it owns, fetched successfully, rejected because the
+    column it is judged on was never selected. That is a silent, total failure
+    of whatever route made the typo (it cost us bulk content reminders), and it
+    is not something each of a dozen call sites should have to remember.
+
+    ``*`` already covers everything, so it is passed through untouched.
+    """
+    if columns.strip() == "*":
+        return columns
+    parts = [part.strip() for part in columns.split(",") if part.strip()]
+    if "org_id" not in parts:
+        parts.append("org_id")
+    return ", ".join(parts)
+
+
 async def fetch_scoped(
     table: str,
     row_id: str,
@@ -22,10 +42,11 @@ async def fetch_scoped(
     columns: str = "*",
 ) -> dict:
     """One row of `table` owned by `org_id`. Raises 404 for missing OR foreign."""
+    projection = with_org_id(columns)
     row = first(
         await db(
             lambda: supabase.table(table)
-            .select(columns)
+            .select(projection)
             .eq("id", row_id)
             .eq("org_id", org_id)
             .limit(1)

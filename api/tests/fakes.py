@@ -62,8 +62,23 @@ def _match_or(row: dict, expression: str) -> bool:
     return False
 
 
+def _project(row: dict, columns: str) -> dict:
+    """Keep only the selected columns, the way PostgREST would."""
+    if columns.strip() == "*":
+        return row
+    wanted = {part.strip() for part in columns.split(",") if part.strip()}
+    return {key: value for key, value in row.items() if key in wanted}
+
+
 class FakeQuery:
-    def __init__(self, store: dict[str, list[dict]], table: str, log: list[dict]):
+    def __init__(
+        self,
+        store: dict[str, list[dict]],
+        table: str,
+        log: list[dict],
+        *,
+        strict_columns: bool = False,
+    ):
         self.store, self.table, self.log = store, table, log
         self.op = "select"
         self.payload: Any = None
@@ -71,9 +86,13 @@ class FakeQuery:
         self.filters: list[tuple[str, str, Any]] = []
         self.limit_n: int | None = None
         self.order_by: tuple[str, bool] | None = None
+        self.columns = "*"
+        self.strict_columns = strict_columns
 
     # -- builders ----------------------------------------------------------
-    def select(self, *_args, **_kwargs):
+    def select(self, *args, **_kwargs):
+        if args:
+            self.columns = str(args[0])
         return self
 
     def eq(self, key, value):
@@ -139,7 +158,14 @@ class FakeQuery:
         return self.store.setdefault(self.table, [])
 
     def execute(self) -> FakeResult:
-        self.log.append({"table": self.table, "op": self.op, "filters": list(self.filters)})
+        self.log.append(
+            {
+                "table": self.table,
+                "op": self.op,
+                "filters": list(self.filters),
+                "columns": self.columns,
+            }
+        )
         rows = self._rows()
 
         if self.op == "insert":
@@ -177,6 +203,12 @@ class FakeQuery:
             return FakeResult([dict(row) for row in hits])
 
         found = [dict(row) for row in rows if self._matches(row)]
+        if self.strict_columns:
+            # PostgREST hands back ONLY the projected columns. Off by default so
+            # the suite keeps reading whole rows, but a test can switch it on to
+            # catch code that verifies a column it forgot to select (the bug
+            # that 404'd every bulk content reminder).
+            found = [_project(row, self.columns) for row in found]
         if self.order_by:
             column, desc = self.order_by
             found.sort(
@@ -234,9 +266,11 @@ class FakeSupabase:
         self.log: list[dict] = []
         self.rpc_calls: list[tuple[str, dict]] = []
         self.storage = FakeStorage()
+        # Flip to True in a test to make selects honour their column list.
+        self.strict_columns = False
 
     def table(self, name: str) -> FakeQuery:
-        return FakeQuery(self.store, name, self.log)
+        return FakeQuery(self.store, name, self.log, strict_columns=self.strict_columns)
 
     def rpc(self, function_name: str, params: dict | None = None) -> FakeRpc:
         self.rpc_calls.append((function_name, dict(params or {})))

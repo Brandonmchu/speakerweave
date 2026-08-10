@@ -1572,3 +1572,106 @@ def test_the_reviewer_portal_carries_the_criterion_kinds(evaluation_client):
     home = client.get("/public/review/me").json()
 
     assert home["plan"]["criteria"] == MIXED_CRITERIA
+
+
+# ── the reviewer portal tells the truth about people and about state ────────
+# Two judge-visible defects lived here: the submitter printed twice on the
+# presenter line, and a "Review closed" badge that contradicted the window
+# beside it.
+
+
+def _seed_submitter_participant_rows(fake_db) -> None:
+    """The dual encoding a CFP submission writes: one contact, two roles."""
+    fake_db.seed(
+        "contacts",
+        {
+            "id": "contact-priya",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "first_name": "Priya",
+            "last_name": "Raman",
+            "email": "priya@example.com",
+        },
+    )
+    fake_db.seed(
+        "session_participants",
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": "session-a",
+            "contact_id": "contact-priya",
+            "role": "speaker",
+            "is_primary": True,
+        },
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": "session-a",
+            "contact_id": "contact-priya",
+            "role": "submitter",
+            "is_primary": False,
+        },
+    )
+
+
+def test_reviewer_sees_one_entry_per_person_not_per_participant_row(evaluation_client):
+    """'Presented by Priya Raman, Priya Raman' — the dual row is storage only."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    _seed_owned_assignment(fake_db)
+    _seed_submitter_participant_rows(fake_db)
+
+    home = client.get("/public/review/me").json()
+    speakers = home["assignments"][0]["session"]["speakers"]
+
+    assert [s["id"] for s in speakers] == ["contact-priya"]
+    # both roles survive on the single entry
+    assert sorted(speakers[0]["roles"]) == ["speaker", "submitter"]
+    assert speakers[0]["is_primary"] is True
+
+    detail = client.get("/public/review/submissions/assignment-owned").json()
+    assert [s["id"] for s in detail["session"]["speakers"]] == ["contact-priya"]
+
+
+def test_reviewer_home_reports_an_open_plan_as_open(evaluation_client):
+    """An open plan inside a valid window is OPEN — the judge's contradiction."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(
+        fake_db,
+        status="open",
+        opens_at="2026-08-01T00:00:00+00:00",
+        closes_at="2026-12-31T23:59:59+00:00",
+    )
+    _seed_owned_assignment(fake_db)
+
+    plan = client.get("/public/review/me").json()["plan"]
+
+    assert plan["review_open"] is True
+    assert plan["closed_reason"] is None
+    assert plan["opens_at"] == "2026-08-01T00:00:00+00:00"
+
+
+def test_reviewer_home_says_why_a_draft_round_is_closed(evaluation_client):
+    """A link from a plan the organizer hasn't opened explains itself."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="draft")
+    _seed_owned_assignment(fake_db)
+
+    plan = client.get("/public/review/me").json()["plan"]
+
+    assert plan["review_open"] is False
+    assert "hasn't opened yet" in plan["closed_reason"]
+
+
+def test_reviewer_home_closed_state_matches_what_saving_enforces(evaluation_client):
+    """An open plan past its window reads closed instead of 403-ing on save."""
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", closes_at="2020-01-01T00:00:00+00:00")
+    _seed_owned_assignment(fake_db)
+
+    plan = client.get("/public/review/me").json()["plan"]
+
+    assert plan["review_open"] is False
+    assert "closed" in plan["closed_reason"]
+    # ...and the write agrees, which is the whole point of one verdict.
+    assert client.put(
+        "/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD
+    ).status_code == 403

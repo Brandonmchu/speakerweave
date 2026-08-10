@@ -366,9 +366,32 @@ export interface ReviewerHome {
   evaluator: Evaluator
   plan: Pick<
     EvaluationPlan,
-    'id' | 'name' | 'instructions' | 'scale' | 'criteria' | 'anonymized' | 'status'
-  >
+    | 'id'
+    | 'name'
+    | 'instructions'
+    | 'scale'
+    | 'criteria'
+    | 'anonymized'
+    | 'status'
+    | 'opens_at'
+    | 'closes_at'
+  > & {
+    /**
+     * Whether this reviewer can actually write, decided by the server from the
+     * plan status AND the review window together — the same test `save_review`
+     * applies. The portal must not re-derive it from `status`: that read
+     * "Review closed" beside a window that was plainly open.
+     */
+    review_open?: boolean
+    /** Why it is closed, when it is. */
+    closed_reason?: string | null
+  }
   assignments: ReviewerAssignment[]
+}
+
+/** The one place the portal decides open vs closed (older payloads: status). */
+export function reviewIsOpen(plan: ReviewerHome['plan']): boolean {
+  return typeof plan.review_open === 'boolean' ? plan.review_open : plan.status === 'open'
 }
 
 export interface ReviewRecord {

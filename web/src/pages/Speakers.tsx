@@ -149,11 +149,15 @@ export function Speakers() {
     const q = search.trim().toLowerCase()
     return speakers.filter((s) => {
       if (q) {
-        const company = (s as { company_name?: string | null }).company_name ?? ''
-        const hay = `${s.name} ${s.email ?? ''} ${company}`.toLowerCase()
+        const hay = `${s.name} ${s.email ?? ''} ${s.company_name ?? ''}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
-      if (onboardingFilter === 'onboarded' && s.tasks_outstanding > 0) return false
+      // "Onboarded" means they finished something, not that nothing was ever
+      // asked of them: a speaker with no tasks assigned has zero outstanding
+      // too, and counting them as onboarded overstated the roster's progress.
+      if (onboardingFilter === 'onboarded' && (s.tasks_total === 0 || s.tasks_outstanding > 0)) {
+        return false
+      }
       if (onboardingFilter === 'outstanding' && s.tasks_outstanding === 0) return false
       if (inviteFilter === 'invited' && !s.invited) return false
       if (inviteFilter === 'uninvited' && s.invited) return false
@@ -181,6 +185,24 @@ export function Speakers() {
   const refreshRoster = () => {
     queryClient.invalidateQueries({ queryKey: speakersKey })
     queryClient.invalidateQueries({ queryKey: statusesKey })
+  }
+
+  const clearFilters = () => {
+    setOnboardingFilter('all')
+    setInviteFilter('all')
+    setWorkflowFilter('all')
+  }
+
+  /**
+   * Refetch AND make the new people impossible to miss. Someone just added has
+   * no tasks yet, so they sort to the end of a long roster and a stale filter
+   * can hide them outright — which is how "add speaker" came to look like it
+   * had silently failed. Show the roster the way that proves it worked.
+   */
+  const revealRoster = (email?: string) => {
+    refreshRoster()
+    clearFilters()
+    setSearch(email ?? '')
   }
 
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && speakersQuery.isPending)
@@ -361,9 +383,7 @@ export function Speakers() {
                 variant="secondary"
                 onClick={() => {
                   setSearch('')
-                  setOnboardingFilter('all')
-                  setInviteFilter('all')
-                  setWorkflowFilter('all')
+                  clearFilters()
                 }}
               >
                 Clear filters
@@ -468,13 +488,13 @@ export function Speakers() {
             open={importOpen}
             onOpenChange={setImportOpen}
             eventId={event.id}
-            onImported={refreshRoster}
+            onImported={() => revealRoster()}
           />
           <AddSpeakerDialog
             open={addOpen}
             onOpenChange={setAddOpen}
             eventId={event.id}
-            onAdded={refreshRoster}
+            onAdded={(email) => revealRoster(email)}
           />
           <SpeakerDrawer
             eventId={event.id}
@@ -508,7 +528,7 @@ export function speakersToCsv(speakers: EventSpeaker[]): string {
   const rows = speakers.map((s) => [
     s.name,
     s.email ?? '',
-    (s as { company_name?: string | null }).company_name ?? '',
+    s.company_name ?? '',
     onboardingStatusLabel(s),
     s.invited ? 'Yes' : 'No',
     String(s.session_count),
@@ -1056,7 +1076,8 @@ function AddSpeakerDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   eventId: string
-  onAdded: () => void
+  /** Called with the added speaker's email so the roster can point at them. */
+  onAdded: (email: string) => void
 }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -1090,14 +1111,18 @@ function AddSpeakerDialog({
         toast({ variant: 'destructive', title: "Couldn't add speaker", description: data.errors[0].message })
         return
       }
+      const added = email.trim()
       if (data.created > 0) {
-        toast({ title: 'Speaker added', description: `${firstName.trim() || email.trim()} is on the roster.` })
+        toast({
+          title: 'Speaker added',
+          description: `${firstName.trim() || added} is on the roster — showing them below.`,
+        })
       } else {
-        toast({ title: 'Already on the roster', description: `${email.trim()} was already a speaker.` })
+        toast({ title: 'Already on the roster', description: `${added} was already a speaker.` })
       }
       reset()
       onOpenChange(false)
-      onAdded()
+      onAdded(added)
     },
     onError: (error: Error) =>
       toast({ variant: 'destructive', title: "Couldn't add speaker", description: error.message }),

@@ -334,3 +334,102 @@ describe('ContentLibrary', () => {
     expect(screen.getByTestId('download-selected')).toBeDisabled()
   })
 })
+
+/**
+ * Judge-observed: a library row read "Received" while its detail read
+ * "History (0 versions) — Nothing uploaded yet", because the badge and the
+ * history were reading different linkages. The server now resolves both from
+ * one place; the UI's job is to show WHICH linkage delivered the file, and to
+ * not offer a restore for a version that isn't part of the task's own history.
+ */
+describe('ContentLibrary — a headshot delivered from the portal profile', () => {
+  const PROFILE_LIBRARY = {
+    ...LIBRARY,
+    items: [
+      {
+        ...LIBRARY.items[1],
+        status: 'received',
+        current_version: 1,
+        versions_count: 1,
+        current_file: {
+          file_id: 'pf1',
+          version: 1,
+          filename: 'ben-headshot.png',
+          url: 'https://files.test/ben.png',
+          created_at: '2026-08-07T08:00:00Z',
+          is_current: true,
+          source: 'profile',
+        },
+      },
+    ],
+    counts: { received: 1, missing: 0, needs_changes: 0 },
+    outstanding: [],
+  }
+
+  const PROFILE_DETAIL = {
+    item: {
+      item_id: 'a2',
+      type: 'headshot',
+      title: 'Headshot photo',
+      required: true,
+      assignment_status: 'todo',
+      status: 'received',
+      current_version: 1,
+      speaker: { contact_id: 'ben', name: 'Ben Franklin', email: 'ben@example.com', photo_url: null },
+    },
+    versions: [
+      {
+        file_id: 'pf1',
+        version: 1,
+        filename: 'ben-headshot.png',
+        url: 'https://files.test/ben.png',
+        created_at: '2026-08-07T08:00:00Z',
+        is_current: true,
+        source: 'profile',
+      },
+    ],
+    comments: [],
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url)
+        if (u.includes('/task-assignments/')) return json(PROFILE_DETAIL)
+        if (u.includes('/content')) return json(PROFILE_LIBRARY)
+        if (u.includes('/api/events')) return json([{ id: 'e1', name: 'AI Builders Summit', slug: 'summit' }])
+        return json({})
+      })
+    )
+  })
+
+  it('shows what made the row "Received", where it came from, and when', async () => {
+    renderLibrary()
+    await screen.findByText('Ben Franklin')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const list = await screen.findByTestId('content-version-list')
+    expect(within(list).getByText(/History \(1 version\)/)).toBeInTheDocument()
+    expect(within(list).queryByText('Nothing uploaded yet.')).not.toBeInTheDocument()
+    expect(within(list).getByText('ben-headshot.png')).toBeInTheDocument()
+    expect(within(list).getByTestId('version-source-profile')).toHaveTextContent(
+      'From portal profile'
+    )
+    expect(within(list).getByTestId('version-timestamp')).toHaveTextContent(/7 Aug 2026/)
+  })
+
+  it('does not offer a restore for a version outside the task history', async () => {
+    renderLibrary()
+    await screen.findByText('Ben Franklin')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const list = await screen.findByTestId('content-version-list')
+    expect(within(list).queryByTestId('restore-version-1')).not.toBeInTheDocument()
+    // the file is still downloadable — it just isn't a pointer we can move
+    expect(within(list).getByRole('link', { name: /Download/ })).toHaveAttribute(
+      'href',
+      'https://files.test/ben.png'
+    )
+  })
+})

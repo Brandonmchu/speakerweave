@@ -202,3 +202,132 @@ def test_review_rejects_bad_decision(client, auth_headers, admin_db):
         json={"decision": "maybe"},
     )
     assert resp.status_code == 400
+
+
+# ── regressions: the roster is the event's people, not just its stage ────────
+
+
+def test_roster_includes_a_speaker_with_no_session_and_no_tasks(client, auth_headers, admin_db):
+    """A hand-added speaker appears immediately, with honest zeros.
+
+    Judge-observed as "Add speaker silently fails": the roster was keyed off
+    session_participants, so a contact who was not yet on a session simply did
+    not exist as far as the list was concerned.
+    """
+    walk_in = "22222222-2222-2222-2222-2222222200a3"
+    admin_db.seed(
+        "contacts",
+        {
+            "id": walk_in,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "first_name": "Grace",
+            "last_name": "Hopper",
+            "email": "grace@example.com",
+            "company_name": "US Navy",
+        },
+    )
+
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/speakers", headers=auth_headers).json()
+    speakers = {s["contact_id"]: s for s in body["speakers"]}
+    assert walk_in in speakers
+    grace = speakers[walk_in]
+    assert grace["name"] == "Grace Hopper"
+    assert grace["company_name"] == "US Navy"
+    assert (grace["session_count"], grace["tasks_total"], grace["tasks_outstanding"]) == (0, 0, 0)
+    assert grace["invited"] is False
+    # and the speakers who ARE on sessions keep their aggregates
+    assert speakers[ADA]["session_count"] == 2
+    assert speakers[ADA]["tasks_total"] == 1
+
+
+def test_imported_speaker_shows_up_on_the_roster(client, auth_headers, admin_db):
+    """The exact judge flow: import reports created:1, roster must show them.
+
+    Drives the real import endpoint rather than seeding a row, so the two halves
+    of the flow are asserted against each other end to end.
+    """
+    imported = client.post(
+        f"/api/events/{TEST_EVENT_ID}/speakers/import",
+        headers=auth_headers,
+        json={"csv": "first_name,last_name,email\nGrace,Hopper,grace@example.com\n"},
+    )
+    assert imported.status_code == 200
+    assert imported.json()["created"] == 1
+
+    roster = client.get(f"/api/events/{TEST_EVENT_ID}/speakers", headers=auth_headers).json()
+    assert "grace@example.com" in {s["email"] for s in roster["speakers"]}
+
+
+def test_roster_excludes_contacts_from_another_event(client, auth_headers, admin_db):
+    """Widening the roster to all contacts must not widen it past the event."""
+    admin_db.seed(
+        "contacts",
+        {
+            "id": "22222222-2222-2222-2222-2222222200b9",
+            "org_id": TEST_ORG_ID,
+            "event_id": OTHER_EVENT_ID,
+            "first_name": "Other",
+            "last_name": "Event",
+            "email": "other-event@example.com",
+        },
+    )
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/speakers", headers=auth_headers).json()
+    emails = {s["email"] for s in body["speakers"]}
+    assert "other-event@example.com" not in emails
+    assert "foreign@example.com" not in emails  # nor another org's
+
+
+# ── regression: bulk content reminders resolve their own event ──────────────
+
+
+def test_remind_outstanding_finds_a_valid_event(client, auth_headers, admin_db):
+    """Judge-observed 404 "Event not found" on a valid id with a valid token.
+
+    ``strict_columns`` makes the fake return ONLY the projected columns, exactly
+    like PostgREST. That is what turned a fetch-then-verify into a 404: the
+    lookup asked for `id, name` and then judged the row on the `org_id` it had
+    never selected. Without this flag the bug is invisible in tests, which is
+    precisely how it reached production.
+    """
+    admin_db.strict_columns = True
+    admin_db.seed(
+        "tasks",
+        {
+            "id": "33333333-3333-3333-3333-3333333300a9",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "kind": "file_request",
+            "name": "Headshot",
+            "required": True,
+        },
+    )
+    admin_db.seed(
+        "task_assignments",
+        {
+            "id": "44444444-4444-4444-4444-4444444400a9",
+            "org_id": TEST_ORG_ID,
+            "task_id": "33333333-3333-3333-3333-3333333300a9",
+            "contact_id": BEN,
+            "status": "todo",
+        },
+    )
+
+    resp = client.post(
+        f"/api/events/{TEST_EVENT_ID}/content/remind", headers=auth_headers, json={}
+    )
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["outstanding"] == 1
+    assert body["reminded"] == 1
+    queued = [e for e in admin_db.rows("email_outbox") if e.get("template_key") == "content_reminder"]
+    assert len(queued) == 1
+    assert queued[0]["contact_id"] == BEN
+
+
+def test_remind_outstanding_still_404s_for_another_orgs_event(client, auth_headers, admin_db):
+    admin_db.strict_columns = True
+    resp = client.post(
+        f"/api/events/{OTHER_EVENT_ID}/content/remind", headers=auth_headers, json={}
+    )
+    assert resp.status_code == 404

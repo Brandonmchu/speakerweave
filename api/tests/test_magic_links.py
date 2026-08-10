@@ -204,3 +204,74 @@ def test_reviewer_dependency_returns_evaluator_context(fake_db, portal_client):
 
     assert response.status_code == 200
     assert response.json() == {"org_id": TEST_ORG_ID, "evaluator_id": EVALUATOR_ID}
+
+
+# ── reviewer links are bearer credentials, not one-shot sign-ins ────────────
+
+
+async def test_a_review_link_survives_being_opened_twice(fake_db):
+    """The judge-visible bug: reopening a reviewer link read 'already used'."""
+    _seed_link(fake_db, "reviewer-bearer", purpose="review")
+
+    first_open = await magic_links.redeem("reviewer-bearer", now=NOW)
+    second_open = await magic_links.redeem("reviewer-bearer", now=NOW)
+
+    assert first_open == second_open
+    assert second_open["purpose"] == "review"
+    assert second_open["evaluator_id"] == EVALUATOR_ID
+    assert second_open["org_id"] == TEST_ORG_ID
+    # first sight is still stamped, for the organizer's "was this opened?"
+    assert fake_db.rows("magic_link_tokens")[0]["used_at"] == NOW.isoformat()
+
+
+async def test_a_review_link_still_expires(fake_db):
+    _seed_link(
+        fake_db, "stale-reviewer", purpose="review", expires_at=NOW - timedelta(seconds=1)
+    )
+
+    with pytest.raises(magic_links.InvalidMagicLinkError):
+        await magic_links.redeem("stale-reviewer", now=NOW)
+
+
+async def test_a_review_link_still_honours_revocation(fake_db):
+    _seed_link(
+        fake_db,
+        "revoked-reviewer",
+        purpose="review",
+        revoked_at=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+
+    with pytest.raises(magic_links.InvalidMagicLinkError):
+        await magic_links.redeem("revoked-reviewer", now=NOW)
+
+
+async def test_a_speaker_portal_link_is_still_single_use(fake_db):
+    """Only 'review' is reusable — the portal link keeps its one-shot guarantee."""
+    _seed_link(fake_db, "speaker-once", purpose="portal")
+
+    await magic_links.redeem("speaker-once", now=NOW)
+
+    with pytest.raises(magic_links.InvalidMagicLinkError):
+        await magic_links.redeem("speaker-once", now=NOW)
+
+
+def test_a_reviewer_can_reopen_their_link_and_get_a_session(fake_db, portal_client):
+    """End to end: two POSTs to /redeem with the same reviewer token both work."""
+    _seed_link(
+        fake_db,
+        "reviewer-reopen",
+        purpose="review",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+
+    first_open = portal_client.post("/public/session/redeem", json={"token": "reviewer-reopen"})
+    second_open = portal_client.post("/public/session/redeem", json={"token": "reviewer-reopen"})
+
+    assert first_open.status_code == 200
+    assert second_open.status_code == 200
+    assert second_open.json() == {
+        "purpose": "review",
+        "org_id": TEST_ORG_ID,
+        "evaluator_id": EVALUATOR_ID,
+    }
+    assert portal_client.get("/_test/reviewer").status_code == 200

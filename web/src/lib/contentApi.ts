@@ -17,6 +17,15 @@ export type ContentType = 'slides' | 'headshot' | 'bio' | 'other' | (string & {}
 export type ContentStatus = 'received' | 'missing' | 'needs_changes' | (string & {})
 export type CommentAuthor = 'organizer' | 'speaker' | (string & {})
 
+/**
+ * `source` says which linkage delivered this version: an upload against the
+ * task itself, or the headshot the speaker set on their portal profile. A
+ * profile version explains a "Received" row that has no task upload behind it,
+ * and is not something the organizer can restore to (there is no task-file
+ * history to move a pointer within) — hence it is labelled, not silent.
+ */
+export type ContentVersionSource = 'upload' | 'profile'
+
 export interface ContentVersion {
   file_id: string
   version: number
@@ -24,6 +33,7 @@ export interface ContentVersion {
   url: string | null
   created_at: string | null
   is_current: boolean
+  source?: ContentVersionSource
 }
 
 export interface ContentComment {

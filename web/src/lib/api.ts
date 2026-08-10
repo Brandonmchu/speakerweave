@@ -661,6 +661,34 @@ export function requestManageLink(
   )
 }
 
+/**
+ * One submission, with every field the edit form binds to guaranteed present.
+ *
+ * The edit form initialises its inputs from this object, so a missing or
+ * differently-named key does not degrade — it renders an empty box over a
+ * stored value and then SAVES that emptiness. `description` is accepted as an
+ * alias for `abstract` for exactly that reason: the column behind it is
+ * `sessions.description`, and the two names have drifted before.
+ */
+function normalizeSubmitterSubmission(wire: unknown): SubmitterSubmission {
+  const row = (wire ?? {}) as Record<string, unknown>
+  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+  const id = (value: unknown): string | null =>
+    typeof value === 'string' && value ? value : null
+  return {
+    ...(row as unknown as SubmitterSubmission),
+    id: text(row.id),
+    title: text(row.title),
+    abstract: text(row.abstract) || text(row.description),
+    track: text(row.track) || null,
+    track_id: id(row.track_id),
+    format: text(row.format) || null,
+    format_id: id(row.format_id),
+    editable: Boolean(row.editable),
+    decided: Boolean(row.decided),
+  }
+}
+
 /** GET this submitter's submissions + the event's editable taxonomy. */
 export async function getSubmitterSubmissions(token: string): Promise<SubmitterDashboardData> {
   const wire = await apiGet<Partial<SubmitterDashboardData>>(
@@ -670,7 +698,9 @@ export async function getSubmitterSubmissions(token: string): Promise<SubmitterD
     event: wire.event ?? null,
     tracks: Array.isArray(wire.tracks) ? wire.tracks : [],
     formats: Array.isArray(wire.formats) ? wire.formats : [],
-    submissions: Array.isArray(wire.submissions) ? wire.submissions : [],
+    submissions: Array.isArray(wire.submissions)
+      ? wire.submissions.map(normalizeSubmitterSubmission)
+      : [],
   }
 }
 
@@ -684,7 +714,7 @@ export async function editSubmitterSubmission(
     { token, ...input }
   )
   const submission = (wire as { submission?: SubmitterSubmission })?.submission
-  return submission ?? (wire as SubmitterSubmission)
+  return normalizeSubmitterSubmission(submission ?? wire)
 }
 
 export async function withdrawSubmitterSubmission(
@@ -696,7 +726,7 @@ export async function withdrawSubmitterSubmission(
     { token }
   )
   const submission = (wire as { submission?: SubmitterSubmission })?.submission
-  return submission ?? (wire as SubmitterSubmission)
+  return normalizeSubmitterSubmission(submission ?? wire)
 }
 
 // ── Speaker CRM (organizer) ──────────────────────────────────────────────────

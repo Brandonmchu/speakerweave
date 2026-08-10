@@ -39,11 +39,11 @@ const ME = {
       },
       file: { filename: 'slides-v2.pdf', url: 'u2', version: 2 },
       versions: [
-        { file_id: 'f2', version: 2, filename: 'slides-v2.pdf', url: 'u2', created_at: null, is_current: true },
-        { file_id: 'f1', version: 1, filename: 'slides-v1.pdf', url: 'u1', created_at: null, is_current: false },
+        { file_id: 'f2', version: 2, filename: 'slides-v2.pdf', url: 'u2', created_at: '2026-08-06T09:30:00Z', is_current: true },
+        { file_id: 'f1', version: 1, filename: 'slides-v1.pdf', url: 'u1', created_at: '2026-08-02T14:05:00Z', is_current: false },
       ],
       comments: [
-        { id: 'k1', author_role: 'organizer', author_label: 'Organizer', body: 'Please send a sharper deck.', created_at: null },
+        { id: 'k1', author_role: 'organizer', author_label: 'Organizer', body: 'Please send a sharper deck.', created_at: '2026-08-07T11:15:00Z' },
       ],
     },
   ],
@@ -144,5 +144,49 @@ describe('Portal content pipeline', () => {
     const headshotHint = screen.getByTestId('headshot-hint')
     expect(headshotHint).toHaveTextContent(/up to 8 MB/)
     expect(screen.getByTestId('headshot-input').getAttribute('accept') ?? '').toContain('image/png')
+  })
+})
+
+describe('Portal timestamps', () => {
+  /**
+   * Judge-observed: the portal listed v1/v2 with no dates and showed organizer
+   * feedback with an author but no time. A version without a date is just a
+   * number, and "please re-upload" reads very differently a month later.
+   */
+  it('dates every version in the history and every comment in the thread', async () => {
+    renderPortal()
+
+    // the current upload says when it landed, right on the file chip
+    expect(await screen.findByTestId('current-version-time')).toHaveTextContent(/Aug 6, 2026/)
+
+    fireEvent.click(screen.getByRole('button', { name: /View 1 previous version/ }))
+    const priorVersions = await screen.findAllByTestId('version-time')
+    expect(priorVersions).toHaveLength(1)
+    expect(priorVersions[0]).toHaveTextContent(/Uploaded/)
+    expect(priorVersions[0]).toHaveTextContent(/Aug 2, 2026/)
+
+    expect(screen.getByTestId('comment-time')).toHaveTextContent(/Aug 7, 2026/)
+  })
+
+  it('says so plainly when a timestamp is missing rather than showing nothing', async () => {
+    const undated = structuredClone(ME) as typeof ME
+    undated.tasks[0].versions[1].created_at = null as unknown as string
+    undated.tasks[0].comments[0].created_at = null as unknown as string
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url)
+        if (u.includes('/public/session/redeem')) {
+          return json({ purpose: 'portal', org_id: 'o1', contact_id: 'c1' })
+        }
+        if (u.includes('/public/portal/me')) return json(undated)
+        return json({})
+      })
+    )
+
+    renderPortal()
+    fireEvent.click(await screen.findByRole('button', { name: /View 1 previous version/ }))
+    expect(await screen.findByTestId('version-time')).toHaveTextContent('Upload time not recorded')
+    expect(screen.getByTestId('comment-time')).toHaveTextContent('Time not recorded')
   })
 })

@@ -7,11 +7,13 @@ import {
   criterionKind,
   getReviewerHome,
   getReviewerSubmission,
+  reviewIsOpen,
   saveReviewerReview,
   type EvaluationCriterion,
   type ReviewScoreValue,
   type ReviewerAssignment,
   type ReviewerHome,
+  type ReviewerSpeaker,
 } from '@/lib/evaluationApi'
 import { fetchMe, redeemToken, scrubTokenFromUrl } from '@/lib/portalAuth'
 import { cn } from '@/lib/utils'
@@ -111,14 +113,15 @@ function ReviewerWorkspace() {
   if (!home) return null
 
   const completed = home.assignments.filter((item) => item.review_status === 'reviewed').length
+  const isOpen = reviewIsOpen(home.plan)
   return (
     <PublicReviewShell>
       <header className="border-b border-border pb-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <Badge variant={home.plan.status === 'open' ? 'solid' : 'warning'}>
-                {home.plan.status === 'open' ? 'Review open' : 'Review closed'}
+              <Badge variant={isOpen ? 'solid' : 'warning'}>
+                {isOpen ? 'Review open' : 'Review closed'}
               </Badge>
               {home.plan.anonymized && (
                 <Badge variant="outline"><ShieldCheck /> Anonymized</Badge>
@@ -143,6 +146,20 @@ function ReviewerWorkspace() {
             </div>
           </div>
         </div>
+        {/* A closed round always says WHICH kind of closed it is. The bare
+            "Review closed" badge over a valid-looking window read as a bug. */}
+        {!isOpen && (
+          <div
+            data-testid="review-closed-reason"
+            className="mt-5 flex max-w-3xl items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-4 py-3 text-sm leading-relaxed text-foreground"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning-strong" />
+            <span>
+              {home.plan.closed_reason ??
+                'This review round is not accepting reviews right now.'}
+            </span>
+          </div>
+        )}
         {home.plan.instructions && (
           <div className="mt-5 max-w-3xl rounded-md border-l-2 border-primary bg-primary-subtle/45 px-4 py-3 text-sm leading-relaxed text-foreground">
             {home.plan.instructions}
@@ -290,12 +307,9 @@ function Scorecard({
     const value = scores[criterion.name]
     return value !== undefined && value !== ''
   })
-  const canSubmit = home.plan.status === 'open' && (abstained ? Boolean(abstainReason.trim()) : completeScores)
-  const speakerNames = !home.plan.anonymized
-    ? (session.speakers ?? [])
-        .map((speaker) => [speaker.first_name, speaker.last_name].filter(Boolean).join(' '))
-        .filter(Boolean)
-    : []
+  const isOpen = reviewIsOpen(home.plan)
+  const canSubmit = isOpen && (abstained ? Boolean(abstainReason.trim()) : completeScores)
+  const speakerNames = !home.plan.anonymized ? presenterNames(session.speakers) : []
 
   return (
     <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
@@ -412,7 +426,7 @@ function Scorecard({
         <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-5">
           <Button
             variant="ghost"
-            disabled={save.isPending || home.plan.status !== 'open'}
+            disabled={save.isPending || !isOpen}
             onClick={() => save.mutate({ isDraft: true, advance: false })}
           >
             <Save />
@@ -437,6 +451,32 @@ function Scorecard({
       </div>
     </article>
   )
+}
+
+/**
+ * The people to print on "Presented by …" — one line per PERSON.
+ *
+ * A CFP submitter is stored as two participant rows (speaker + submitter) so
+ * that adding a co-speaker cannot drop them from the program. Printing the
+ * rows verbatim produced "Presented by Priya Raman, Priya Raman". The server
+ * now dedupes; this keeps the rendered line honest regardless, and folds by
+ * name as well as id so two records for the same human still read once.
+ */
+function presenterNames(speakers: ReviewerSpeaker[] | undefined): string[] {
+  const seenIds = new Set<string>()
+  const seenNames = new Set<string>()
+  const names: string[] = []
+  for (const speaker of speakers ?? []) {
+    const name = [speaker.first_name, speaker.last_name].filter(Boolean).join(' ').trim()
+    if (!name) continue
+    const id = speaker.id ? String(speaker.id) : ''
+    const folded = name.toLowerCase()
+    if ((id && seenIds.has(id)) || seenNames.has(folded)) continue
+    if (id) seenIds.add(id)
+    seenNames.add(folded)
+    names.push(name)
+  }
+  return names
 }
 
 function RatingRow({

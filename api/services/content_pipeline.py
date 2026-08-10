@@ -14,7 +14,11 @@ this module turns that raw stream into a managed pipeline:
   always ``org_id`` (organizer) or ``contact_id`` (speaker), never the body.
 * **Library** — ``list_content`` aggregates every deliverable across an event's
   speakers with type + status, so an organizer sees the whole collection at once
-  and who is still outstanding.
+  and who is still outstanding. ``item_versions`` is the single place that
+  answers "what is actually behind this item" — a task upload OR the headshot a
+  speaker set on their portal profile — and ``content_status`` derives the
+  received/missing badge from that same answer, so a row can never claim
+  receipt over an empty history (or hide a headshot that really did arrive).
 * **Reminders** — ``outstanding_by_contact`` groups missing required items per
   speaker so the route can queue one nudge each.
 * **Export** — ``build_export_zip`` bundles the current version of every
@@ -81,9 +85,28 @@ def classify_item_type(task_name: str | None) -> str:
     return "other"
 
 
-def content_status(assignment_status: str | None) -> str:
-    """Map a task_assignment status to the library's received/missing/needs_changes."""
-    return _STATUS_MAP.get(assignment_status or "todo", "missing")
+def content_status(assignment_status: str | None, *, has_file: bool) -> str:
+    """The library status of one content item: received / missing / needs_changes.
+
+    Derived from the assignment status AND the evidence behind it, because the
+    two used to be able to disagree: a row could read "Received" while its own
+    detail said "Nothing uploaded yet" (an assignment marked done/approved with
+    no file), and a headshot that a speaker really had uploaded — from their
+    portal profile rather than against the task — read "Missing".
+
+    So the rule is: a claim of receipt needs something collected to back it, and
+    something collected is receipt. A denial is the organizer's explicit
+    judgement on a file and always survives (it is what "needs changes" means).
+
+    ``has_file`` is deliberately required, not defaulted: the point is that no
+    call site gets to decide status without looking at the evidence.
+    """
+    status = _STATUS_MAP.get(assignment_status or "todo", "missing")
+    if status == "received" and not has_file:
+        return "missing"
+    if status == "missing" and has_file:
+        return "received"
+    return status
 
 
 def _contact_name(contact: dict) -> str:
@@ -142,7 +165,9 @@ def _ext_of(filename: str | None) -> str:
 # ── versions ─────────────────────────────────────────────────────────────────
 
 
-def versions_for(file_rows: list[dict], current_file_id: str | None) -> list[dict]:
+def versions_for(
+    file_rows: list[dict], current_file_id: str | None, *, source: str = "upload"
+) -> list[dict]:
     """Version history for one item, newest first, with ``is_current`` marked.
 
     Current is the row the assignment points at (``file_id``); if that is stale
@@ -166,9 +191,77 @@ def versions_for(file_rows: list[dict], current_file_id: str | None) -> list[dic
             "mimetype": f.get("mimetype"),
             "created_at": f.get("created_at"),
             "is_current": f.get("id") == current_id,
+            # where this version came from: uploaded against the task, or the
+            # speaker's portal profile headshot (see ``item_versions``).
+            "source": source,
         }
         for f in ordered
     ]
+
+
+def _avatar_version(contact: dict) -> list[dict]:
+    """The contact's ``photo_url`` as a single, non-restorable version row.
+
+    Weaker evidence than a ``files`` row — an avatar can arrive from a CSV
+    import or a directory sync, so on its own it is NOT proof a speaker
+    delivered anything (see ``item_versions``). It is only ever used to show
+    WHAT an existing claim of receipt refers to.
+    """
+    url = (contact or {}).get("photo_url")
+    if not url:
+        return []
+    return [
+        {
+            # No files row to point at: a synthetic id keeps list keys stable
+            # and marks this version as something that can't be restored to.
+            "file_id": f"profile:{contact.get('id')}",
+            "version": 1,
+            "filename": "Profile headshot",
+            "url": url,
+            "size": None,
+            "mimetype": None,
+            "created_at": contact.get("updated_at"),
+            "is_current": True,
+            "source": "profile",
+        }
+    ]
+
+
+def item_versions(
+    assignment: dict,
+    task: dict,
+    contact: dict,
+    file_rows: list[dict],
+    profile_file_rows: list[dict],
+) -> list[dict]:
+    """Every version behind one content item, from whichever linkage delivered it.
+
+    A speaker can deliver a headshot two ways — upload it against the headshot
+    task, or set it on their portal profile — and the library used to see only
+    the first, which is why a portal headshot never reached the organizer while
+    a row could still claim "Received" over an empty history. One resolver now
+    answers "what is behind this item", and the list, the detail, the reminders
+    and the export all read it, so they cannot disagree:
+
+    1. uploads against the task itself — always the truth when they exist;
+    2. otherwise, for a headshot item, the profile headshots the speaker
+       uploaded through the portal (``files`` rows with no task assignment,
+       written by ``services.portal.set_headshot``);
+    3. otherwise, only where the assignment ALREADY claims receipt, the
+       contact's ``photo_url``. A bare avatar is not a delivery — promoting one
+       would mark half a roster "Received" for pictures nobody sent — but when
+       an organizer has recorded receipt, that picture is what they recorded it
+       against, and showing it beats an empty history under a "Received" badge.
+    """
+    if file_rows:
+        return versions_for(file_rows, assignment.get("file_id"))
+    if classify_item_type(task.get("name")) != "headshot":
+        return []
+    if profile_file_rows:
+        return versions_for(profile_file_rows, None, source="profile")
+    if _STATUS_MAP.get(assignment.get("status") or "todo", "missing") != "received":
+        return []
+    return _avatar_version(contact)
 
 
 def next_version(existing_file_rows: list[dict]) -> int:
@@ -220,11 +313,12 @@ async def _collect(org_id: str, event_id: str) -> dict:
 
     contact_ids = sorted({a["contact_id"] for a in assignments if a.get("contact_id")})
     contacts_by_id: dict[str, dict] = {}
+    profile_files_by_contact: dict[str, list[dict]] = {}
     if contact_ids:
         for contact in rows(
             await db(
                 lambda: supabase.table("contacts")
-                .select("id, first_name, last_name, email, photo_url")
+                .select("id, first_name, last_name, email, photo_url, updated_at")
                 .eq("org_id", org_id)
                 .in_("id", contact_ids)
                 .execute(),
@@ -232,6 +326,20 @@ async def _collect(org_id: str, event_id: str) -> dict:
             )
         ):
             contacts_by_id[contact["id"]] = contact
+        # Profile headshots: files these speakers uploaded from their portal
+        # profile rather than against a task (hence no task_assignment_id).
+        for file_row in rows(
+            await db(
+                lambda: supabase.table("files")
+                .select("id, contact_id, filename, bucket_path, mimetype, size, version, created_at")
+                .eq("org_id", org_id)
+                .in_("contact_id", contact_ids)
+                .is_("task_assignment_id", "null")
+                .execute(),
+                "content_profile_files",
+            )
+        ):
+            profile_files_by_contact.setdefault(file_row.get("contact_id"), []).append(file_row)
 
     assignment_ids = sorted({a["id"] for a in assignments if a.get("id")})
     files_by_assignment: dict[str, list[dict]] = {}
@@ -261,20 +369,46 @@ async def _collect(org_id: str, event_id: str) -> dict:
             key = comment.get("task_assignment_id")
             comments_by_assignment[key] = comments_by_assignment.get(key, 0) + 1
 
-    return {
+    ctx = {
         "tasks_by_id": tasks_by_id,
         "assignments": assignments,
         "contacts_by_id": contacts_by_id,
         "files_by_assignment": files_by_assignment,
+        "profile_files_by_contact": profile_files_by_contact,
         "comments_by_assignment": comments_by_assignment,
     }
+    # Resolve each item's evidence ONCE, here: the list, the reminders and the
+    # export then read the same answer instead of each deriving their own.
+    ctx["versions_by_assignment"] = {
+        assignment["id"]: _versions_of(assignment, ctx)
+        for assignment in assignments
+        if assignment.get("id")
+    }
+    ctx["file_rows_by_id"] = {
+        file_row["id"]: file_row
+        for group in (*files_by_assignment.values(), *profile_files_by_contact.values())
+        for file_row in group
+        if file_row.get("id")
+    }
+    return ctx
+
+
+def _versions_of(assignment: dict, ctx: dict) -> list[dict]:
+    """One assignment's versions, from the rows already loaded into ``ctx``."""
+    contact_id = assignment.get("contact_id")
+    return item_versions(
+        assignment,
+        ctx["tasks_by_id"].get(assignment.get("task_id"), {}),
+        ctx["contacts_by_id"].get(contact_id, {}),
+        ctx["files_by_assignment"].get(assignment.get("id"), []),
+        ctx["profile_files_by_contact"].get(contact_id, []),
+    )
 
 
 def _item_from(assignment: dict, ctx: dict) -> dict:
     task = ctx["tasks_by_id"].get(assignment.get("task_id"), {})
     contact = ctx["contacts_by_id"].get(assignment.get("contact_id"), {})
-    file_rows = ctx["files_by_assignment"].get(assignment.get("id"), [])
-    versions = versions_for(file_rows, assignment.get("file_id"))
+    versions = ctx["versions_by_assignment"].get(assignment.get("id"), [])
     current = next((v for v in versions if v["is_current"]), None)
     return {
         "item_id": assignment.get("id"),
@@ -283,7 +417,7 @@ def _item_from(assignment: dict, ctx: dict) -> dict:
         "required": bool(task.get("required")),
         "due_at": task.get("due_at"),
         "assignment_status": assignment.get("status"),
-        "status": content_status(assignment.get("status")),
+        "status": content_status(assignment.get("status"), has_file=bool(versions)),
         "current_version": current["version"] if current else 0,
         "versions_count": len(versions),
         "current_file": current,
@@ -403,6 +537,23 @@ async def _files_for(org_id: str, assignment_id: str) -> list[dict]:
     )
 
 
+async def _profile_files_for(org_id: str, contact_id: str | None) -> list[dict]:
+    """Headshots this speaker uploaded from their portal profile (no task)."""
+    if not contact_id:
+        return []
+    return rows(
+        await db(
+            lambda: supabase.table("files")
+            .select("id, contact_id, filename, bucket_path, mimetype, size, version, created_at")
+            .eq("org_id", org_id)
+            .eq("contact_id", contact_id)
+            .is_("task_assignment_id", "null")
+            .execute(),
+            "content_item_profile_files",
+        )
+    )
+
+
 async def content_item(org_id: str, assignment_id: str) -> dict:
     """Full detail for one content item: versions + comment thread + speaker."""
     assignment = await _get_org_assignment(org_id, assignment_id)
@@ -420,7 +571,7 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
     contact = first(
         await db(
             lambda: supabase.table("contacts")
-            .select("id, first_name, last_name, email, photo_url")
+            .select("id, first_name, last_name, email, photo_url, updated_at")
             .eq("id", assignment.get("contact_id"))
             .eq("org_id", org_id)
             .limit(1)
@@ -429,7 +580,15 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
         )
     ) or {}
     files = await _files_for(org_id, assignment_id)
-    versions = versions_for(files, assignment.get("file_id"))
+    # Same resolver as the library list: whatever made the row "Received" is
+    # what the detail must show — including a headshot the speaker delivered
+    # through their portal profile instead of against this task.
+    profile_files = (
+        await _profile_files_for(org_id, assignment.get("contact_id"))
+        if not files and classify_item_type(task.get("name")) == "headshot"
+        else []
+    )
+    versions = item_versions(assignment, task, contact, files, profile_files)
     current = next((v for v in versions if v["is_current"]), None)
     return {
         "item": {
@@ -438,7 +597,7 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
             "title": task.get("name") or "Content item",
             "required": bool(task.get("required")),
             "assignment_status": assignment.get("status"),
-            "status": content_status(assignment.get("status")),
+            "status": content_status(assignment.get("status"), has_file=bool(versions)),
             "current_version": current["version"] if current else 0,
             "speaker": {
                 "contact_id": contact.get("id") or assignment.get("contact_id"),
@@ -631,7 +790,8 @@ async def outstanding_by_contact(
 
     grouped: dict[str, dict] = {}
     for assignment in ctx["assignments"]:
-        if content_status(assignment.get("status")) != "missing":
+        versions = ctx["versions_by_assignment"].get(assignment.get("id"), [])
+        if content_status(assignment.get("status"), has_file=bool(versions)) != "missing":
             continue
         task = ctx["tasks_by_id"].get(assignment.get("task_id"), {})
         if required_only and not task.get("required"):
@@ -664,12 +824,11 @@ def _export_records(ctx: dict) -> list[dict]:
     """
     records: list[dict] = []
     for assignment in ctx["assignments"]:
-        file_rows = ctx["files_by_assignment"].get(assignment.get("id"), [])
-        versions = versions_for(file_rows, assignment.get("file_id"))
+        versions = ctx["versions_by_assignment"].get(assignment.get("id"), [])
         current = next((v for v in versions if v["is_current"]), None)
         if not current:
             continue
-        source = next((f for f in file_rows if f.get("id") == current["file_id"]), {}) or {}
+        source = ctx["file_rows_by_id"].get(current["file_id"], {}) or {}
         task = ctx["tasks_by_id"].get(assignment.get("task_id"), {})
         contact = ctx["contacts_by_id"].get(assignment.get("contact_id"), {})
         contact_id = contact.get("id") or assignment.get("contact_id")

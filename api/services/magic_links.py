@@ -8,6 +8,7 @@ for a signed, HttpOnly-cookie session.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -18,8 +19,23 @@ import jwt
 from services.supabase_helpers import db, first
 from supabase_client import supabase
 
+logger = logging.getLogger(__name__)
+
 MAGIC_LINK_PURPOSES = {"portal", "review", "demo"}
 PORTAL_SESSION_PURPOSES = {"portal", "review"}
+
+# Purposes whose link is a BEARER credential rather than a one-shot sign-in.
+#
+# A reviewer link is the reviewer's only way back into their scorecard: it lives
+# in an email they reopen over the days of a review round, on more than one
+# device, and behind mail clients that pre-fetch links. Consuming it on first
+# sight turned every second visit into "this link is already used" — a dead end
+# with no self-serve recovery, since a reviewer has no account to sign into.
+# So a review link validates without being consumed, exactly like the submitter
+# manage link (services/submitter_selfservice). It stays bounded the same way:
+# it is scoped to one org + one evaluator, expires (168h at mint), and an
+# organizer can revoke it — the ONLY thing dropped is single-use.
+REUSABLE_PURPOSES = {"review"}
 
 
 class InvalidMagicLinkError(ValueError):
@@ -91,7 +107,12 @@ async def mint(
 
 
 async def redeem(raw: str, *, now: datetime | None = None) -> dict:
-    """Atomically consume a valid magic link and return its portal context."""
+    """Validate a magic link and return its portal context.
+
+    Single-use purposes are consumed atomically here. A purpose in
+    ``REUSABLE_PURPOSES`` is validated and left alone, so reopening the same
+    link works for as long as it is unrevoked and unexpired.
+    """
     current = _now(now)
     result = await db(
         lambda: supabase.table("magic_link_tokens")
@@ -105,15 +126,39 @@ async def redeem(raw: str, *, now: datetime | None = None) -> dict:
         "magic_link_lookup",
     )
     row = first(result)
+    reusable = bool(row) and row.get("purpose") in REUSABLE_PURPOSES
     expires_at = _parse_timestamp(row.get("expires_at")) if row else None
     if (
         not row
         or row.get("revoked_at") is not None
-        or row.get("used_at") is not None
+        or (row.get("used_at") is not None and not reusable)
         or expires_at is None
         or expires_at <= current
     ):
         raise InvalidMagicLinkError("Magic link is invalid or expired")
+
+    if reusable:
+        # Nothing to consume: expiry and revocation are the whole guard. The
+        # first-seen stamp is still recorded (best effort) so an organizer can
+        # tell an opened invitation from an untouched one.
+        if row.get("used_at") is None:
+            try:
+                await db(
+                    lambda: supabase.table("magic_link_tokens")
+                    .update({"used_at": current.isoformat()})
+                    .eq("id", row["id"])
+                    .is_("used_at", "null")
+                    .execute(),
+                    "magic_link_mark_seen",
+                )
+            except Exception:  # a stamp is never worth failing a valid sign-in
+                logger.warning("magic link: could not stamp first use", exc_info=True)
+        return {
+            "org_id": row.get("org_id"),
+            "purpose": row.get("purpose"),
+            "contact_id": row.get("contact_id"),
+            "evaluator_id": row.get("evaluator_id"),
+        }
 
     # Re-check every validity condition in the UPDATE itself. If two requests
     # race after the lookup, only one can change used_at from NULL and receive a

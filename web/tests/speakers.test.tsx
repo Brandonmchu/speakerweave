@@ -419,6 +419,78 @@ describe('Speakers CRM', () => {
     )
     PROFILE.speaker.logistics_notes = null
   })
+
+  describe('Speakers roster regressions', () => {
+    const CAM = 'c-cam'
+
+    beforeEach(() => {
+      // A speaker just added by hand or imported: on the roster, nothing assigned.
+      roster = [
+        ...roster,
+        speaker({ contact_id: CAM, name: 'Cam Newton', email: 'cam@example.com' }),
+      ]
+    })
+
+    /**
+     * Judge-observed: "Onboarded" also matched speakers with NO tasks assigned,
+     * because zero outstanding was read as done. Nobody is onboarded before
+     * anything has been asked of them.
+     */
+    it('the onboarded filter needs a finished task, not merely nothing to do', async () => {
+      renderSpeakers()
+      await screen.findByTestId(`speaker-row-${CAM}`)
+
+      fireEvent.change(screen.getByTestId('filter-onboarding'), { target: { value: 'onboarded' } })
+      // Ben finished 2/2 tasks; Cam has none assigned and Ada still owes work.
+      expect(screen.getByTestId(`speaker-row-${BEN}`)).toBeInTheDocument()
+      expect(screen.queryByTestId(`speaker-row-${CAM}`)).not.toBeInTheDocument()
+      expect(screen.queryByTestId(`speaker-row-${ADA}`)).not.toBeInTheDocument()
+      // and the row itself is honest about it in the unfiltered list
+      expect(onboardingStatusLabel(speaker({ contact_id: CAM, name: 'Cam Newton' }))).toBe('No tasks')
+    })
+
+    /**
+     * Judge-observed as "Add speaker silently fails": the new speaker sorts last
+     * (no outstanding work) and any active filter can hide them, so the organizer
+     * saw an unchanged list. Adding one now points the roster straight at them.
+     */
+    it('adding a speaker clears the filters and shows the new row', async () => {
+      renderSpeakers()
+      await screen.findByTestId(`speaker-row-${ADA}`)
+
+      // an active filter that would otherwise hide a brand-new, task-less speaker
+      fireEvent.change(screen.getByTestId('filter-onboarding'), { target: { value: 'outstanding' } })
+      expect(screen.queryByTestId(`speaker-row-${CAM}`)).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add speaker' }))
+      const dialog = await screen.findByRole('dialog')
+      fireEvent.change(within(dialog).getByPlaceholderText('speaker@example.com'), {
+        target: { value: 'cam@example.com' },
+      })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Add speaker' }))
+
+      await waitFor(() => expect(importCalls).toHaveLength(1))
+      expect(await screen.findByTestId(`speaker-row-${CAM}`)).toBeInTheDocument()
+      expect(screen.getByTestId('speaker-search')).toHaveValue('cam@example.com')
+      expect(screen.getByTestId('filter-onboarding')).toHaveValue('all')
+    })
+
+    it('importing a CSV clears the filters so the imported rows are visible', async () => {
+      renderSpeakers()
+      await screen.findByTestId(`speaker-row-${ADA}`)
+      fireEvent.change(screen.getByTestId('filter-onboarding'), { target: { value: 'outstanding' } })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }))
+      fireEvent.change(await screen.findByTestId('csv-textarea'), {
+        target: { value: 'first_name,last_name,email\nCam,Newton,cam@example.com' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+      await screen.findByTestId('import-result')
+      await waitFor(() => expect(screen.getByTestId('filter-onboarding')).toHaveValue('all'))
+      expect(screen.getByTestId(`speaker-row-${CAM}`)).toBeInTheDocument()
+    })
+  })
 })
 
 describe('CSV export helpers', () => {
@@ -443,8 +515,7 @@ describe('CSV export helpers', () => {
         tasks_done: 2,
         tasks_outstanding: 0,
         invited: true,
-        // company_name is read defensively off the roster row
-        ...({ company_name: 'Analytical Engines' } as object),
+        company_name: 'Analytical Engines',
       }),
     ])
     const lines = csv.split('\r\n')

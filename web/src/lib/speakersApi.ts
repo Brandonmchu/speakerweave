@@ -11,6 +11,8 @@ export interface EventSpeaker {
   contact_id: string
   name: string
   email: string | null
+  company_name?: string | null
+  title?: string | null
   photo_url: string | null
   session_count: number
   last_portal_access_at: string | null
