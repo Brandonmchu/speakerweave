@@ -10,6 +10,7 @@ Two entrypoints:
 
     venv/bin/python -m scripts.seed_demo reset   # delete only demo-seeded rows
     venv/bin/python -m scripts.seed_demo seed    # reset, then insert (idempotent)
+    venv/bin/python -m scripts.seed_demo seed --namespace a  # clone workspace
 
 Everything this script writes carries a FIXED demo UUID (or hangs off a row that
 does), so `reset()` deletes precisely the demo rows and never touches the event,
@@ -19,9 +20,14 @@ Uses the service-role Supabase client directly (see supabase_client.py).
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import hashlib
+import re
 import sys
 from datetime import datetime, timedelta, timezone
+
+from scripts.mint_dev_token import mint_dev_token
 
 # Run as a module (`-m scripts.seed_demo`) from the api/ directory so the
 # project root is importable.
@@ -51,8 +57,88 @@ F_ABSTRACT = "55555555-5555-5555-5555-555555555501"
 F_TRACK = "55555555-5555-5555-5555-555555555502"
 F_FORMAT = "55555555-5555-5555-5555-555555555503"
 F_TAKEAWAYS = "55555555-5555-5555-5555-555555555504"
+F_BIO = "55555555-5555-5555-5555-555555555505"
 F_PRIOR = "55555555-5555-5555-5555-555555555506"
 F_SPOKEN = "55555555-5555-5555-5555-555555555507"
+QUESTION_RULE = "77777777-7777-7777-7777-777777777701"
+
+EVENT_SLUG = "ai-builders-summit"
+FORM_SLUG = "call-for-speakers"
+
+_NAMESPACE_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62})\Z")
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+
+
+def validate_namespace(namespace: str) -> str:
+    """Validate a namespace for safe use in both org ids and public slugs."""
+    if not _NAMESPACE_RE.fullmatch(namespace):
+        raise ValueError(
+            "namespace must be 1-63 lowercase letters, digits, or hyphens, "
+            "and cannot start with a hyphen"
+        )
+    return namespace
+
+
+def namespace_byte(namespace: str) -> str:
+    """Return the stable byte reserved for a namespace's cloned UUIDs.
+
+    Single-letter namespaces deliberately map a -> aa, b -> ab, ... z -> c3
+    for readable test replicas. Longer namespaces use the first SHA-256 byte.
+    As requested, the scheme has a one-byte namespace space, so callers should
+    avoid namespace-byte collisions when keeping more than one clone.
+    """
+    namespace = validate_namespace(namespace)
+    if len(namespace) == 1 and "a" <= namespace <= "z":
+        return f"{0xAA + ord(namespace) - ord('a'):02x}"
+    return hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:2]
+
+
+def remap(uuid_value: str, namespace: str | None) -> str:
+    """Replace a seeded UUID's first byte for ``namespace``; no-op by default."""
+    if namespace is None:
+        return uuid_value
+    if not _UUID_RE.fullmatch(uuid_value):
+        raise ValueError(f"not a canonical UUID: {uuid_value!r}")
+    return namespace_byte(namespace) + uuid_value[2:]
+
+
+def org_id(namespace: str | None) -> str:
+    return ORG if namespace is None else f"org_replica_{validate_namespace(namespace)}"
+
+
+def event_slug(namespace: str | None) -> str:
+    return EVENT_SLUG if namespace is None else f"{EVENT_SLUG}-{validate_namespace(namespace)}"
+
+
+def form_slug(namespace: str | None) -> str:
+    return FORM_SLUG if namespace is None else f"{FORM_SLUG}-{validate_namespace(namespace)}"
+
+
+def _scope_seed_value(value, namespace: str | None):
+    """Recursively scope seeded UUIDs, UUID-keyed JSON, and org references."""
+    if namespace is None:
+        return value
+    if isinstance(value, dict):
+        return {
+            _scope_seed_value(key, namespace): _scope_seed_value(item, namespace)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_scope_seed_value(item, namespace) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scope_seed_value(item, namespace) for item in value)
+    if value == ORG:
+        return org_id(namespace)
+    if isinstance(value, str) and _UUID_RE.fullmatch(value):
+        return remap(value, namespace)
+    return value
+
+
+def _scope_rows(rows: list[dict], namespace: str | None) -> list[dict]:
+    return _scope_seed_value(rows, namespace)
 
 # ── demo-row UUID factories (hex-only prefixes = "this is demo-seeded") ───────
 def _contact_id(i: int) -> str:
@@ -838,17 +924,19 @@ def _png(rgb: tuple[int, int, int], size: int = 240) -> bytes:
     )
 
 
-def seed_content_files() -> int:
+def seed_content_files(namespace: str | None = None) -> int:
     """Give every delivered content item a real file, version history and pointer.
 
     Idempotent: an assignment that already has files is left alone, and the
     storage upload upserts, so re-running never duplicates a version.
     """
-    task_id = _task_id(CONTENT_TASK_IDX)
+    scoped_org = org_id(namespace)
+    scoped_event = remap(EVENT, namespace)
+    task_id = remap(_task_id(CONTENT_TASK_IDX), namespace)
     assignments = (
         supabase.table("task_assignments")
         .select("id, contact_id, status, file_id")
-        .eq("org_id", ORG)
+        .eq("org_id", scoped_org)
         .eq("task_id", task_id)
         .execute()
         .data
@@ -858,14 +946,14 @@ def seed_content_files() -> int:
 
     written = 0
     for contact_idx, version_count in _CONTENT_FILES.items():
-        contact_id = _contact_id(contact_idx)
+        contact_id = remap(_contact_id(contact_idx), namespace)
         assignment = by_contact.get(contact_id)
         if not assignment:
             continue
         existing = (
             supabase.table("files")
             .select("id")
-            .eq("org_id", ORG)
+            .eq("org_id", scoped_org)
             .eq("task_assignment_id", assignment["id"])
             .execute()
             .data
@@ -876,7 +964,7 @@ def seed_content_files() -> int:
 
         current_id = None
         for version in range(1, version_count + 1):
-            path = f"{ORG}/{contact_id}/demo-headshot-v{version}.png"
+            path = f"{scoped_org}/{contact_id}/demo-headshot-v{version}.png"
             data = _png(_CONTENT_TINTS.get(contact_idx, (90, 90, 110)))
             supabase.storage.from_("portal-files").upload(
                 path, data, {"content-type": "image/png", "upsert": "true"}
@@ -885,8 +973,8 @@ def seed_content_files() -> int:
                 supabase.table("files")
                 .insert(
                     {
-                        "org_id": ORG,
-                        "event_id": EVENT,
+                        "org_id": scoped_org,
+                        "event_id": scoped_event,
                         "contact_id": contact_id,
                         "task_assignment_id": assignment["id"],
                         "bucket_path": path,
@@ -907,14 +995,14 @@ def seed_content_files() -> int:
         if current_id:
             supabase.table("task_assignments").update({"file_id": current_id}).eq(
                 "id", assignment["id"]
-            ).eq("org_id", ORG).execute()
+            ).eq("org_id", scoped_org).execute()
 
         # The denied item is only a story if the speaker can read WHY.
         if assignment.get("status") == "denied":
             supabase.table("content_comments").insert(
                 {
-                    "org_id": ORG,
-                    "event_id": EVENT,
+                    "org_id": scoped_org,
+                    "event_id": scoped_event,
                     "task_assignment_id": assignment["id"],
                     "contact_id": contact_id,
                     "author_role": "organizer",
@@ -939,10 +1027,282 @@ _ALL_TEMPLATE_IDS = [_template_id(i) for i in range(1, 4)]
 _ALL_OUTBOX_IDS = [_outbox_id(i) for i in range(1, len(_OUTBOX) + 1)]
 
 
-def reset() -> None:
+def _build_prerequisites(namespace: str) -> list[tuple[str, list[dict]]]:
+    """Clone the structural rows that migration 002 provides for ``org_dev``."""
+    rows: list[tuple[str, list[dict]]] = [
+        ("orgs", [{"org_id": ORG, "name": "Dais Dev Org"}]),
+        (
+            "events",
+            [
+                {
+                    "id": EVENT,
+                    "org_id": ORG,
+                    "name": "AI Builders Summit 2026",
+                    "slug": event_slug(namespace),
+                    "starts_at": "2026-10-12 08:00-07",
+                    "ends_at": "2026-10-13 18:00-07",
+                    "timezone": "America/Los_Angeles",
+                    "location": "San Francisco, CA",
+                }
+            ],
+        ),
+        (
+            "tracks",
+            [
+                {
+                    "id": TRACK_ENG,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Engineering",
+                    "color": "#4F46E5",
+                    "order": 0,
+                },
+                {
+                    "id": TRACK_PROD,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Product",
+                    "color": "#0EA5E9",
+                    "order": 1,
+                },
+                {
+                    "id": TRACK_RES,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Research",
+                    "color": "#10B981",
+                    "order": 2,
+                },
+            ],
+        ),
+        (
+            "rooms",
+            [
+                {
+                    "id": ROOM_MAIN,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Main Stage",
+                    "order": 0,
+                    "capacity": 400,
+                },
+                {
+                    "id": ROOM_A,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Workshop A",
+                    "order": 1,
+                    "capacity": 80,
+                },
+                {
+                    "id": ROOM_B,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Workshop B",
+                    "order": 2,
+                    "capacity": 80,
+                },
+            ],
+        ),
+        (
+            "formats",
+            [
+                {
+                    "id": FMT_KEYNOTE,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Keynote",
+                    "default_duration_min": 45,
+                },
+                {
+                    "id": FMT_TALK,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Talk",
+                    "default_duration_min": 30,
+                },
+                {
+                    "id": FMT_LIGHTNING,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Lightning Talk",
+                    "default_duration_min": 15,
+                },
+                {
+                    "id": FMT_WORKSHOP,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "name": "Workshop",
+                    "default_duration_min": 90,
+                },
+            ],
+        ),
+        (
+            "fields",
+            [
+                {
+                    "id": F_ABSTRACT,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "abstract",
+                    "public_name": "Abstract",
+                    "field_type": "textarea",
+                    "options": {
+                        "max_length": 2000,
+                        "help": "One paragraph. What will the audience learn?",
+                    },
+                    "required": True,
+                },
+                {
+                    "id": F_TRACK,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "track_choice",
+                    "public_name": "Track",
+                    "field_type": "dropdown",
+                    "options": {"choices": ["Engineering", "Product", "Research"]},
+                    "required": True,
+                },
+                {
+                    "id": F_FORMAT,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "format_choice",
+                    "public_name": "Session format",
+                    "field_type": "dropdown",
+                    "options": {
+                        "choices": ["Keynote", "Talk", "Lightning Talk", "Workshop"]
+                    },
+                    "required": True,
+                },
+                {
+                    "id": F_TAKEAWAYS,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "takeaways",
+                    "public_name": "Key takeaways",
+                    "field_type": "textarea",
+                    "options": {
+                        "max_length": 1000,
+                        "help": "3-5 bullets the attendee leaves with.",
+                    },
+                    "required": False,
+                },
+                {
+                    "id": F_BIO,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "contact",
+                    "internal_name": "speaker_bio",
+                    "public_name": "Speaker bio",
+                    "field_type": "textarea",
+                    "options": {"max_length": 1500},
+                    "required": True,
+                },
+                {
+                    "id": F_PRIOR,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "prior_talk",
+                    "public_name": "Link to a prior talk recording",
+                    "field_type": "url",
+                    "options": {"help": "Only shown if you have spoken before."},
+                    "required": False,
+                },
+                {
+                    "id": F_SPOKEN,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "scope": "session",
+                    "internal_name": "spoken_before",
+                    "public_name": "Have you spoken at a conference before?",
+                    "field_type": "checkbox",
+                    "options": {},
+                    "required": False,
+                },
+            ],
+        ),
+        (
+            "forms",
+            [
+                {
+                    "id": CFP_FORM,
+                    "org_id": ORG,
+                    "event_id": EVENT,
+                    "slug": form_slug(namespace),
+                    "name": "Call for Speakers",
+                    "kind": "cfp",
+                    "welcome_html": (
+                        "<h2>Welcome to the AI Builders Summit CFP!</h2><p>Sessions for "
+                        "our agenda will be selected from these submissions. Submissions "
+                        "close soon — we can't wait to read yours.</p>"
+                    ),
+                    "settings": {"submission_limit": 3, "max_speakers": 6},
+                }
+            ],
+        ),
+        (
+            "form_fields",
+            [
+                {
+                    "org_id": ORG,
+                    "form_id": CFP_FORM,
+                    "field_id": field_id,
+                    "page": 3,
+                    "order": order,
+                    "required": required,
+                }
+                for field_id, order, required in (
+                    (F_ABSTRACT, 0, True),
+                    (F_TRACK, 1, True),
+                    (F_FORMAT, 2, True),
+                    (F_TAKEAWAYS, 3, False),
+                    (F_SPOKEN, 4, False),
+                    (F_PRIOR, 5, False),
+                )
+            ],
+        ),
+        (
+            "question_rules",
+            [
+                {
+                    "id": QUESTION_RULE,
+                    "org_id": ORG,
+                    "form_id": CFP_FORM,
+                    "target_field_id": F_PRIOR,
+                    "logic": {
+                        "when": [{"field": F_SPOKEN, "op": "eq", "value": True}],
+                        "match": "all",
+                        "action": "show",
+                    },
+                }
+            ],
+        ),
+    ]
+    return [(table, _scope_rows(table_rows, namespace)) for table, table_rows in rows]
+
+
+def _bootstrap_namespace(namespace: str) -> None:
+    for table, rows in _build_prerequisites(namespace):
+        _insert(table, rows)
+
+
+def reset(namespace: str | None = None) -> None:
     """Delete only demo-seeded rows, in FK-safe order. Never touches the event,
-    its rooms/tracks/formats/fields/CFP form, or any non-demo rows."""
+    its rooms/tracks/formats/fields/CFP form, or any non-demo rows.
+
+    A namespaced org is itself disposable, so its structural prerequisites and
+    org row are removed after the same child-first cleanup.
+    """
     t = supabase.table
+    scoped_org = org_id(namespace)
+    scoped_event = remap(EVENT, namespace)
+    scoped_session_ids = [remap(value, namespace) for value in _ALL_SESSION_IDS]
 
     # org_dev is exclusively the demo org, so a clean reset clears ALL of its
     # rows (including anything created by live demo usage — decisions,
@@ -952,13 +1312,20 @@ def reset() -> None:
     # tracks, formats, levels, tags, fields, forms, form_fields,
     # question_rules, routing_rules).
     for table in (
+        "content_comments",    # -> task_assignments, contacts
+        "files",               # -> contacts, sessions, task_assignments
+    ):
+        t(table).delete().eq("org_id", scoped_org).execute()
+
+    if namespace is not None:
+        t("resource_pages").delete().eq("org_id", scoped_org).execute()
+    for table in (
         "reviews",             # -> assignments
         "assignments",         # -> plan, session
         "evaluators",          # -> plan
         "evaluation_plans",
         "task_assignments",    # -> tasks, contacts
         "calendar_invites",    # -> sessions, contacts
-        "files",               # -> contacts, sessions, task_assignments
         "magic_link_tokens",   # -> contacts
         "email_outbox",        # -> contacts
         "tasks",               # -> sessions, portals
@@ -966,16 +1333,42 @@ def reset() -> None:
         "session_participants",  # -> sessions, contacts
         "session_tracks",        # -> sessions, tracks (migration 004)
     ):
-        t(table).delete().eq("org_id", ORG).execute()
+        t(table).delete().eq("org_id", scoped_org).execute()
 
     # session_tags has no org_id column — scope by the seeded session ids.
-    t("session_tags").delete().in_("session_id", _ALL_SESSION_IDS).execute()
+    t("session_tags").delete().in_("session_id", scoped_session_ids).execute()
 
     # parents last
-    t("sessions").delete().eq("org_id", ORG).execute()
-    t("email_templates").delete().eq("org_id", ORG).execute()
-    t("contacts").delete().eq("org_id", ORG).execute()
-    print("reset: demo rows deleted")
+    t("sessions").delete().eq("org_id", scoped_org).execute()
+    t("email_templates").delete().eq("org_id", scoped_org).execute()
+    t("contacts").delete().eq("org_id", scoped_org).execute()
+
+    if namespace is not None:
+        # Replicas are disposable workspaces, including structural or live-test
+        # data accumulated beneath the org since it was seeded.
+        for table in (
+            "directory_notes",
+            "directory_stage_history",
+            "directory_segments",
+            "directory_custom_fields",
+            "directory_people",
+            "routing_rules",
+            "question_rules",
+            "form_fields",
+            "api_tokens",
+            "events_log",
+        ):
+            t(table).delete().eq("org_id", scoped_org).execute()
+
+        t("friendly_id_counters").delete().eq("event_id", scoped_event).execute()
+        for table in ("forms", "fields", "levels", "tags", "rooms", "tracks", "formats"):
+            t(table).delete().eq("org_id", scoped_org).execute()
+        t("events").delete().eq("org_id", scoped_org).execute()
+        t("org_memberships").delete().eq("org_id", scoped_org).execute()
+        t("orgs").delete().eq("org_id", scoped_org).execute()
+        print(f"reset: demo rows deleted for {scoped_org}")
+    else:
+        print("reset: demo rows deleted")
 
 
 def _insert(table: str, rows: list[dict]) -> int:
@@ -985,61 +1378,78 @@ def _insert(table: str, rows: list[dict]) -> int:
     return len(rows)
 
 
-async def _provision_accepted_speakers() -> int:
+async def _provision_accepted_speakers(namespace: str | None = None) -> int:
     """Fill missing canonical assignments without disturbing seeded progress."""
     created = 0
     for index, spec in enumerate(_SESSION_SPEC, start=1):
         if spec["status"] == "accepted":
             created += await provision_speaker_onboarding(
-                ORG,
-                EVENT,
-                _session_id(index),
+                org_id(namespace),
+                remap(EVENT, namespace),
+                remap(_session_id(index), namespace),
             )
     return created
 
 
-def seed() -> dict:
+def seed(namespace: str | None = None) -> dict:
     """Idempotent: reset, then insert the full demo dataset."""
-    reset()
+    reset(namespace)
+    if namespace is not None:
+        _bootstrap_namespace(namespace)
     counts: dict[str, int] = {}
 
-    counts["contacts"] = _insert("contacts", build_contacts())
-    counts["sessions"] = _insert("sessions", build_sessions())
-    counts["session_participants"] = _insert("session_participants", build_participants())
-    counts["portals"] = _insert("portals", [build_portal()])
-    counts["tasks"] = _insert("tasks", build_tasks())
-    counts["task_assignments"] = _insert("task_assignments", build_task_assignments())
-    counts["task_assignments"] += asyncio.run(_provision_accepted_speakers())
-    counts["files"] = seed_content_files()
-    counts["evaluation_plans"] = _insert("evaluation_plans", [build_plan()])
-    counts["evaluators"] = _insert("evaluators", build_evaluators())
+    counts["contacts"] = _insert("contacts", _scope_rows(build_contacts(), namespace))
+    counts["sessions"] = _insert("sessions", _scope_rows(build_sessions(), namespace))
+    counts["session_participants"] = _insert(
+        "session_participants", _scope_rows(build_participants(), namespace)
+    )
+    counts["portals"] = _insert("portals", _scope_rows([build_portal()], namespace))
+    counts["tasks"] = _insert("tasks", _scope_rows(build_tasks(), namespace))
+    counts["task_assignments"] = _insert(
+        "task_assignments", _scope_rows(build_task_assignments(), namespace)
+    )
+    counts["task_assignments"] += asyncio.run(_provision_accepted_speakers(namespace))
+    counts["files"] = seed_content_files(namespace)
+    counts["evaluation_plans"] = _insert(
+        "evaluation_plans", _scope_rows([build_plan()], namespace)
+    )
+    counts["evaluators"] = _insert(
+        "evaluators", _scope_rows(build_evaluators(), namespace)
+    )
     assignments, reviews = build_assignments_and_reviews()
-    counts["assignments"] = _insert("assignments", assignments)
-    counts["reviews"] = _insert("reviews", reviews)
-    counts["email_templates"] = _insert("email_templates", build_email_templates())
-    counts["email_outbox"] = _insert("email_outbox", build_outbox())
+    counts["assignments"] = _insert("assignments", _scope_rows(assignments, namespace))
+    counts["reviews"] = _insert("reviews", _scope_rows(reviews, namespace))
+    counts["email_templates"] = _insert(
+        "email_templates", _scope_rows(build_email_templates(), namespace)
+    )
+    counts["email_outbox"] = _insert(
+        "email_outbox", _scope_rows(build_outbox(), namespace)
+    )
 
     print("seed: inserted")
     for table, n in counts.items():
         print(f"  {table:22s} {n}")
+    if namespace is not None:
+        scoped_org = org_id(namespace)
+        print(f"org id: {scoped_org}")
+        print(f"event slug: {event_slug(namespace)}")
+        print(f"dev token: {mint_dev_token(org=scoped_org)}")
     return counts
 
 
 def main(argv: list[str]) -> int:
-    cmd = argv[1] if len(argv) > 1 else "seed"
-    if cmd == "reset":
-        reset()
-    elif cmd == "seed":
-        seed()
-    elif cmd == "content":
-        # Backfill just the collected files onto an already-seeded database.
-        print(f"content: {seed_content_files()} file version(s) written")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", nargs="?", default="seed", choices=("seed", "reset", "content"))
+    parser.add_argument("--namespace", type=validate_namespace)
+    args = parser.parse_args(argv[1:])
+
+    if args.command == "reset":
+        reset(args.namespace)
+    elif args.command == "seed":
+        seed(args.namespace)
     else:
-        print(
-            f"usage: python -m scripts.seed_demo [seed|reset|content]  (got {cmd!r})",
-            file=sys.stderr,
-        )
-        return 2
+        # Backfill just the collected files onto an already-seeded database.
+        print(f"content: {seed_content_files(args.namespace)} file version(s) written")
     return 0
 
 

@@ -115,6 +115,8 @@ export interface DirectoryPayload {
   duplicate_count: number
   facets: DirectoryFacets
   custom_fields: CustomFieldDef[]
+  /** Computed from the exact synchronized snapshot that produced `people`. */
+  overview: CrmOverview
 }
 
 const EMPTY_FACETS: DirectoryFacets = {
@@ -149,6 +151,7 @@ export async function listDirectory(
     duplicate_count: wire.duplicate_count ?? 0,
     facets: { ...EMPTY_FACETS, ...(wire.facets ?? {}) },
     custom_fields: list<CustomFieldDef>(wire.custom_fields),
+    overview: normalizeOverview(wire.overview),
   }
 }
 
@@ -177,17 +180,21 @@ const EMPTY_TOTALS = {
   tagged: 0,
 }
 
+function normalizeOverview(wire: Partial<CrmOverview> | null | undefined): CrmOverview {
+  return {
+    totals: { ...EMPTY_TOTALS, ...(wire?.totals ?? {}) },
+    top_companies: list(wire?.top_companies),
+    top_titles: list(wire?.top_titles),
+    top_tags: list(wire?.top_tags),
+    by_stage: list(wire?.by_stage),
+    by_event: list(wire?.by_event),
+  }
+}
+
 /** GET /api/crm/overview — org-wide KPIs and the analytics widgets. */
 export async function getOverview(): Promise<CrmOverview> {
   const wire = await apiGet<Partial<CrmOverview>>('/api/crm/overview')
-  return {
-    totals: { ...EMPTY_TOTALS, ...(wire.totals ?? {}) },
-    top_companies: list(wire.top_companies),
-    top_titles: list(wire.top_titles),
-    top_tags: list(wire.top_tags),
-    by_stage: list(wire.by_stage),
-    by_event: list(wire.by_event),
-  }
+  return normalizeOverview(wire)
 }
 
 export interface PersonNote {

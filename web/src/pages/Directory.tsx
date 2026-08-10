@@ -40,7 +40,6 @@ import {
   createPerson,
   createSegment,
   getOutreachLog,
-  getOverview,
   importDirectory,
   listDirectory,
   mergePeople,
@@ -81,7 +80,7 @@ function activeCriteria(filters: DirectoryFilters): { key: keyof DirectoryFilter
     event_id: 'Event',
   }
   return (Object.keys(filters) as (keyof DirectoryFilters)[])
-    .filter((key) => Boolean(filters[key]))
+    .filter((key) => Boolean(filters[key]) && Boolean(labels[key]))
     .map((key) => ({
       key,
       label: `${labels[key] ?? key}: ${key === 'stage' ? (STAGE_LABELS[String(filters[key])] ?? filters[key]) : filters[key]}`,
@@ -126,9 +125,9 @@ export function Directory() {
     queryKey: ['crm', 'directory', query],
     queryFn: () => listDirectory(query),
   })
-  const overviewQuery = useQuery({ queryKey: ['crm', 'overview'], queryFn: getOverview })
 
   const data = directoryQuery.data
+  const overview = data?.overview
   const people = data?.people ?? []
   const facets = data?.facets
   const segments = data?.segments ?? []
@@ -216,14 +215,14 @@ export function Directory() {
       {/* CRM dashboard — org-wide KPIs and analytics (CRM-12). */}
       <section className="mt-6" aria-label="CRM overview">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Total contacts" value={overviewQuery.data?.totals.contacts ?? 0} hint="Across every event" />
-          <StatCard label="Events" value={overviewQuery.data?.totals.events ?? 0} />
+          <StatCard label="Total contacts" value={overview?.totals.contacts ?? 0} hint="Across every event" />
+          <StatCard label="Events" value={overview?.totals.events ?? 0} />
           <StatCard
             label="Returning speakers"
-            value={overviewQuery.data?.totals.returning_speakers ?? 0}
+            value={overview?.totals.returning_speakers ?? 0}
             hint="Appear at 2+ events"
           />
-          <StatCard label="In pipeline" value={overviewQuery.data?.totals.in_pipeline ?? 0} />
+          <StatCard label="In pipeline" value={overview?.totals.in_pipeline ?? 0} />
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -233,10 +232,10 @@ export function Directory() {
               Top companies
             </h2>
             <ul className="mt-3 space-y-1.5">
-              {(overviewQuery.data?.top_companies ?? []).length === 0 && (
+              {(overview?.top_companies ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No company data yet.</li>
               )}
-              {(overviewQuery.data?.top_companies ?? []).map((row) => (
+              {(overview?.top_companies ?? []).map((row) => (
                 <li key={row.name}>
                   <button
                     type="button"
@@ -254,10 +253,10 @@ export function Directory() {
           <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
             <h2 className="text-sm font-semibold text-foreground">Areas of focus (tags)</h2>
             <ul className="mt-3 space-y-1.5">
-              {(overviewQuery.data?.top_tags ?? []).length === 0 && (
+              {(overview?.top_tags ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No tags applied yet.</li>
               )}
-              {(overviewQuery.data?.top_tags ?? []).map((row) => (
+              {(overview?.top_tags ?? []).map((row) => (
                 <li key={row.name}>
                   <button
                     type="button"
@@ -275,10 +274,10 @@ export function Directory() {
           <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
             <h2 className="text-sm font-semibold text-foreground">Contacts by event</h2>
             <ul className="mt-3 space-y-1.5">
-              {(overviewQuery.data?.by_event ?? []).length === 0 && (
+              {(overview?.by_event ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No events yet.</li>
               )}
-              {(overviewQuery.data?.by_event ?? []).map((row) => (
+              {(overview?.by_event ?? []).map((row) => (
                 <li key={row.id}>
                   <button
                     type="button"
@@ -1139,6 +1138,15 @@ function MergeDialog({
 
 /* ── Bulk outreach ───────────────────────────────────────────────────────── */
 
+function outreachSummary(result: OutreachResult): string {
+  return [
+    `Delivered ${result.sent}`,
+    `suppressed ${result.skipped}${result.skipped ? ' (demo addresses)' : ''}`,
+    `failed ${result.failed}`,
+    `${result.total} recipients`,
+  ].join(' · ')
+}
+
 function OutreachDialog({
   recipients,
   onClose,
@@ -1164,12 +1172,7 @@ function OutreachDialog({
       }),
     onSuccess: (payload) => {
       setResult(payload)
-      toast({
-        title: `Sent to ${payload.sent + payload.skipped} of ${payload.total} recipients`,
-        description: payload.skipped
-          ? `${payload.skipped} suppressed (reserved demo address).`
-          : undefined,
-      })
+      toast({ title: outreachSummary(payload) })
       onSent()
     },
     onError: (error: Error) => toast({ title: "Couldn't send", description: error.message }),
@@ -1181,7 +1184,7 @@ function OutreachDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Email {recipients.length} contacts</DialogTitle>
+          <DialogTitle>Email {result?.total ?? recipients.length} contacts</DialogTitle>
           <DialogDescription>
             Merge tags resolve per recipient: {'{{first_name}}'}, {'{{company}}'}, {'{{title}}'},{' '}
             {'{{event_name}}'}.
@@ -1191,8 +1194,7 @@ function OutreachDialog({
         {result ? (
           <div className="space-y-3">
             <p className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success-strong">
-              Sent {result.sent}, suppressed {result.skipped}, failed {result.failed} of{' '}
-              {result.total} recipients.
+              {outreachSummary(result)}
             </p>
             <ul className="space-y-1">
               {result.recipients.map((row) => (

@@ -113,6 +113,7 @@ def test_directory_groups_one_person_across_events(client, auth_headers, crm_db)
     # The richest appearance wins the identity, not whichever event sorted first.
     assert priya[0]["company_name"] == "Latticework Systems"
     assert payload["total_all"] == 3
+    assert payload["overview"]["totals"]["contacts"] == payload["total_all"]
 
 
 def test_backfill_is_idempotent(client, auth_headers, crm_db):
@@ -424,6 +425,9 @@ def test_segment_round_trip_reruns_its_filter(client, auth_headers, crm_db):
 
     reopened = _people(client, auth_headers, segment_id=segment_id)
     assert [row["name"] for row in reopened["people"]] == ["Marcus Okafor"]
+    assert [(row["name"], row["member_count"]) for row in reopened["segments"]] == [
+        ("AI Experts", 1)
+    ]
 
     # Dynamic really means dynamic: a newly tagged person joins without edits.
     dana_id = _people(client, auth_headers, q="dana")["people"][0]["id"]
@@ -627,6 +631,7 @@ def test_overview_kpis_match_the_directory(client, auth_headers, crm_db):
     overview = client.get("/api/crm/overview", headers=auth_headers).json()
 
     assert overview["totals"]["contacts"] == directory["total_all"] == 3
+    assert directory["overview"] == overview
     assert overview["totals"]["events"] == 2
     # Priya is the only person at more than one event — the metric a per-event
     # dashboard structurally cannot produce.

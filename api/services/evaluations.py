@@ -2440,6 +2440,139 @@ async def _review_context(org_id: str, evaluator_id: str, assignment_id: str) ->
     return assignment, plan
 
 
+_IDENTITY_FIELD_NAMES = {
+    "name",
+    "first_name",
+    "last_name",
+    "full_name",
+    "speaker_name",
+    "presenter_name",
+    "email",
+    "email_address",
+    "company",
+    "company_name",
+    "employer",
+    "organization",
+    "organisation",
+}
+
+
+def _field_name(value: Any) -> str:
+    return "_".join(str(value or "").strip().casefold().replace("-", " ").split())
+
+
+def _is_identity_field(field_id: str, definition: dict, label: str) -> bool:
+    """Whether a form answer directly identifies the proposal's author.
+
+    Form libraries have used both machine names (``company_name``) and plain
+    labels (``Your company``) for these questions over time, so anonymity must
+    consider both.  The id itself is included for legacy answer maps whose keys
+    were human machine names rather than UUIDs.
+    """
+    if definition.get("scope") == "contact":
+        return True
+    candidates = {
+        _field_name(field_id),
+        _field_name(definition.get("internal_name")),
+        _field_name(definition.get("public_name")),
+        _field_name(label),
+    }
+    if candidates & _IDENTITY_FIELD_NAMES:
+        return True
+    compact = {candidate.replace("_", "") for candidate in candidates if candidate}
+    return any(
+        marker in candidate
+        for candidate in compact
+        for marker in (
+            "email",
+            "company",
+            "employer",
+            "organization",
+            "organisation",
+            "speakername",
+            "presentername",
+            "yourname",
+            "fullname",
+            "firstname",
+            "lastname",
+        )
+    )
+
+
+def _human_answer_label(field_id: str, definition: dict, override: Any) -> str:
+    label = str(override or definition.get("public_name") or "").strip()
+    if label:
+        return label
+    # Old answer maps occasionally used a readable machine key. Preserve that
+    # information without ever exposing an opaque field UUID to a reviewer.
+    machine = _field_name(definition.get("internal_name") or field_id)
+    if machine and not all(char in "0123456789abcdef_" for char in machine.replace("_", "")):
+        return machine.replace("_", " ").capitalize()
+    return "Additional response"
+
+
+async def _reviewer_form_answers(session: dict, org_id: str, *, anonymized: bool) -> dict:
+    """Resolve reviewer-visible answers to labels and apply plan anonymity.
+
+    This is deliberately server-side: the browser never receives a speaker's
+    identity answers under an anonymized plan, and it never has to translate a
+    database field id into reviewer-facing copy.
+    """
+    answers = session.get("form_answers") or {}
+    if not isinstance(answers, dict) or not answers:
+        return {}
+
+    answer_ids = [str(field_id) for field_id in answers]
+    definitions = rows(
+        await db(
+            lambda: supabase.table("fields")
+            .select("id, public_name, internal_name, scope")
+            .in_("id", answer_ids)
+            .eq("org_id", org_id)
+            .execute(),
+            "review_submission_fields",
+        )
+    )
+    by_id = {str(row.get("id")): row for row in definitions}
+
+    layout: list[dict] = []
+    if session.get("source_form_id"):
+        layout = rows(
+            await db(
+                lambda: supabase.table("form_fields")
+                .select("field_id, page, order, label_override")
+                .eq("form_id", session["source_form_id"])
+                .eq("org_id", org_id)
+                .execute(),
+                "review_submission_form_fields",
+            )
+        )
+        layout.sort(key=lambda row: (row.get("page") or 1, row.get("order") or 0))
+    overrides = {
+        str(row.get("field_id")): row.get("label_override")
+        for row in layout
+        if row.get("field_id") is not None
+    }
+    ordered_ids = [
+        str(row.get("field_id"))
+        for row in layout
+        if str(row.get("field_id")) in answers
+    ]
+    ordered_ids.extend(field_id for field_id in answer_ids if field_id not in ordered_ids)
+
+    output: dict[str, Any] = {}
+    label_counts: dict[str, int] = {}
+    for field_id in ordered_ids:
+        definition = by_id.get(field_id) or {}
+        label = _human_answer_label(field_id, definition, overrides.get(field_id))
+        if anonymized and _is_identity_field(field_id, definition, label):
+            continue
+        label_counts[label] = label_counts.get(label, 0) + 1
+        display_label = label if label_counts[label] == 1 else f"{label} ({label_counts[label]})"
+        output[display_label] = answers[field_id]
+    return output
+
+
 async def reviewer_submission(org_id: str, evaluator_id: str, assignment_id: str) -> dict:
     assignment, plan = await _review_context(org_id, evaluator_id, assignment_id)
     session = first(
@@ -2455,8 +2588,14 @@ async def reviewer_submission(org_id: str, evaluator_id: str, assignment_id: str
         )
     )
     session = verify_org_access(session, org_id, "Session")
+    session["form_answers"] = await _reviewer_form_answers(
+        session, org_id, anonymized=bool(plan.get("anonymized"))
+    )
     if plan.get("anonymized"):
         session.pop("submitter_contact_id", None)
+        # A legacy session may carry identity-shaped custom data alongside the
+        # form answer map. It is not needed by the reviewer scorecard.
+        session.pop("custom_fields", None)
     else:
         speakers = await _speaker_map([session["id"]], org_id)
         session["speakers"] = speakers.get(session["id"], [])

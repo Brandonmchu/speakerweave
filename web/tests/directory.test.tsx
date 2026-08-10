@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DirectoryPerson } from '@/lib/crmApi'
 import { Directory } from '@/pages/Directory'
+import { Toaster } from '@/ui/toaster'
 
 const PRIYA: DirectoryPerson = {
   id: 'p-priya',
@@ -140,18 +141,22 @@ function directoryPayload(url: string) {
     duplicate_count: 2,
     facets: FACETS,
     custom_fields: [],
+    overview: OVERVIEW,
   }
 }
 
 let segments: { id: string; name: string; kind: string; filter: Record<string, string>; member_ids: string[]; member_count: number }[] = []
 let posted: { url: string; body: unknown }[] = []
+let overviewRequests = 0
+let outreachPayload: Record<string, unknown>
 
-function renderDirectory() {
+function renderDirectory({ withToaster = false }: { withToaster?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <Directory />
+        {withToaster && <Toaster />}
       </QueryClientProvider>
     </MemoryRouter>
   )
@@ -161,6 +166,18 @@ describe('Speaker Directory', () => {
   beforeEach(() => {
     segments = []
     posted = []
+    overviewRequests = 0
+    outreachPayload = {
+      sent: 2,
+      failed: 0,
+      skipped: 0,
+      total: 2,
+      event: { id: 'e-1', name: 'AI Builders Summit' },
+      recipients: [
+        { person_id: MARCUS.id, name: MARCUS.name, email: MARCUS.email, subject: 'Speak at DevFlow Conf 2027?', status: 'sent' },
+        { person_id: PRIYA.id, name: PRIYA.name, email: PRIYA.email, subject: 'Speak at DevFlow Conf 2027?', status: 'sent' },
+      ],
+    }
     window.localStorage.setItem('dais.token', 'test-token')
     vi.stubGlobal(
       'fetch',
@@ -173,7 +190,13 @@ describe('Speaker Directory', () => {
         if (url.startsWith('/api/crm/directory') && method === 'GET') {
           return jsonResponse(directoryPayload(url))
         }
-        if (url.startsWith('/api/crm/overview')) return jsonResponse(OVERVIEW)
+        if (url.startsWith('/api/crm/overview')) {
+          overviewRequests += 1
+          return jsonResponse({
+            ...OVERVIEW,
+            totals: { ...OVERVIEW.totals, contacts: 20 },
+          })
+        }
         if (url.startsWith('/api/crm/segments') && method === 'POST') {
           const segment = {
             id: 'seg-ai',
@@ -181,7 +204,7 @@ describe('Speaker Directory', () => {
             kind: String(body.kind),
             filter: body.filter ?? {},
             member_ids: body.member_ids ?? [],
-            member_count: 2,
+            member_count: 1,
           }
           segments = [segment]
           return jsonResponse({ segment })
@@ -205,17 +228,7 @@ describe('Speaker Directory', () => {
           })
         }
         if (url.startsWith('/api/crm/outreach') && method === 'POST') {
-          return jsonResponse({
-            sent: 2,
-            failed: 0,
-            skipped: 0,
-            total: 2,
-            event: { id: 'e-1', name: 'AI Builders Summit' },
-            recipients: [
-              { person_id: MARCUS.id, name: MARCUS.name, email: MARCUS.email, subject: 'Speak at DevFlow Conf 2027?', status: 'sent' },
-              { person_id: PRIYA.id, name: PRIYA.name, email: PRIYA.email, subject: 'Speak at DevFlow Conf 2027?', status: 'sent' },
-            ],
-          })
+          return jsonResponse(outreachPayload)
         }
         return jsonResponse({}, 404)
       })
@@ -248,6 +261,16 @@ describe('Speaker Directory', () => {
 
     const contacts = screen.getByText('Total contacts').closest('div') as HTMLElement
     expect(within(contacts).getByText('3')).toBeInTheDocument()
+  })
+
+  it('renders the list and contact KPI from one synchronized first-load snapshot', async () => {
+    renderDirectory()
+
+    expect(await screen.findByText('Marcus Okafor')).toBeInTheDocument()
+    const contacts = screen.getByText('Total contacts').closest('div') as HTMLElement
+    expect(within(contacts).getByText('3')).toBeInTheDocument()
+    expect(screen.getAllByRole('row')).toHaveLength(ALL.length + 1)
+    expect(overviewRequests).toBe(0)
   })
 
   it('narrows on search and restores the full list when cleared', async () => {
@@ -296,6 +319,8 @@ describe('Speaker Directory', () => {
       expect(call?.body).toMatchObject({ name: 'AI Experts', kind: 'dynamic', filter: { tag: 'AI' } })
     })
     expect(await screen.findByText(/Segment: AI Experts/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'AI Experts 1' })).toBeInTheDocument()
+    expect(screen.queryByText(/segment_id:/i)).not.toBeInTheDocument()
   })
 
   it('flags near-duplicates and merges them into one chosen primary record', async () => {
@@ -355,7 +380,36 @@ describe('Speaker Directory', () => {
     expect(preview.textContent).not.toContain('{{first_name}}')
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }))
-    expect(await screen.findByText(/Sent 2, suppressed 0, failed 0 of 2 recipients/)).toBeInTheDocument()
+    expect(
+      await screen.findByText('Delivered 2 · suppressed 0 · failed 0 · 2 recipients')
+    ).toBeInTheDocument()
+  })
+
+  it('reports suppressed demo outreach consistently in the toast, banner, and title', async () => {
+    outreachPayload = {
+      sent: 0,
+      failed: 0,
+      skipped: 2,
+      total: 2,
+      event: { id: 'e-1', name: 'AI Builders Summit' },
+      recipients: [
+        { person_id: MARCUS.id, name: MARCUS.name, email: MARCUS.email, subject: 'Hello', status: 'cancelled' },
+        { person_id: PRIYA.id, name: PRIYA.name, email: PRIYA.email, subject: 'Hello', status: 'cancelled' },
+      ],
+    }
+    renderDirectory({ withToaster: true })
+    await screen.findByText('Marcus Okafor')
+
+    fireEvent.click(screen.getByLabelText('Select Marcus Okafor'))
+    fireEvent.click(screen.getAllByLabelText('Select Priya Raman')[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Send email' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Send email' }))
+
+    const summary = 'Delivered 0 · suppressed 2 (demo addresses) · failed 0 · 2 recipients'
+    await waitFor(() => expect(screen.getAllByText(summary)).toHaveLength(2))
+    expect(screen.getByRole('heading', { name: 'Email 2 contacts' })).toBeInTheDocument()
+    expect(screen.queryByText(/Sent to 2 of 2/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Email 0 contacts' })).not.toBeInTheDocument()
   })
 
   it('drills through from a dashboard widget to the filtered list', async () => {

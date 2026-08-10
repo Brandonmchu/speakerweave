@@ -321,6 +321,28 @@ async def list_submissions(org_id: str, contact_id: str) -> dict:
 # ── write: edit / withdraw, close-locked and contact-scoped ─────────────────
 
 
+def _abstract_question_id(fields: list[dict]) -> str | None:
+    """The form question that owns ``sessions.description``.
+
+    This mirrors ``forms.abstract_from_answers``: an explicitly abstract-like
+    text question wins, otherwise the form's first long-text question is the
+    legacy fallback. Unlike the read helper, this does not require an existing
+    answer because an edit may be the first non-blank value for the question.
+    """
+    fallback: str | None = None
+    for field in fields:
+        field_id = str(field.get("id") or "")
+        field_type = field.get("type")
+        label = "".join(char for char in str(field.get("label") or "").casefold() if char.isalnum())
+        if field_id and any(
+            hint in label for hint in ("abstract", "description", "summary", "synopsis")
+        ) and field_type in {"text", "textarea", "long_text"}:
+            return field_id
+        if not fallback and field_id and field_type in {"textarea", "long_text"}:
+            fallback = field_id
+    return fallback
+
+
 async def edit_submission(org_id: str, contact_id: str, submission_id: str, patch: dict) -> dict:
     """Edit title / abstract / track / format while the submission is editable."""
     session = await _load_owned_session(org_id, contact_id, submission_id)
@@ -335,7 +357,18 @@ async def edit_submission(org_id: str, contact_id: str, submission_id: str, patc
             raise HTTPException(status_code=400, detail="Title cannot be empty.")
         update["title"] = title
     if "abstract" in patch:
-        update["description"] = str(patch.get("abstract") or "").strip()
+        abstract = str(patch.get("abstract") or "").strip()
+        update["description"] = abstract
+        if session.get("source_form_id"):
+            layout = [
+                to_public_field(entry)
+                for entry in await load_form_layout(session["source_form_id"], org_id)
+            ]
+            abstract_field_id = _abstract_question_id(layout)
+            if abstract_field_id:
+                answers = dict(session.get("form_answers") or {})
+                answers[abstract_field_id] = abstract
+                update["form_answers"] = answers
     if "track_id" in patch:
         update["track_id"] = await _valid_taxonomy_id("tracks", org_id, event_id, patch.get("track_id"))
     if "format_id" in patch:

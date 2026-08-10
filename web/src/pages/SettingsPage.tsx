@@ -36,6 +36,7 @@ import {
   publicProgramUrl,
   type EmbedWidget,
 } from '@/lib/programApi'
+import { buildZonedTimestamp, zonedDay } from '@/lib/scheduleApi'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
 import { Button } from '@/ui/button'
@@ -90,19 +91,26 @@ export function timezoneOptions(current?: string | null): string[] {
   return seen
 }
 
-/** `<input type="date">` wants YYYY-MM-DD in local time; the API wants ISO. */
-export function toDateInput(iso?: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+/** `<input type="date">` shows the calendar day in the event's own timezone. */
+export function toDateInput(iso?: string | null, timezone?: string | null): string {
+  return zonedDay(iso, timezone) ?? ''
 }
 
-export function fromDateInput(value: string): string | null {
-  if (!value) return null
-  const d = new Date(`${value}T00:00:00`)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+/** A date input -> event-local start/end boundary, stored as an absolute instant. */
+export function fromDateInput(
+  value: string,
+  timezone?: string | null,
+  endOfDay = false
+): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const boundary = buildZonedTimestamp(value, endOfDay ? 24 * 60 : 0, timezone)
+  const instant = new Date(boundary)
+  if (Number.isNaN(instant.getTime())) return null
+  if (!endOfDay) return boundary
+  // Store the inclusive local end-of-day. The agenda treats ends_at as an
+  // exclusive range boundary, so its existing "one minute before end" logic
+  // still lands on the organizer's final date.
+  return `${new Date(instant.getTime() - 1).toISOString().slice(0, -1)}+00:00`
 }
 
 interface EventDraft {
@@ -115,12 +123,13 @@ interface EventDraft {
 }
 
 function toEventDraft(event: EventSummary): EventDraft {
+  const timezone = event.timezone || localTimezone()
   return {
     name: event.name ?? '',
     slug: event.slug ?? '',
-    timezone: event.timezone || localTimezone(),
-    starts_at: toDateInput(event.starts_at),
-    ends_at: toDateInput(event.ends_at),
+    timezone,
+    starts_at: toDateInput(event.starts_at, timezone),
+    ends_at: toDateInput(event.ends_at, timezone),
     location: event.location ?? '',
   }
 }
@@ -631,8 +640,8 @@ function EventCard({ event }: { event: EventSummary }) {
         name: draft.name.trim(),
         slug: draft.slug.trim(),
         timezone: draft.timezone || null,
-        starts_at: fromDateInput(draft.starts_at),
-        ends_at: fromDateInput(draft.ends_at),
+        starts_at: fromDateInput(draft.starts_at, draft.timezone),
+        ends_at: fromDateInput(draft.ends_at, draft.timezone, true),
         location: draft.location.trim() || null,
       }),
     onSuccess: () => {

@@ -14,6 +14,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsPage, slugError } from '@/pages/SettingsPage'
+import { agendaDays, type Agenda } from '@/lib/scheduleApi'
 
 const EVENT = {
   id: 'evt-1',
@@ -40,7 +41,9 @@ function json(payload: unknown, status = 200) {
   })
 }
 
-function stubFetch({ patchStatus = 200 }: { patchStatus?: number } = {}) {
+function stubFetch(
+  { patchStatus = 200, event = EVENT }: { patchStatus?: number; event?: typeof EVENT } = {}
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -53,11 +56,11 @@ function stubFetch({ patchStatus = 200 }: { patchStatus?: number } = {}) {
         if (patchStatus === 409) {
           return json({ detail: 'That public URL slug is already taken' }, 409)
         }
-        return json({ event: { ...EVENT, ...body } })
+        return json({ event: { ...event, ...body } })
       }
       if (url.includes('/api/api-tokens')) return json({ api_tokens: [] })
       if (url.includes('/api/events') && !url.includes('/api/events/')) {
-        return json({ events: [EVENT] })
+        return json({ events: [event] })
       }
       return json({ items: [] })
     })
@@ -171,5 +174,43 @@ describe('Settings — public URL slug', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
     // The 409 is a fixable answer, so the form stays dirty and re-savable.
     await waitFor(() => expect(screen.getByTestId('save-event')).toBeEnabled())
+  })
+
+  it('saves entered dates as whole calendar days in the event timezone', async () => {
+    vi.unstubAllGlobals()
+    stubFetch({
+      event: {
+        ...EVENT,
+        starts_at: '2026-10-10T07:00:00+00:00',
+        ends_at: '2026-10-12T06:59:59.999+00:00',
+      },
+    })
+    renderSettings()
+
+    fireEvent.change(await screen.findByLabelText('Starts'), {
+      target: { value: '2026-10-12' },
+    })
+    fireEvent.change(screen.getByLabelText('Ends'), { target: { value: '2026-10-13' } })
+    fireEvent.click(screen.getByTestId('save-event'))
+
+    let body: Record<string, unknown> = {}
+    await waitFor(() => {
+      body = calls.find((call) => call.method === 'PATCH')?.body ?? {}
+      expect(body.starts_at).toBe('2026-10-12T07:00:00+00:00')
+      expect(body.ends_at).toBe('2026-10-14T06:59:59.999+00:00')
+    })
+
+    const board: Agenda = {
+      event: {
+        id: EVENT.id,
+        timezone: EVENT.timezone,
+        starts_at: String(body.starts_at),
+        ends_at: String(body.ends_at),
+      },
+      rooms: [],
+      tracks: [],
+      sessions: [],
+    }
+    expect(agendaDays(board, EVENT.timezone)).toEqual(['2026-10-12', '2026-10-13'])
   })
 })

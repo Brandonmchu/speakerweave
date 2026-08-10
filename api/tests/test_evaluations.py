@@ -731,6 +731,94 @@ def _seed_owned_assignment(fake_db) -> None:
     )
 
 
+def _seed_reviewer_submission_details(fake_db) -> None:
+    """A form whose answer map contains both identity and proposal details."""
+    form_id = "form-review-details"
+    fields = [
+        ("field-speaker-name", "speaker_name", "Speaker name", "contact", "Priya Raman"),
+        ("field-company", "company_name", "Company", "contact", "Latticework Systems"),
+        ("field-email", "email", "Email address", "contact", "priya@latticework.example"),
+        ("field-bio", "bio", "Why are you a fit?", "contact", "Priya founded Latticework."),
+        ("field-abstract", "abstract", "Abstract", "session", "A practical systems talk."),
+        (
+            "field-prereqs",
+            "prerequisites",
+            "Technical prerequisites",
+            "session",
+            "Bring a laptop.",
+        ),
+    ]
+    for order, (field_id, internal_name, label, scope, _value) in enumerate(fields):
+        fake_db.seed(
+            "fields",
+            {
+                "id": field_id,
+                "org_id": TEST_ORG_ID,
+                "public_name": label,
+                "internal_name": internal_name,
+                "scope": scope,
+            },
+        )
+        fake_db.seed(
+            "form_fields",
+            {
+                "id": f"review-ff-{order}",
+                "org_id": TEST_ORG_ID,
+                "form_id": form_id,
+                "field_id": field_id,
+                "page": 1,
+                "order": order,
+                "label_override": "What should reviewers prepare?" if field_id == "field-prereqs" else None,
+            },
+        )
+    session = fake_db.rows("sessions")[0]
+    session["source_form_id"] = form_id
+    session["submitter_contact_id"] = "contact-priya"
+    session["form_answers"] = {
+        field_id: value for field_id, _internal_name, _label, _scope, value in fields
+    }
+    _seed_submitter_participant_rows(fake_db)
+    fake_db.rows("contacts")[0]["company_name"] = "Latticework Systems"
+
+
+def test_anonymized_reviewer_details_redact_identity_and_resolve_question_labels(
+    evaluation_client,
+):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", anonymized=True)
+    _seed_owned_assignment(fake_db)
+    _seed_reviewer_submission_details(fake_db)
+
+    response = client.get("/public/review/submissions/assignment-owned")
+
+    assert response.status_code == 200
+    session = response.json()["session"]
+    assert session["form_answers"] == {
+        "Abstract": "A practical systems talk.",
+        "What should reviewers prepare?": "Bring a laptop.",
+    }
+    serialized = response.text.casefold()
+    assert "priya raman" not in serialized
+    assert "latticework systems" not in serialized
+    assert "priya@latticework.example" not in serialized
+    assert "field-abstract" not in serialized
+    assert "field-prereqs" not in serialized
+
+
+def test_non_anonymized_reviewer_details_keep_identity_with_human_labels(evaluation_client):
+    client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open", anonymized=False)
+    _seed_owned_assignment(fake_db)
+    _seed_reviewer_submission_details(fake_db)
+
+    session = client.get("/public/review/submissions/assignment-owned").json()["session"]
+
+    assert session["form_answers"]["Speaker name"] == "Priya Raman"
+    assert session["form_answers"]["Company"] == "Latticework Systems"
+    assert session["form_answers"]["Email address"] == "priya@latticework.example"
+    assert session["speaker"]["first_name"] == "Priya"
+
+
 def test_a_plan_with_no_window_accepts_reviews(evaluation_client):
     """The state every seeded/pre-008 plan is in: no dates, no restriction."""
     client, fake_db, _reviewer = evaluation_client

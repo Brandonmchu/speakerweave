@@ -238,6 +238,85 @@ def _apply_filters(directory: list[dict], filters: dict) -> list[dict]:
     return kept
 
 
+def _segment_rows_with_counts(segments: list[dict], directory: list[dict]) -> list[dict]:
+    """Saved segments resolved against the same directory snapshot as the list."""
+    payload = []
+    for segment in segments:
+        row = _segment_row(segment)
+        if row["kind"] == "curated":
+            wanted = {str(value) for value in row["member_ids"]}
+            row["member_count"] = sum(1 for person in directory if person["id"] in wanted)
+        else:
+            row["member_count"] = len(
+                _apply_filters(directory, crm.clean_filters(row["filter"]))
+            )
+        payload.append(row)
+    payload.sort(key=lambda row: str(row["name"]).casefold())
+    return payload
+
+
+def _overview_payload(directory: list[dict], events_by_id: dict[str, dict]) -> dict:
+    """KPIs computed from one already-synchronized directory snapshot."""
+
+    def _tally(key: str) -> list[dict]:
+        counts: dict[str, int] = {}
+        for row in directory:
+            value = str(row.get(key) or "").strip()
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+        return [{"name": name, "count": count} for name, count in ranked[:8]]
+
+    tag_counts: dict[str, int] = {}
+    for row in directory:
+        for tag in row["tags"]:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+    return {
+        "totals": {
+            "contacts": len(directory),
+            "events": len(events_by_id),
+            "returning_speakers": sum(1 for row in directory if row["event_count"] > 1),
+            "in_pipeline": sum(1 for row in directory if row["in_pipeline"]),
+            "confirmed": sum(1 for row in directory if row["pipeline_stage"] == "confirmed"),
+            "tagged": sum(1 for row in directory if row["tags"]),
+        },
+        "top_companies": _tally("company_name"),
+        "top_titles": _tally("title"),
+        "top_tags": [
+            {"name": name, "count": count}
+            for name, count in sorted(
+                tag_counts.items(), key=lambda item: (-item[1], item[0].casefold())
+            )[:8]
+        ],
+        "by_stage": [
+            {
+                "stage": stage,
+                "label": crm.STAGE_LABELS[stage],
+                "count": sum(
+                    1
+                    for row in directory
+                    if row["in_pipeline"] and row["pipeline_stage"] == stage
+                ),
+            }
+            for stage in crm.STAGES
+        ],
+        "by_event": sorted(
+            (
+                {
+                    "id": str(event.get("id")),
+                    "name": str(event.get("name") or "Event"),
+                    "count": sum(
+                        1 for row in directory if str(event.get("id")) in row["event_ids"]
+                    ),
+                }
+                for event in events_by_id.values()
+            ),
+            key=lambda item: (-item["count"], item["name"].casefold()),
+        ),
+    }
+
+
 # ── directory ──────────────────────────────────────────────────────────────
 
 
@@ -305,7 +384,7 @@ async def list_directory(
         "total_all": len(directory),
         "filters": filters,
         "segment_id": segment_id or None,
-        "segments": [_segment_row(row) for row in segments],
+        "segments": _segment_rows_with_counts(segments, directory),
         "duplicate_count": len({row["id"] for row in directory if row["is_duplicate"]}),
         "facets": {
             "companies": companies,
@@ -318,6 +397,10 @@ async def list_directory(
             ],
         },
         "custom_fields": await _custom_field_defs(org_id),
+        # The page's list and KPI card must describe one point in time. Returning
+        # both here prevents two concurrent lazy-sync reads from painting a
+        # three-row table beside a twenty-contact total.
+        "overview": _overview_payload(directory, events_by_id),
     }
 
 
@@ -387,64 +470,7 @@ async def crm_overview(auth: tuple = Depends(get_current_user_and_org)):
     _user_id, org_id = auth
     await crm.sync_org(org_id)
     directory, events_by_id, _people = await _directory_rows(org_id)
-
-    def _tally(key: str) -> list[dict]:
-        counts: dict[str, int] = {}
-        for row in directory:
-            value = str(row.get(key) or "").strip()
-            if value:
-                counts[value] = counts.get(value, 0) + 1
-        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))
-        return [{"name": name, "count": count} for name, count in ranked[:8]]
-
-    tag_counts: dict[str, int] = {}
-    for row in directory:
-        for tag in row["tags"]:
-            tag_counts[tag] = tag_counts.get(tag, 0) + 1
-
-    by_stage = [
-        {
-            "stage": stage,
-            "label": crm.STAGE_LABELS[stage],
-            "count": sum(
-                1 for row in directory if row["in_pipeline"] and row["pipeline_stage"] == stage
-            ),
-        }
-        for stage in crm.STAGES
-    ]
-
-    return {
-        "totals": {
-            "contacts": len(directory),
-            "events": len(events_by_id),
-            "returning_speakers": sum(1 for row in directory if row["event_count"] > 1),
-            "in_pipeline": sum(1 for row in directory if row["in_pipeline"]),
-            "confirmed": sum(1 for row in directory if row["pipeline_stage"] == "confirmed"),
-            "tagged": sum(1 for row in directory if row["tags"]),
-        },
-        "top_companies": _tally("company_name"),
-        "top_titles": _tally("title"),
-        "top_tags": [
-            {"name": name, "count": count}
-            for name, count in sorted(
-                tag_counts.items(), key=lambda item: (-item[1], item[0].casefold())
-            )[:8]
-        ],
-        "by_stage": by_stage,
-        "by_event": sorted(
-            (
-                {
-                    "id": str(event.get("id")),
-                    "name": str(event.get("name") or "Event"),
-                    "count": sum(
-                        1 for row in directory if str(event.get("id")) in row["event_ids"]
-                    ),
-                }
-                for event in events_by_id.values()
-            ),
-            key=lambda item: (-item["count"], item["name"].casefold()),
-        ),
-    }
+    return _overview_payload(directory, events_by_id)
 
 
 # ── one person ─────────────────────────────────────────────────────────────
@@ -936,18 +962,9 @@ async def list_segments(auth: tuple = Depends(get_current_user_and_org)):
     """Saved segments plus a live member count for each — a segment nobody can
     size is a name, not a list."""
     _user_id, org_id = auth
+    await crm.sync_org(org_id)
     directory, _events, _people = await _directory_rows(org_id)
-    payload = []
-    for segment in await _segments(org_id):
-        row = _segment_row(segment)
-        if row["kind"] == "curated":
-            wanted = {str(value) for value in row["member_ids"]}
-            row["member_count"] = sum(1 for person in directory if person["id"] in wanted)
-        else:
-            row["member_count"] = len(_apply_filters(directory, crm.clean_filters(row["filter"])))
-        payload.append(row)
-    payload.sort(key=lambda row: str(row["name"]).casefold())
-    return {"segments": payload}
+    return {"segments": _segment_rows_with_counts(await _segments(org_id), directory)}
 
 
 @router.post("/segments", status_code=201)

@@ -253,6 +253,28 @@ def test_edit_updates_title_and_abstract(client, selfservice_db):
     assert resp.json()["submission"]["title"] == "Faster inference"
 
 
+def test_edit_keeps_description_and_abstract_form_answer_in_sync(
+    client, auth_headers, selfservice_db
+):
+    seed_cfp_questions(selfservice_db)
+    row = selfservice_db.rows("sessions")[0]
+    row["form_answers"] = {F_ABSTRACT: "The original abstract."}
+    seed_token(selfservice_db)
+
+    edited = client.patch(
+        f"/public/submissions/{SESSION_ID}",
+        json={"token": RAW_TOKEN, "abstract": "The revised abstract."},
+    )
+
+    assert edited.status_code == 200
+    detail = client.get(f"/api/sessions/{SESSION_ID}", headers=auth_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["session"]["description"] == "The revised abstract."
+    abstract_answer = next(answer for answer in body["answers"] if answer["field_id"] == F_ABSTRACT)
+    assert abstract_answer["value"] == "The revised abstract."
+
+
 def test_edit_accepts_the_token_from_a_header(client, selfservice_db):
     seed_token(selfservice_db)
     resp = client.patch(
