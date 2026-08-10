@@ -23,7 +23,7 @@ import {
 } from '@/lib/featuredEvent'
 import { Button } from '@/ui/button'
 
-export const REPO_URL = '#'
+export const REPO_URL = 'https://github.com/Brandonmchu/speakerweave'
 
 const HIGHLIGHTS = [
   {

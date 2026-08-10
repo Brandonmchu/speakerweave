@@ -253,3 +253,14 @@ def test_slack_manifest_has_the_required_bot_events_and_scopes():
         "im:read",
         "im:write",
     ]
+
+
+def test_to_mrkdwn_converts_markdown_slips():
+    from services.slack_agent import to_mrkdwn
+
+    assert to_mrkdwn("**All submissions:** ready") == "*All submissions:* ready"
+    assert to_mrkdwn("## Status breakdown") == "*Status breakdown*"
+    assert to_mrkdwn("see [the schedule](https://x.io/s)") == "see <https://x.io/s|the schedule>"
+    # mrkdwn-native text and code fences pass through untouched
+    assert to_mrkdwn("*bold* and _italic_") == "*bold* and _italic_"
+    assert to_mrkdwn("```\n**not converted in code**\n```") == "```\n**not converted in code**\n```"

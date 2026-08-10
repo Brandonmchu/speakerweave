@@ -31,7 +31,9 @@ SYSTEM_PROMPT = (
     "Use the supplied tools for factual questions; never invent conference data. "
     "Only use decide_submission when the user's message explicitly asks you to "
     "accept, decline, or queue a submission. Keep the final answer practical and "
-    "short enough for Slack."
+    "short enough for Slack. Format for Slack mrkdwn, NOT standard Markdown: "
+    "*single asterisks* for bold, _underscores_ for italic, plain '-' bullets, "
+    "and never use ** or ## — Slack renders those literally."
 )
 
 TOOLS: list[dict[str, Any]] = [
@@ -276,11 +278,33 @@ async def answer(text: str, org_id: str) -> str:
         return MODEL_FAILURE_REPLY
 
 
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+)$", re.MULTILINE)
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+
+
+def to_mrkdwn(text: str) -> str:
+    """Best-effort standard-Markdown → Slack mrkdwn.
+
+    The model is prompted to emit mrkdwn, but a slip into **bold**, ## headings,
+    or [text](url) renders literally in Slack — this converter is the backstop.
+    Code fences are left untouched (Slack renders triple-backtick blocks)."""
+    parts = text.split("```")
+    for i in range(0, len(parts), 2):  # even indexes are outside code fences
+        chunk = parts[i]
+        chunk = _MD_HEADING.sub(lambda m: f"*{m.group(1).strip()}*", chunk)
+        chunk = _MD_BOLD.sub(r"*\1*", chunk)
+        chunk = _MD_LINK.sub(r"<\2|\1>", chunk)
+        parts[i] = chunk
+    return "```".join(parts)
+
+
 async def post_message(channel: str, thread_ts: str, text: str) -> None:
     token = (os.getenv("SLACK_BOT_TOKEN") or "").strip()
     if not token:
         logger.warning("slack agent: SLACK_BOT_TOKEN is not configured; reply not posted")
         return
+    text = to_mrkdwn(text)
     try:
         async with httpx.AsyncClient(
             base_url=SLACK_API_URL,
