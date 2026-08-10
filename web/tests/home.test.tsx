@@ -63,6 +63,7 @@ describe('Home landing', () => {
     expect(href(/Speakers/i)).toContain('/e/ai-builders-summit/speakers')
     expect(href(/Call for Speakers/i)).toContain('/submit/call-for-speakers')
     expect(href(/Developers/i)).toContain('/developers')
+    expect(href(/Speaker sign in/i)).toContain('/speaker-signin')
     // Real-org sign-in stays reachable (Clerk).
     expect(href(/Sign in/i)).toContain('/sign-in')
   })

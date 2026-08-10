@@ -109,6 +109,7 @@ export interface SpeakerSessionRef {
   title: string
   starts_at: string | null
   room: string | null
+  track?: ProgramTrack | null
   format: string | null
 }
 
@@ -242,6 +243,18 @@ export function dedupeProgramSpeakers(speakers: ProgramSpeaker[]): ProgramSpeake
 
 export type EmbedWidget = 'schedule' | 'speakers'
 
+export interface EmbedOptions {
+  track?: string
+  accent?: string
+  compact?: boolean
+}
+
+/** Six hexadecimal digits, without the leading #, or null when unsafe. */
+export function sanitizeAccent(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  return /^[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : null
+}
+
 /** The origin public pages are served from ('' when there's no DOM). */
 export function publicProgramOrigin(): string {
   return typeof window === 'undefined' ? '' : window.location.origin
@@ -271,6 +284,22 @@ export function publicProgramFeedUrl(slug: string, widget: EmbedWidget = 'schedu
   return `${publicProgramOrigin()}/public/program/${encodeURIComponent(slug)}/${widget}`
 }
 
+/** The whole published programme as a subscribable iCalendar feed. */
+export function publicCalendarFeedUrl(slug: string): string {
+  return `${publicProgramOrigin()}/public/program/${encodeURIComponent(slug)}/calendar.ics`
+}
+
+/** Query portion shared by direct iframes and the Settings live preview. */
+export function embedPageQuery(options: EmbedOptions = {}): string {
+  const params = ['embed=1']
+  const track = options.track?.trim()
+  const accent = sanitizeAccent(options.accent)
+  if (track) params.push(`track=${encodeURIComponent(track)}`)
+  if (accent) params.push(`accent=${accent}`)
+  if (options.compact) params.push('compact=1')
+  return params.join('&')
+}
+
 /**
  * The `<script>` embed — the recommended one, because the loader listens for
  * the page's `dais-embed-height` postMessage and resizes the iframe to fit.
@@ -292,18 +321,33 @@ function attrEscape(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
-export function embedScriptSnippet(slug: string, widget: EmbedWidget = 'schedule'): string {
-  return [
+export function embedScriptSnippet(
+  slug: string,
+  widget: EmbedWidget = 'schedule',
+  options: EmbedOptions = {}
+): string {
+  const attributes = [
     `<script src="${embedScriptUrl(slug)}"`,
     `        data-dais-event="${attrEscape(slug)}"`,
-    `        data-dais-widget="${widget}"></script>`,
-  ].join('\n')
+    `        data-dais-widget="${widget}"`,
+  ]
+  const track = options.track?.trim()
+  const accent = sanitizeAccent(options.accent)
+  if (track) attributes.push(`        data-dais-track="${attrEscape(track)}"`)
+  if (accent) attributes.push(`        data-dais-accent="${accent}"`)
+  if (options.compact) attributes.push('        data-dais-compact="1"')
+  attributes[attributes.length - 1] += '></script>'
+  return attributes.join('\n')
 }
 
 /** The no-JavaScript fallback: the same page in a plain, fixed-height iframe. */
-export function embedIframeSnippet(slug: string, widget: EmbedWidget = 'schedule'): string {
+export function embedIframeSnippet(
+  slug: string,
+  widget: EmbedWidget = 'schedule',
+  options: EmbedOptions = {}
+): string {
   return [
-    `<iframe src="${publicProgramUrl(slug, widget)}?embed=1"`,
+    `<iframe src="${publicProgramUrl(slug, widget)}?${embedPageQuery(options)}"`,
     `        title="dais ${widget}" loading="lazy" scrolling="no"`,
     `        style="width:100%;height:600px;border:0"></iframe>`,
   ].join('\n')

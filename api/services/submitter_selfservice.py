@@ -269,7 +269,7 @@ async def list_submissions(org_id: str, contact_id: str) -> dict:
     contact = first(
         await db(
             lambda: supabase.table("contacts")
-            .select("id, event_id, org_id")
+            .select("id, event_id, org_id, email")
             .eq("id", contact_id)
             .eq("org_id", org_id)
             .limit(1)
@@ -313,6 +313,7 @@ async def list_submissions(org_id: str, contact_id: str) -> dict:
     close_at = await _form_close_at(org_id, sessions[0].get("source_form_id")) if sessions else None
     now = _now()
     return {
+        "email": contact.get("email"),
         "event": {
             "id": event_id,
             "name": (event or {}).get("name"),

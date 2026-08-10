@@ -40,7 +40,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog'
-import { Avatar, ProgramShell, useEmbedHeight } from '@/pages/publicProgramShared'
+import {
+  Avatar,
+  ProgramShell,
+  programAccentStyle,
+  useEmbedHeight,
+} from '@/pages/publicProgramShared'
 
 /** Sentinel for "no filter" — shared by the track chips and the facet selects. */
 const ANY = '__all__'
@@ -81,6 +86,9 @@ export function PublicSchedule() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
   const embed = searchParams.get('embed') === '1'
+  const compact = searchParams.get('compact') === '1'
+  const accent = searchParams.get('accent')
+  const requestedTrack = searchParams.get('track')?.trim() || ANY
 
   // No browser timezone is sent: the public page must render in the EVENT's
   // timezone (the zone the organizer published against), so a Tokyo visitor
@@ -98,7 +106,7 @@ export function PublicSchedule() {
   const eventLocation = query.data?.event.location ?? null
 
   const [activeDate, setActiveDate] = useState('')
-  const [track, setTrack] = useState<string>(ANY)
+  const [track, setTrack] = useState<string>(requestedTrack)
   const [format, setFormat] = useState<string>(ANY)
   const [room, setRoom] = useState<string>(ANY)
   const [search, setSearch] = useState('')
@@ -110,6 +118,8 @@ export function PublicSchedule() {
   useEffect(() => {
     if (days.length && !days.some((d) => d.date === activeDate)) setActiveDate(days[0].date)
   }, [days, activeDate])
+
+  useEffect(() => setTrack(requestedTrack), [requestedTrack])
 
   // Re-measure the embed iframe whenever the visible content changes.
   useEmbedHeight(embed)
@@ -246,7 +256,7 @@ export function PublicSchedule() {
     )
   } else {
     body = (
-      <div className="space-y-6">
+      <div className={compact ? 'space-y-4' : 'space-y-6'}>
         {days.length > 1 && (
           <Tabs value={activeDate} onValueChange={setActiveDate}>
             <TabsList variant="underline">
@@ -408,13 +418,13 @@ export function PublicSchedule() {
               }
             />
           ) : (
-            <div className="space-y-3">
+            <div className={compact ? 'space-y-2' : 'space-y-3'}>
               <p className="text-xs font-medium text-muted-foreground" role="status">
                 {flatResults.length} {mine && !searching ? 'saved' : 'result'}
                 {flatResults.length === 1 ? '' : 's'}
                 {' across all days'}
               </p>
-              <ol className="space-y-3">
+              <ol className={compact ? 'space-y-2' : 'space-y-3'}>
                 {flatResults.map(({ session, date }, i) => (
                   <li key={session.id || `${session.title}-${i}`}>
                     <SessionCard
@@ -425,6 +435,7 @@ export function PublicSchedule() {
                       starred={Boolean(session.id && starred.has(session.id))}
                       onToggleStar={() => session.id && toggle(session.id)}
                       onOpen={() => session.id && setSelectedId(session.id)}
+                      compact={compact}
                     />
                   </li>
                 ))}
@@ -437,7 +448,7 @@ export function PublicSchedule() {
             description="Try a different track, format or room — or clear your search."
           />
         ) : (
-          <ol className="space-y-3">
+          <ol className={compact ? 'space-y-2' : 'space-y-3'}>
             {dayResults.map((session, i) => (
               <li key={session.id || `${session.title}-${i}`}>
                 <SessionCard
@@ -447,6 +458,7 @@ export function PublicSchedule() {
                   starred={Boolean(session.id && starred.has(session.id))}
                   onToggleStar={() => session.id && toggle(session.id)}
                   onOpen={() => session.id && setSelectedId(session.id)}
+                  compact={compact}
                 />
               </li>
             ))}
@@ -466,12 +478,27 @@ export function PublicSchedule() {
   }
 
   if (embed) {
-    return <div className="bg-transparent px-1 py-2">{body}</div>
+    return (
+      <div
+        data-testid="public-program-page"
+        data-compact={compact ? 'true' : undefined}
+        className={compact ? 'bg-transparent px-1 py-1' : 'bg-transparent px-1 py-2'}
+        style={programAccentStyle(accent)}
+      >
+        {body}
+      </div>
+    )
   }
 
   return (
-    <ProgramShell slug={slug} eventName={query.data?.event.name} active="schedule">
-      {query.data?.event.location && (
+    <ProgramShell
+      slug={slug}
+      eventName={query.data?.event.name}
+      active="schedule"
+      accent={accent}
+      compact={compact}
+    >
+      {!compact && query.data?.event.location && (
         <p className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
           <MapPin className="h-4 w-4" />
           {query.data.event.location}
@@ -492,6 +519,7 @@ function SessionCard({
   starred,
   onToggleStar,
   onOpen,
+  compact = false,
 }: {
   session: ProgramSession
   zone: string | null
@@ -500,6 +528,7 @@ function SessionCard({
   starred: boolean
   onToggleStar: () => void
   onOpen: () => void
+  compact?: boolean
 }) {
   const time = formatTimeRange(session.starts_at, session.ends_at, zone)
   const summary = htmlToText(session.description)
@@ -534,7 +563,10 @@ function SessionCard({
           onOpen()
         }
       }}
-      className="cursor-pointer rounded-xl border border-border bg-card p-4 text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
+      className={cn(
+        'cursor-pointer rounded-xl border border-border bg-card text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        compact ? 'p-3' : 'p-4 sm:p-5'
+      )}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:gap-5">
         <div className="shrink-0 sm:w-32">

@@ -16,7 +16,8 @@ export const featuredScheduleUrl = `/e/${FEATURED_EVENT_SLUG}/schedule`
 export const featuredSpeakersUrl = `/e/${FEATURED_EVENT_SLUG}/speakers`
 
 /** The public Call-for-Speakers submission form (seeded slug). */
-export const CFP_FORM_URL = '/submit/call-for-speakers'
+export const CFP_FORM_SLUG = 'call-for-speakers'
+export const CFP_FORM_URL = `/submit/${CFP_FORM_SLUG}`
 
 /** The public API / developer docs. */
 export const DEVELOPERS_URL = '/developers'

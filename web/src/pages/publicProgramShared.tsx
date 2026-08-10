@@ -5,10 +5,10 @@
  * embed mode (`?embed=1`) none of this renders — the page is chrome-less and
  * only posts its height up to the embed.js iframe.
  */
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import { initialsOf } from '@/lib/programApi'
+import { initialsOf, sanitizeAccent } from '@/lib/programApi'
 import { cn } from '@/lib/utils'
 
 /**
@@ -66,21 +66,68 @@ export function Avatar({
   )
 }
 
+/** Scope a validated ?accent=RRGGBB value to one public program page. */
+export function programAccentStyle(value: string | null): CSSProperties | undefined {
+  const accent = sanitizeAccent(value)
+  if (!accent) return undefined
+
+  const red = Number.parseInt(accent.slice(0, 2), 16) / 255
+  const green = Number.parseInt(accent.slice(2, 4), 16) / 255
+  const blue = Number.parseInt(accent.slice(4, 6), 16) / 255
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const lightness = (max + min) / 2
+  const delta = max - min
+  let hue = 0
+  if (delta) {
+    if (max === red) hue = ((green - blue) / delta) % 6
+    else if (max === green) hue = (blue - red) / delta + 2
+    else hue = (red - green) / delta + 4
+    hue *= 60
+    if (hue < 0) hue += 360
+  }
+  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1))
+  const hsl = `${Math.round(hue)} ${Math.round(saturation * 100)}% ${Math.round(lightness * 100)}%`
+  const strong = `${Math.round(hue)} ${Math.round(saturation * 100)}% ${Math.max(
+    0,
+    Math.round(lightness * 100) - 6
+  )}%`
+
+  return {
+    '--dais-accent': `#${accent}`,
+    '--primary': hsl,
+    '--primary-strong': strong,
+    '--ring': hsl,
+  } as CSSProperties
+}
+
 /** The public microsite frame: brand mark, event name, and Schedule/Speakers tabs. */
 export function ProgramShell({
   slug,
   eventName,
   active,
+  accent,
+  compact = false,
   children,
 }: {
   slug: string
   eventName: string | null | undefined
   active: 'schedule' | 'speakers'
+  accent?: string | null
+  compact?: boolean
   children: ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-[#FBFBFB]">
-      <header className="sticky top-0 z-10 border-b border-border bg-card/90 backdrop-blur">
+    <div
+      data-testid="public-program-page"
+      data-compact={compact ? 'true' : undefined}
+      className="min-h-screen bg-[#FBFBFB]"
+      style={programAccentStyle(accent ?? null)}
+    >
+      {!compact && <header
+        data-testid="program-header"
+        className="sticky top-0 z-10 border-b border-border bg-card/90 backdrop-blur"
+      >
         <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-5 py-3.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
             d
@@ -97,8 +144,15 @@ export function ProgramShell({
           <ShellTab to={`/e/${slug}/schedule`} label="Schedule" active={active === 'schedule'} />
           <ShellTab to={`/e/${slug}/speakers`} label="Speakers" active={active === 'speakers'} />
         </div>
-      </header>
-      <main className="mx-auto w-full max-w-[1040px] px-5 py-8 sm:py-10">{children}</main>
+      </header>}
+      <main
+        className={cn(
+          'mx-auto w-full max-w-[1040px] px-5',
+          compact ? 'py-3' : 'py-8 sm:py-10'
+        )}
+      >
+        {children}
+      </main>
       <footer className="mx-auto w-full max-w-[1040px] px-5 pb-12">
         <EmbedSnippet slug={slug} widget={active} />
         <p className="mt-6 text-center text-xs text-muted-foreground">Powered by dais</p>

@@ -28,6 +28,7 @@ const SPEAKERS = {
           title: 'RAG in Production',
           starts_at: '2026-10-12T17:00:00+00:00',
           room: 'Room A',
+          track: { name: 'Research', color: '#654321' },
           format: 'Talk',
         },
       ],
@@ -162,6 +163,14 @@ describe('PublicSpeakers', () => {
     // No matches → empty state.
     fireEvent.change(screen.getByLabelText('Search speakers'), { target: { value: 'zzzz' } })
     expect(screen.getByText('No speakers match')).toBeInTheDocument()
+  })
+
+  it('pre-filters speakers to people with a session in the requested track', async () => {
+    renderAt('/e/ai-builders-summit/speakers?track=Research')
+
+    expect(await screen.findByText('Alice Alpha')).toBeInTheDocument()
+    expect(screen.queryByText('Bob Beta')).not.toBeInTheDocument()
+    expect(screen.getByTestId('speaker-result-count')).toHaveTextContent('1 speaker')
   })
 
   it('counts the speakers a search matches (EMB-05/12)', async () => {

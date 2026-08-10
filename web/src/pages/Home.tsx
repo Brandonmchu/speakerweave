@@ -118,10 +118,10 @@ export function Home() {
           </nav>
 
           <Link
-            to="/sign-in"
+            to="/speaker-signin"
             className="ml-auto rounded-md px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-subtle sm:ml-2"
           >
-            Sign in
+            Speaker sign in
           </Link>
         </div>
       </header>

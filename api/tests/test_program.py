@@ -273,6 +273,41 @@ def test_unknown_slug_404s(program_client, program_db):
     assert program_client.get("/public/program/nope/speakers").status_code == 404
 
 
+# ── calendar feed ───────────────────────────────────────────────────────────
+
+
+def test_calendar_feed_contains_one_escaped_event_per_published_session(
+    program_client, program_db
+):
+    event = program_db.rows("events")[0]
+    event["location"] = "San Francisco, CA"
+    keynote = next(row for row in program_db.rows("sessions") if row["id"] == S1)
+    keynote["title"] = "Opening; Keynote, Live"
+    keynote["description"] = "<p>Models \\ systems; safely, now</p>"
+
+    response = program_client.get(f"/public/program/{SLUG}/calendar.ics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/calendar")
+    assert response.headers["cache-control"] == "public, max-age=300"
+    body = response.text
+    assert body.startswith("BEGIN:VCALENDAR\r\n")
+    assert body.rstrip().endswith("END:VCALENDAR")
+    assert body.count("BEGIN:VEVENT") == 4
+    assert "UID:SESS-s1@dais" in body
+    assert "DTSTART:20261012T160000Z" in body
+    assert "DTEND:20261012T164500Z" in body
+    assert "SUMMARY:Opening\\; Keynote\\, Live" in body
+    assert "DESCRIPTION:Models \\\\ systems\\; safely\\, now" in body
+    assert "LOCATION:Room B\\, San Francisco\\, CA" in body
+    assert "Unplaced Talk" not in body
+    assert "Not Yet Accepted" not in body
+
+
+def test_calendar_feed_404s_for_unknown_slug(program_client, program_db):
+    assert program_client.get("/public/program/nope/calendar.ics").status_code == 404
+
+
 # ── the event-dates clamp ────────────────────────────────────────────────────
 
 
@@ -392,6 +427,7 @@ def test_speaker_sessions_carry_id_and_format(program_client, program_db):
     ref = by_name["Zed Zeta"]["sessions"][0]
     assert ref["id"] == S1
     assert ref["title"] == "Opening Keynote"
+    assert ref["track"] == {"name": "Engineering", "color": "#123456"}
     assert ref["format"] == "Keynote"
 
 
@@ -473,6 +509,9 @@ def test_embed_js_is_javascript_and_self_contained(program_client, program_db):
     body = res.text
     assert "data-dais-event" in body
     assert "data-dais-widget" in body
+    assert "data-dais-track" in body
+    assert "data-dais-accent" in body
+    assert "data-dais-compact" in body
     assert "?embed=1" in body
     assert "dais-embed-height" in body
     assert "createElement('iframe')" in body

@@ -182,6 +182,7 @@ def test_get_submissions_is_token_scoped(client, selfservice_db):
     assert sub["abstract"] == "A practical tour."
     assert sub["status"] == "pending"
     assert sub["editable"] is True
+    assert body["email"] == "ada@example.com"
     assert body["event"]["closed"] is False
 
 

@@ -722,6 +722,7 @@ export interface SubmitterEventInfo {
 }
 
 export interface SubmitterDashboardData {
+  email: string | null
   event: SubmitterEventInfo | null
   tracks: SubmitterTaxonomyItem[]
   formats: SubmitterTaxonomyItem[]
@@ -784,6 +785,7 @@ export async function getSubmitterSubmissions(token: string): Promise<SubmitterD
     `/public/submissions?token=${encodeURIComponent(token)}`
   )
   return {
+    email: typeof wire.email === 'string' ? wire.email : null,
     event: wire.event ?? null,
     tracks: Array.isArray(wire.tracks) ? wire.tracks : [],
     formats: Array.isArray(wire.formats) ? wire.formats : [],

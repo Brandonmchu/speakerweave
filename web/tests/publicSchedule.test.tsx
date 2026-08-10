@@ -433,6 +433,30 @@ describe('PublicSchedule', () => {
     expect(capturedIcs.trim().endsWith('END:VCALENDAR')).toBe(true)
   })
 
+  it('pre-applies the track query parameter', async () => {
+    renderAt('/e/ai-builders-summit/schedule?track=Research')
+
+    expect(await screen.findByText('Vector Databases')).toBeInTheDocument()
+    expect(screen.queryByText('Opening Keynote')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Research' })).toHaveClass('border-primary')
+  })
+
+  it('scopes a validated accent query parameter to the public page', async () => {
+    renderAt('/e/ai-builders-summit/schedule?accent=ff5500')
+    await screen.findByText('Opening Keynote')
+
+    expect(screen.getByTestId('public-program-page')).toHaveStyle('--dais-accent: #ff5500')
+  })
+
+  it('uses a compact layout and hides the public program header', async () => {
+    renderAt('/e/ai-builders-summit/schedule?compact=1')
+    await screen.findByText('Opening Keynote')
+
+    expect(screen.queryByTestId('program-header')).not.toBeInTheDocument()
+    expect(screen.getByTestId('public-program-page')).toHaveAttribute('data-compact', 'true')
+    expect(cardFor('Opening Keynote')).toHaveClass('p-3')
+  })
+
   it('in embed mode drops the chrome and posts its height to the parent', async () => {
     Object.defineProperty(document.documentElement, 'scrollHeight', {
       configurable: true,

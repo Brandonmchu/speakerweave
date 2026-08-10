@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CalendarClock, CheckCircle2, Pencil, Inbox as InboxIcon, UserPlus, Users } from 'lucide-react'
 
@@ -33,6 +33,8 @@ import { Textarea } from '@/ui/textarea'
  */
 export function SubmitterDashboard() {
   const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const token = params.get('token') ?? ''
 
   const query = useQuery({
@@ -83,12 +85,36 @@ export function SubmitterDashboard() {
   const submissions = data.submissions
   const eventName = data.event?.name ?? undefined
   const closeAt = data.event?.close_at ? new Date(data.event.close_at) : null
+  const signedInEmail =
+    data.email ??
+    submissions.flatMap((submission) => submission.participants ?? []).find((p) => p.is_primary)
+      ?.email ??
+    null
+
+  function signOut() {
+    queryClient.removeQueries({ queryKey: ['submitter-submissions', token], exact: true })
+    navigate('/speaker-signin', { replace: true })
+  }
 
   return (
     <SubmitterShell eyebrow={eventName}>
       <header className="border-b border-border pb-6">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Your submissions</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+              Your speaker account
+            </h1>
+            {signedInEmail && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Signed in as <span className="font-medium text-foreground">{signedInEmail}</span>
+              </p>
+            )}
+          </div>
+          <Button variant="ghost" size="sm" onClick={signOut}>
+            Sign out
+          </Button>
+        </div>
+        <p className="mt-4 text-sm text-muted-foreground">
           {submissions.length === 0
             ? 'You have no submissions yet.'
             : `${submissions.length} submission${submissions.length === 1 ? '' : 's'}${

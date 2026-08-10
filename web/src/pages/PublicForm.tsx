@@ -465,6 +465,9 @@ export function PublicForm() {
             />
           )}
           <div className="mt-8 w-full max-w-sm border-t border-border pt-6">
+            <p className="mb-4 text-sm text-muted-foreground">
+              This is your speaker account — bookmark it or sign in anytime with your email.
+            </p>
             {receipt.manage_token ? (
               <ManageLinkReady slug={slug} token={receipt.manage_token} />
             ) : (
@@ -801,7 +804,13 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
         <div className="rounded-2xl border border-border bg-card p-6 shadow-[0_10px_30px_rgba(15,23,42,0.08)] sm:p-10">
           {children}
         </div>
-        <p className="mt-6 text-center text-xs text-muted-foreground">Powered by dais</p>
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          <Link to="/speaker-signin" className="font-medium text-primary hover:underline">
+            Speaker sign in
+          </Link>
+          <span aria-hidden> · </span>
+          Powered by dais
+        </p>
       </div>
     </div>
   )

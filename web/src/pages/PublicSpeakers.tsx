@@ -20,7 +20,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/dialog'
-import { Avatar, ProgramShell, useEmbedHeight } from '@/pages/publicProgramShared'
+import {
+  Avatar,
+  ProgramShell,
+  programAccentStyle,
+  useEmbedHeight,
+} from '@/pages/publicProgramShared'
 import { SessionDetailDialog, useMySchedule } from '@/pages/PublicSchedule'
 
 /** Gallery = photo grid (EMB-12); List = compact directory rows (EMB-04). */
@@ -30,6 +35,9 @@ export function PublicSpeakers() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
   const embed = searchParams.get('embed') === '1'
+  const compact = searchParams.get('compact') === '1'
+  const accent = searchParams.get('accent')
+  const track = searchParams.get('track')?.trim() ?? ''
 
   const query = useQuery({
     queryKey: ['program-speakers', slug],
@@ -52,7 +60,7 @@ export function PublicSpeakers() {
   // ?view=list deep-links the directory rendering (the embeddable "list of
   // speakers"); the photo grid is the default.
   const [view, setView] = useState<SpeakerView>(
-    searchParams.get('view') === 'list' ? 'list' : 'gallery'
+    searchParams.get('view') === 'list' || compact ? 'list' : 'gallery'
   )
 
   // The personal schedule is shared with the schedule page (same localStorage),
@@ -62,11 +70,16 @@ export function PublicSpeakers() {
   // Client-side keyword filter over name, company and title (EMB-05/12).
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return speakers
-    return speakers.filter((s) =>
+    const inTrack = track
+      ? speakers.filter((speaker) =>
+          speaker.sessions.some((session) => session.track?.name === track)
+        )
+      : speakers
+    if (!q) return inTrack
+    return inTrack.filter((s) =>
       [s.name, s.company ?? '', s.title ?? ''].join(' ').toLowerCase().includes(q)
     )
-  }, [speakers, search])
+  }, [speakers, search, track])
 
   useEmbedHeight(embed)
 
@@ -102,7 +115,7 @@ export function PublicSpeakers() {
     )
   } else {
     body = (
-      <div className="space-y-5">
+      <div className={compact ? 'space-y-3' : 'space-y-5'}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="w-full sm:max-w-xs">
             <div className="relative">
@@ -148,10 +161,15 @@ export function PublicSpeakers() {
             ))}
           </div>
         ) : (
-          <ul data-testid="speaker-directory-list" className="space-y-2">
+          <ul data-testid="speaker-directory-list" className={compact ? 'space-y-1' : 'space-y-2'}>
             {filtered.map((speaker) => (
               <li key={speakerKey(speaker)}>
-                <SpeakerRow speaker={speaker} zone={zone} onClick={() => setSelected(speaker)} />
+                <SpeakerRow
+                  speaker={speaker}
+                  zone={zone}
+                  compact={compact}
+                  onClick={() => setSelected(speaker)}
+                />
               </li>
             ))}
           </ul>
@@ -181,11 +199,26 @@ export function PublicSpeakers() {
   )
 
   if (embed) {
-    return <div className="px-1 py-2">{content}</div>
+    return (
+      <div
+        data-testid="public-program-page"
+        data-compact={compact ? 'true' : undefined}
+        className={compact ? 'px-1 py-1' : 'px-1 py-2'}
+        style={programAccentStyle(accent)}
+      >
+        {content}
+      </div>
+    )
   }
 
   return (
-    <ProgramShell slug={slug} eventName={query.data?.event.name} active="speakers">
+    <ProgramShell
+      slug={slug}
+      eventName={query.data?.event.name}
+      active="speakers"
+      accent={accent}
+      compact={compact}
+    >
       {content}
     </ProgramShell>
   )
@@ -238,10 +271,12 @@ function ViewToggle({
 function SpeakerRow({
   speaker,
   zone,
+  compact = false,
   onClick,
 }: {
   speaker: ProgramSpeaker
   zone: string | null
+  compact?: boolean
   onClick: () => void
 }) {
   return (
@@ -249,7 +284,10 @@ function SpeakerRow({
       type="button"
       data-testid="speaker-card"
       onClick={onClick}
-      className="flex w-full items-start gap-4 rounded-xl border border-border bg-card px-4 py-3.5 text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        'flex w-full items-start rounded-xl border border-border bg-card text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        compact ? 'gap-3 px-3 py-2.5' : 'gap-4 px-4 py-3.5'
+      )}
     >
       <span className="h-14 w-14 shrink-0 overflow-hidden rounded-full ring-1 ring-border">
         <Avatar name={speaker.name} photoUrl={speaker.photo_url} />

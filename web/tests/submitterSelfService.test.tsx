@@ -195,6 +195,9 @@ describe('PublicForm — confirmation and manage prompt', () => {
 
     // The email path is still offered, as a secondary option.
     expect(screen.getByText(/Prefer a link by email/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/This is your speaker account — bookmark it or sign in anytime/i)
+    ).toBeInTheDocument()
 
     // Reaching the dashboard required no manage-link email at all.
     expect(calls.some((c) => c.url.includes('/manage-link'))).toBe(false)
@@ -243,6 +246,7 @@ describe('PublicForm — confirmation and manage prompt', () => {
 // ── SubmitterDashboard: list + edit + withdraw ──────────────────────────────
 
 const DASHBOARD_DATA = {
+  email: 'ada@example.com',
   event: { id: 'ev-1', name: 'DaisConf', close_at: FUTURE, closed: false },
   tracks: [
     { id: 'track-ai', name: 'AI & ML' },
@@ -286,6 +290,7 @@ function renderDashboard(entry = '/submit/cfp/manage?token=tok') {
       <QueryClientProvider client={queryClient}>
         <Routes>
           <Route path="/submit/:slug/manage" element={<SubmitterDashboard />} />
+          <Route path="/speaker-signin" element={<div>Signed out to speaker sign in</div>} />
         </Routes>
       </QueryClientProvider>
     </MemoryRouter>
@@ -311,6 +316,18 @@ describe('SubmitterDashboard', () => {
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument()
     expect(screen.getByText('speaker · submitter')).toBeInTheDocument()
     expect(screen.getByText('Primary')).toBeInTheDocument()
+  })
+
+  it('shows the signed-in email and signs out without leaving the token in the URL', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(DASHBOARD_DATA)))
+    renderDashboard()
+
+    expect(await screen.findByText('Your speaker account')).toBeInTheDocument()
+    expect(screen.getAllByText('ada@example.com').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByText('Signed out to speaker sign in')).toBeInTheDocument()
+    expect(window.location.search).not.toContain('token=')
   })
 
   it('adds a co-speaker from an editable submission', async () => {

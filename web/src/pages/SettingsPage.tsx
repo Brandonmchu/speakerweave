@@ -30,16 +30,21 @@ import {
   type TaxonomyRow,
 } from '@/lib/adminApi'
 import {
+  embedPageQuery,
   embedIframeSnippet,
   embedScriptSnippet,
+  publicCalendarFeedUrl,
   publicProgramFeedUrl,
   publicProgramUrl,
+  sanitizeAccent,
+  type EmbedOptions,
   type EmbedWidget,
 } from '@/lib/programApi'
 import { buildZonedTimestamp, zonedDay } from '@/lib/scheduleApi'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
 import { Button } from '@/ui/button'
+import { Checkbox } from '@/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -338,11 +343,24 @@ function SnippetBlock({
  */
 function EmbedSection({ event }: { event: EventSummary }) {
   const [widget, setWidget] = useState<EmbedWidget>('schedule')
+  const [track, setTrack] = useState('')
+  const [accent, setAccent] = useState('')
+  const [compact, setCompact] = useState(false)
+  const tracksQuery = useQuery({
+    queryKey: ['taxonomy', 'tracks', event.id],
+    queryFn: () => listTaxonomy(event.id, 'tracks'),
+  })
 
   if (!event.slug) return null
 
-  const scriptSnippet = embedScriptSnippet(event.slug, widget)
-  const iframeSnippet = embedIframeSnippet(event.slug, widget)
+  const accentError = accent && !sanitizeAccent(accent) ? 'Enter exactly 6 hex digits.' : null
+  const options: EmbedOptions = {
+    track: track || undefined,
+    accent: sanitizeAccent(accent) ?? undefined,
+    compact,
+  }
+  const scriptSnippet = embedScriptSnippet(event.slug, widget, options)
+  const iframeSnippet = embedIframeSnippet(event.slug, widget, options)
 
   return (
     <section className="rounded-lg border border-border bg-card shadow-soft">
@@ -390,6 +408,53 @@ function EmbedSection({ event }: { event: EventSummary }) {
           </div>
         </div>
 
+        <div className="grid gap-4 rounded-lg border border-border bg-background/50 p-4 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="embed-track">Track filter</Label>
+            <NativeSelect
+              id="embed-track"
+              aria-label="Track filter"
+              className="h-9"
+              value={track}
+              onValueChange={setTrack}
+              options={[
+                { value: '', label: 'All tracks' },
+                ...(tracksQuery.data ?? []).map((item) => ({
+                  value: item.name,
+                  label: `${item.name} track`,
+                })),
+              ]}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="embed-accent">Accent color</Label>
+            <Input
+              id="embed-accent"
+              aria-label="Accent color"
+              className="h-9 font-mono"
+              value={accent}
+              maxLength={6}
+              placeholder="4962E2"
+              aria-invalid={accentError ? true : undefined}
+              onChange={(event) => setAccent(event.target.value)}
+            />
+            {accentError && <p className="text-xs text-destructive">{accentError}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="embed-compact">Layout</Label>
+            <div className="flex h-9 items-center gap-2">
+              <Checkbox
+                id="embed-compact"
+                checked={compact}
+                onCheckedChange={(checked) => setCompact(checked === true)}
+              />
+              <Label htmlFor="embed-compact" className="font-normal">
+                Compact
+              </Label>
+            </div>
+          </div>
+        </div>
+
         <SnippetBlock
           title="Script embed (recommended)"
           hint="Auto-resizes to fit the programme — no scrollbars, no fixed height to maintain."
@@ -403,7 +468,7 @@ function EmbedSection({ event }: { event: EventSummary }) {
           testId="embed-snippet-iframe"
         />
 
-        <EmbedPreview slug={event.slug} widget={widget} />
+        <EmbedPreview slug={event.slug} widget={widget} options={options} />
 
         <div className="space-y-1.5">
           <p className="text-sm font-medium text-foreground">JSON feed</p>
@@ -417,6 +482,18 @@ function EmbedSection({ event }: { event: EventSummary }) {
             testId="embed-json-feed"
           />
         </div>
+
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium text-foreground">Calendar feed (iCal)</p>
+          <p className="text-xs text-muted-foreground">
+            Subscribe to the complete published schedule from any calendar app.
+          </p>
+          <PublicLinkRow
+            label="iCal"
+            url={publicCalendarFeedUrl(event.slug)}
+            testId="embed-ical-feed"
+          />
+        </div>
       </div>
     </section>
   )
@@ -428,8 +505,16 @@ function EmbedSection({ event }: { event: EventSummary }) {
  * decoration: the organizer sees the embed working before pasting it anywhere,
  * and a broken widget is visible here instead of on their marketing site.
  */
-function EmbedPreview({ slug, widget }: { slug: string; widget: EmbedWidget }) {
-  const src = `${publicProgramUrl(slug, widget)}?embed=1`
+function EmbedPreview({
+  slug,
+  widget,
+  options,
+}: {
+  slug: string
+  widget: EmbedWidget
+  options: EmbedOptions
+}) {
+  const src = `${publicProgramUrl(slug, widget)}?${embedPageQuery(options)}`
   return (
     <div className="space-y-2">
       <div className="min-w-0">

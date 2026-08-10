@@ -16,7 +16,9 @@ Everything served here is deliberately public data:
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -24,6 +26,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, limiter
+from services.ics import escape_text, format_utc
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
 
@@ -43,12 +46,20 @@ EMBED_JS = """\
   if (!script) return;
   var slug = script.getAttribute('data-dais-event');
   var widget = script.getAttribute('data-dais-widget') || 'schedule';
+  var track = script.getAttribute('data-dais-track');
+  var accent = script.getAttribute('data-dais-accent');
+  var compact = script.getAttribute('data-dais-compact');
   if (!slug) return;
   if (widget !== 'schedule' && widget !== 'speakers') widget = 'schedule';
   var origin = '';
   try { origin = new URL(script.src).origin; } catch (e) { origin = ''; }
   var iframe = document.createElement('iframe');
-  iframe.src = origin + '/e/' + encodeURIComponent(slug) + '/' + widget + '?embed=1';
+  var params = [];
+  if (track) params.push('track=' + encodeURIComponent(track));
+  if (accent && /^[0-9a-fA-F]{6}$/.test(accent)) params.push('accent=' + accent);
+  if (compact === '1') params.push('compact=1');
+  iframe.src = origin + '/e/' + encodeURIComponent(slug) + '/' + widget + '?embed=1' +
+    (params.length ? '&' + params.join('&') : '');
   iframe.title = 'dais ' + widget;
   iframe.loading = 'lazy';
   iframe.scrolling = 'no';
@@ -103,6 +114,12 @@ def _resolve_timezone(tz: str | None, fallback: str | None) -> tuple[ZoneInfo, s
 
 def _speaker_name(contact: dict) -> str:
     return f"{contact.get('first_name') or ''} {contact.get('last_name') or ''}".strip()
+
+
+def _plain_text(value: object) -> str:
+    """Match the browser schedule export: strip tags and collapse whitespace."""
+    without_tags = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return " ".join(html.unescape(without_tags).replace("\xa0", " ").split())
 
 
 def _event_day_window(event: dict) -> tuple[str, str] | None:
@@ -397,7 +414,7 @@ async def get_speakers(request: Request, event_slug: str):
     org_id, event_id = event["org_id"], event["id"]
 
     sessions = await _accepted_sessions(org_id, event_id)
-    room_names, _track_meta, format_names = await _name_maps(org_id, event_id)
+    room_names, track_meta, format_names = await _name_maps(org_id, event_id)
     sessions_by_id = {str(s["id"]): s for s in sessions}
     speakers_by_session, contacts_by_id = await _speakers_by_session(
         [str(s["id"]) for s in sessions], org_id
@@ -454,6 +471,7 @@ async def get_speakers(request: Request, event_slug: str):
                         "title": s.get("title") or "",
                         "starts_at": s.get("starts_at"),
                         "room": room_names.get(str(s.get("room_id"))) or None,
+                        "track": track_meta.get(str(s.get("track_id"))),
                         "format": format_names.get(str(s.get("format_id"))) or None,
                     }
                     for s in sess_list
@@ -465,6 +483,66 @@ async def get_speakers(request: Request, event_slug: str):
         "event": {"name": event.get("name"), "timezone": event.get("timezone")},
         "speakers": speakers,
     }
+
+
+@router.get("/{event_slug}/calendar.ics")
+@limiter.limit(RATE_PUBLIC_DEFAULT)
+async def get_calendar_feed(request: Request, event_slug: str):
+    """A cacheable iCalendar feed of the accepted, published schedule."""
+    event = await _load_event(event_slug)
+    org_id, event_id = event["org_id"], event["id"]
+    sessions = await _accepted_sessions(org_id, event_id)
+    room_names, _track_meta, _format_names = await _name_maps(org_id, event_id)
+    window = _event_day_window(event)
+    scheduled = [
+        session
+        for session in sessions
+        if session.get("starts_at") and _within_event_days(session, event, window)
+    ]
+    scheduled.sort(
+        key=lambda session: _parse_dt(session.get("starts_at"))
+        or datetime.max.replace(tzinfo=timezone.utc)
+    )
+
+    stamp = format_utc(datetime.now(timezone.utc))
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//dais//EN", "CALSCALE:GREGORIAN"]
+    for session in scheduled:
+        starts_at = _parse_dt(session.get("starts_at"))
+        if starts_at is None:
+            continue
+        ends_at = _parse_dt(session.get("ends_at")) or starts_at + timedelta(hours=1)
+        uid = session.get("friendly_id") or session["id"]
+        location = ", ".join(
+            value
+            for value in (
+                room_names.get(str(session.get("room_id"))),
+                event.get("location"),
+            )
+            if value
+        )
+        description = _plain_text(session.get("description"))
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:{uid}@dais",
+                f"DTSTAMP:{stamp}",
+                f"DTSTART:{format_utc(starts_at)}",
+                f"DTEND:{format_utc(ends_at)}",
+                f"SUMMARY:{escape_text(session.get('title') or 'Session')}",
+            ]
+        )
+        if description:
+            lines.append(f"DESCRIPTION:{escape_text(description)}")
+        if location:
+            lines.append(f"LOCATION:{escape_text(location)}")
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+
+    return Response(
+        content="\r\n".join(lines),
+        media_type="text/calendar",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 @router.get("/{event_slug}/session/{session_id}")

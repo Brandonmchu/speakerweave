@@ -28,6 +28,7 @@ import { Onboarding } from '@/pages/Onboarding'
 import { Portal } from '@/pages/Portal'
 import { PublicForm } from '@/pages/PublicForm'
 import { SubmitterDashboard } from '@/pages/SubmitterDashboard'
+import { SpeakerSignin } from '@/pages/SpeakerSignin'
 import { PublicSchedule } from '@/pages/PublicSchedule'
 import { PublicSpeakers } from '@/pages/PublicSpeakers'
 import { Review } from '@/pages/Review'
@@ -108,6 +109,7 @@ export default function App() {
         {/* Public, unauthenticated surfaces. */}
         <Route path="/dev-login" element={<DevLogin />} />
         <Route path="/submit/:slug" element={<PublicForm />} />
+        <Route path="/speaker-signin" element={<SpeakerSignin />} />
         {/* Submitter self-service: magic-link, token in the query, no Clerk. */}
         <Route path="/submit/:slug/manage" element={<SubmitterDashboard />} />
         {/* /demo is the one-click demo entrance — always the landing, even when

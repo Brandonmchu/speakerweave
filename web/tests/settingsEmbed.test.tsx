@@ -32,6 +32,8 @@ function stubFetch() {
       const url = String(input)
       const body = url.includes('/api/events') && !url.includes('/api/events/')
         ? { events: [EVENT] }
+        : url.includes('/api/events/evt-1/tracks')
+          ? { tracks: [{ id: 'track-eng', name: 'Engineering', color: '#123456' }] }
         : url.includes('/api/api-tokens')
           ? { api_tokens: [] }
           : { items: [] }
@@ -206,6 +208,46 @@ describe('Settings → Embed & share (EMB-15)', () => {
     expect(screen.getByTestId('embed-json-feed')).toHaveTextContent(
       `${origin()}/public/program/ai-builders-summit/speakers`
     )
+  })
+
+  it('bakes track, accent, and compact options into snippets and the preview', async () => {
+    renderSettings()
+    await screen.findByTestId('embed-preview')
+    await screen.findByRole('option', { name: 'Engineering track' })
+
+    fireEvent.change(screen.getByLabelText('Track filter'), {
+      target: { value: 'Engineering' },
+    })
+    fireEvent.change(screen.getByLabelText('Accent color'), { target: { value: 'ff5500' } })
+    fireEvent.click(screen.getByLabelText('Compact'))
+
+    const script = screen.getByTestId('embed-snippet-script').textContent ?? ''
+    expect(script).toContain('data-dais-track="Engineering"')
+    expect(script).toContain('data-dais-accent="ff5500"')
+    expect(script).toContain('data-dais-compact="1"')
+
+    const query = 'embed=1&track=Engineering&accent=ff5500&compact=1'
+    expect(screen.getByTestId('embed-snippet-iframe').textContent).toContain(
+      `/e/ai-builders-summit/schedule?${query}`
+    )
+    expect(screen.getByTestId('embed-preview')).toHaveAttribute(
+      'src',
+      `${origin()}/e/ai-builders-summit/schedule?${query}`
+    )
+    // Data feeds stay raw and unfiltered so custom consumers control filtering.
+    expect(screen.getByTestId('embed-json-feed')).toHaveTextContent(
+      `${origin()}/public/program/ai-builders-summit/schedule`
+    )
+  })
+
+  it('offers the published schedule as a fourth iCal format', async () => {
+    renderSettings()
+
+    expect(await screen.findByText('Calendar feed (iCal)')).toBeInTheDocument()
+    expect(screen.getByTestId('embed-ical-feed')).toHaveTextContent(
+      `${origin()}/public/program/ai-builders-summit/calendar.ics`
+    )
+    expect(screen.getByLabelText('Copy ical link')).toBeInTheDocument()
   })
 
   it('keeps the copy button inside the block it belongs to', async () => {
