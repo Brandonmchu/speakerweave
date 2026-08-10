@@ -21,7 +21,7 @@ import {
   Workflow,
 } from 'lucide-react'
 
-import agendaScreenshot from '../../../docs/images/agenda.jpg'
+import agendaScreenshot from '../assets/agenda.jpg'
 import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
 import {
