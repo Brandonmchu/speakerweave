@@ -7,6 +7,7 @@ only ever land in the org that owns the slug.
 
 from __future__ import annotations
 
+import html as html_module
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -154,6 +155,76 @@ async def _get_form_by_slug(slug: str) -> dict:
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
     return form
+
+
+async def _queue_submission_confirmation(
+    org_id: str,
+    event_id: str,
+    contact_id: str,
+    session: dict,
+    abstract: str,
+    manage_url: str | None,
+) -> None:
+    """Best-effort confirmation for an already-created CFP submission."""
+    try:
+        event = first(
+            await db(
+                lambda: supabase.table("events")
+                .select("name")
+                .eq("id", event_id)
+                .eq("org_id", org_id)
+                .limit(1)
+                .execute(),
+                "public_submission_confirmation_event",
+            )
+        )
+        event_name = str((event or {}).get("name") or "Your event")
+        title = str(session.get("title") or "Untitled submission")
+        friendly_id = str(
+            session.get("friendly_id") or f"SESS-{session.get('friendly_id_raw')}"
+        )
+        abstract_html = html_module.escape(abstract).replace("\n", "<br>")
+        manage_html = ""
+        if manage_url:
+            safe_url = html_module.escape(manage_url, quote=True)
+            manage_html = (
+                f'<p><a href="{safe_url}">Manage your submission</a></p>'
+                f"<p>{safe_url}</p>"
+            )
+
+        subject = f"[{event_name}] Submission received: {title}"
+        body = (
+            '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;'
+            'font-size:15px;line-height:1.5;color:#111">'
+            "<h2>Submission received</h2>"
+            f"<p>Thank you for submitting to <strong>{html_module.escape(event_name)}</strong>.</p>"
+            f"<p><strong>{html_module.escape(title)}</strong> "
+            f"({html_module.escape(friendly_id)})</p>"
+            f"<p><strong>Abstract</strong><br>{abstract_html}</p>"
+            f"{manage_html}</div>"
+        )
+        await db(
+            lambda: supabase.table("email_outbox")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "event_id": event_id,
+                    "contact_id": contact_id,
+                    "template_key": "submission_confirmation",
+                    "payload": {"subject": subject, "html": body},
+                    "status": "queued",
+                    "dedupe_key": f"submission-confirmation:{session['id']}",
+                }
+            )
+            .execute(),
+            "public_submission_confirmation_queue",
+        )
+    except Exception:  # never 500 a good submission over a courtesy email
+        logger.warning(
+            "public: could not queue submission confirmation session_id=%s",
+            session.get("id"),
+            exc_info=True,
+        )
 
 
 async def _public_fields(form: dict) -> list[dict]:
@@ -511,6 +582,19 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
         logger.warning(
             "public: could not mint manage token session_id=%s", session["id"], exc_info=True
         )
+
+    # Best-effort like the manage-link mint above: the submission is durable at
+    # this point, so an outbox outage may never turn it into a 500. The session
+    # id makes the queued message idempotent while allowing each new submission
+    # from the same contact to receive its own confirmation.
+    await _queue_submission_confirmation(
+        org_id,
+        event_id,
+        contact["id"],
+        session,
+        description,
+        manage_url,
+    )
 
     return {
         "id": session["id"],

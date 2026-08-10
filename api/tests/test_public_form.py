@@ -840,6 +840,68 @@ def test_submission_returns_a_manage_token_scoped_to_the_contact(client, public_
     assert tokens[0]["contact_id"] == session["submitter_contact_id"]
 
 
+def test_submission_queues_confirmation_with_abstract_and_manage_link(client, public_db):
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            title="A safer inference stack",
+            description="",
+            answers={F_ABSTRACT: "The complete abstract copy."},
+        ),
+    )
+
+    assert response.status_code == 201
+    session = public_db.rows("sessions")[0]
+    queued = public_db.rows("email_outbox")
+    assert len(queued) == 1
+    assert queued[0]["contact_id"] == session["submitter_contact_id"]
+    assert queued[0]["template_key"] == "submission_confirmation"
+    assert queued[0]["status"] == "queued"
+    assert queued[0]["dedupe_key"] == f"submission-confirmation:{session['id']}"
+    html = queued[0]["payload"]["html"]
+    assert "AI Builders Summit" in html
+    assert "A safer inference stack" in html
+    assert "SESS-1" in html
+    assert "The complete abstract copy." in html
+    assert response.json()["manage_url"] in html
+
+
+def test_each_distinct_submission_gets_its_own_confirmation(client, public_db):
+    payload = submission(description="", answers={F_ABSTRACT: "A tour."})
+
+    assert client.post(f"/public/forms/{SLUG}/submissions", json=payload).status_code == 201
+    assert client.post(f"/public/forms/{SLUG}/submissions", json=payload).status_code == 201
+
+    sessions = public_db.rows("sessions")
+    queued = public_db.rows("email_outbox")
+    assert len(queued) == 2
+    assert {row["dedupe_key"] for row in queued} == {
+        f"submission-confirmation:{session['id']}" for session in sessions
+    }
+
+
+def test_confirmation_queue_failure_never_fails_submission(client, public_db, monkeypatch):
+    from routes import public_routes
+
+    real_db = public_routes.db
+
+    async def fail_confirmation_queue(operation, label="query"):
+        if label == "public_submission_confirmation_queue":
+            raise RuntimeError("outbox unavailable")
+        return await real_db(operation, label)
+
+    monkeypatch.setattr(public_routes, "db", fail_confirmation_queue)
+
+    response = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour."}),
+    )
+
+    assert response.status_code == 201
+    assert len(public_db.rows("sessions")) == 1
+    assert public_db.rows("email_outbox") == []
+
+
 def test_returned_manage_token_reaches_the_manage_endpoints(client, public_db):
     token = client.post(
         f"/public/forms/{SLUG}/submissions",

@@ -7,9 +7,13 @@ stubbed, so the test asserts control flow, not PostgREST.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from services import outbox_worker
+from tests.fakes import FakeSupabase
 
 
 @pytest.fixture
@@ -180,3 +184,165 @@ def test_is_enabled_reads_env(monkeypatch):
     assert outbox_worker.is_enabled() is True
     monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "0")
     assert outbox_worker.is_enabled() is False
+
+
+def test_auto_reminder_configuration_defaults_to_worker_and_reads_interval(monkeypatch):
+    monkeypatch.delenv("AUTO_REMINDERS_ENABLED", raising=False)
+    monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "1")
+    assert outbox_worker.auto_reminders_enabled() is True
+
+    monkeypatch.setenv("AUTO_REMINDERS_ENABLED", "0")
+    assert outbox_worker.auto_reminders_enabled() is False
+
+    monkeypatch.setenv("AUTO_REMINDERS_INTERVAL_HOURS", "2.5")
+    assert outbox_worker._reminder_sweep_interval() == timedelta(hours=2.5)
+
+
+@pytest.mark.asyncio
+async def test_reminder_sweep_queues_one_daily_row_and_filters_ineligible(monkeypatch):
+    now = datetime(2026, 8, 10, 12, tzinfo=timezone.utc)
+    overdue = "2026-08-09T10:00:00+00:00"
+    assignments = [
+        {
+            "id": "a1",
+            "org_id": "org-1",
+            "contact_id": "contact-1",
+            "status": "todo",
+            "tasks": {
+                "id": "task-1",
+                "event_id": "event-1",
+                "name": "Upload slides",
+                "due_at": overdue,
+            },
+        },
+        {
+            "id": "a2",
+            "org_id": "org-1",
+            "contact_id": "contact-1",
+            "status": "denied",
+            "tasks": {
+                "id": "task-2",
+                "event_id": "event-1",
+                "name": "Revise biography",
+                "due_at": "2026-08-08T10:00:00+00:00",
+            },
+        },
+        {
+            "id": "done",
+            "org_id": "org-1",
+            "contact_id": "contact-2",
+            "status": "done",
+            "tasks": {
+                "id": "task-3",
+                "event_id": "event-1",
+                "name": "Already complete",
+                "due_at": overdue,
+            },
+        },
+        {
+            "id": "approved",
+            "org_id": "org-1",
+            "contact_id": "contact-2",
+            "status": "approved",
+            "tasks": {
+                "id": "task-4",
+                "event_id": "event-1",
+                "name": "Already approved",
+                "due_at": overdue,
+            },
+        },
+        {
+            "id": "future",
+            "org_id": "org-1",
+            "contact_id": "contact-3",
+            "status": "todo",
+            "tasks": {
+                "id": "task-5",
+                "event_id": "event-1",
+                "name": "Future task",
+                "due_at": "2026-08-11T10:00:00+00:00",
+            },
+        },
+    ]
+
+    async def load_assignments(sweep_now, limit):
+        assert sweep_now == now
+        assert limit == outbox_worker.REMINDER_ASSIGNMENT_LIMIT
+        return assignments
+
+    fake = FakeSupabase()
+
+    async def immediate_db(operation, _label="query"):
+        return operation()
+
+    monkeypatch.setattr(outbox_worker, "_load_overdue_assignments", load_assignments)
+    monkeypatch.setattr(outbox_worker, "supabase", fake)
+    monkeypatch.setattr(outbox_worker, "db", immediate_db)
+
+    first = await outbox_worker.sweep_overdue_reminders(now=now)
+    second = await outbox_worker.sweep_overdue_reminders(now=now)
+
+    assert first == {"assignments": 5, "contacts": 1, "queued": 1}
+    assert second == {"assignments": 5, "contacts": 1, "queued": 0}
+    queued = fake.rows("email_outbox")
+    assert len(queued) == 1
+    assert queued[0]["contact_id"] == "contact-1"
+    assert queued[0]["template_key"] == "auto_task_reminder"
+    assert queued[0]["status"] == "queued"
+    assert queued[0]["dedupe_key"] == "auto-task-reminder:contact-1:2026-08-10"
+    html = queued[0]["payload"]["html"]
+    assert "Upload slides" in html and "2026-08-09" in html
+    assert "Revise biography" in html and "2026-08-08" in html
+    assert "Already complete" not in html
+    assert "Already approved" not in html
+    assert "Future task" not in html
+
+
+@pytest.mark.asyncio
+async def test_reminder_sweep_runs_only_after_interval(monkeypatch):
+    start = datetime(2026, 8, 10, 12, tzinfo=timezone.utc)
+    clock = {"now": start}
+    sweeps: list[datetime] = []
+
+    async def sweep(*, now=None, limit=outbox_worker.REMINDER_ASSIGNMENT_LIMIT):
+        sweeps.append(now)
+        return {"assignments": 0, "contacts": 0, "queued": 0}
+
+    monkeypatch.setenv("OUTBOX_WORKER_ENABLED", "1")
+    monkeypatch.delenv("AUTO_REMINDERS_ENABLED", raising=False)
+    monkeypatch.delenv("AUTO_REMINDERS_INTERVAL_HOURS", raising=False)
+    monkeypatch.setattr(outbox_worker, "_now", lambda: clock["now"])
+    monkeypatch.setattr(outbox_worker, "sweep_overdue_reminders", sweep)
+    monkeypatch.setattr(outbox_worker, "_last_reminder_sweep_at", None)
+
+    assert await outbox_worker._maybe_sweep_overdue_reminders() is True
+    clock["now"] = start + timedelta(hours=5, minutes=59)
+    assert await outbox_worker._maybe_sweep_overdue_reminders() is False
+    clock["now"] = start + timedelta(hours=6)
+    assert await outbox_worker._maybe_sweep_overdue_reminders() is True
+    assert sweeps == [start, start + timedelta(hours=6)]
+
+
+@pytest.mark.asyncio
+async def test_sweep_exception_does_not_stop_the_drain_loop(monkeypatch):
+    calls: list[str] = []
+
+    async def broken_sweep():
+        calls.append("sweep")
+        raise RuntimeError("database unavailable")
+
+    async def drain():
+        calls.append("drain")
+        return {"sent": 0, "failed": 0, "requeued": 0}
+
+    async def stop_after_cycle(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(outbox_worker, "_maybe_sweep_overdue_reminders", broken_sweep)
+    monkeypatch.setattr(outbox_worker, "drain_once", drain)
+    monkeypatch.setattr(outbox_worker.asyncio, "sleep", stop_after_cycle)
+
+    with pytest.raises(asyncio.CancelledError):
+        await outbox_worker.run_forever(idle_sleep=0)
+
+    assert calls == ["sweep", "drain"]
