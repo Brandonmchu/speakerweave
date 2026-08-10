@@ -49,17 +49,18 @@ afterEach(() => {
 })
 
 describe('Home landing', () => {
-  it('renders the hero and the entry CTAs an agent would look for', () => {
+  it('renders the new hero and its primary demo entry point', () => {
     renderHome()
     expect(
-      screen.getByRole('heading', { name: /Run your conference program/i })
+      screen.getByRole('heading', { name: 'Run your conference program, end to end.' })
     ).toBeInTheDocument()
-    // Primary + secondary org-app entrances.
+    expect(screen.getByText(/From call for papers to a published, staffed, scheduled agenda/)).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /Enter the demo workspace/i })
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Get started$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Organizer dashboard/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: /agenda builder showing a multi-track conference schedule/i }),
+    ).toBeInTheDocument()
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
@@ -81,7 +82,7 @@ describe('Home landing', () => {
     const openSource = screen.getByTestId('open-source-section')
     expect(within(openSource).getByRole('heading', { name: 'Open source' })).toBeInTheDocument()
     expect(openSource).toHaveTextContent('SpeakerWeave is open source')
-    expect(openSource).toHaveTextContent('source-available for the community')
+    expect(openSource).toHaveTextContent('MIT licensed from end to end')
     expect(within(openSource).getByRole('link', { name: /source repository/i })).toHaveAttribute(
       'href',
       REPO_URL,
@@ -99,31 +100,68 @@ describe('Home landing', () => {
     ]) {
       expect(within(stack).getByText(technology)).toBeInTheDocument()
     }
-    expect(stack).toHaveTextContent('swap them without touching the domain core')
+    expect(stack).toHaveTextContent(
+      'Swap auth, email, hosting, or data providers without touching the domain core',
+    )
+    expect(screen.getByText('Open source - MIT')).toHaveAttribute('href', REPO_URL)
+    expect(screen.getByText(/982 backend/).closest('li')).toHaveTextContent(
+      '982 backend + 603 frontend tests',
+    )
+    expect(screen.getByText('Built end-to-end by AI coding agents')).toBeInTheDocument()
+    expect(screen.getByText('REST API + MCP + webhooks-ready')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
+      'href',
+      `${REPO_URL}/blob/main/LICENSE`,
+    )
+    expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', REPO_URL)
   })
 
-  it('shows copyable Claude and ChatGPT MCP configurations for this origin', async () => {
+  it('presents all seven conference-program capabilities', () => {
+    renderHome()
+
+    for (const capability of [
+      'Call for Papers',
+      'Review',
+      'Decisions',
+      'Speaker Portal',
+      'Agenda Builder',
+      'Publish',
+      'Speaker CRM',
+    ]) {
+      expect(screen.getByRole('heading', { name: capability })).toBeInTheDocument()
+    }
+  })
+
+  it('shows four AI surfaces and copyable MCP configurations for this origin', async () => {
     renderHome()
 
     const aiApps = screen.getByTestId('ai-apps-section')
-    expect(within(aiApps).getByRole('heading', { name: 'Use it from your AI' })).toBeInTheDocument()
-    expect(within(aiApps).getByRole('heading', { name: 'Add to Claude' })).toBeInTheDocument()
-    expect(within(aiApps).getByRole('heading', { name: 'Add to ChatGPT' })).toBeInTheDocument()
+    expect(aiApps).toHaveTextContent('One brain, four surfaces')
+    expect(
+      within(aiApps).getByRole('heading', { name: 'Your program context travels with you.' }),
+    ).toBeInTheDocument()
+    for (const surface of [
+      'In-app Ask assistant',
+      'Slack bot',
+      'Claude (MCP)',
+      'ChatGPT (MCP)',
+    ]) {
+      expect(within(aiApps).getByRole('heading', { name: surface })).toBeInTheDocument()
+    }
     expect(aiApps).toHaveTextContent(`${window.location.origin}/mcp`)
     expect(aiApps).toHaveTextContent('claude.ai or Claude for Work')
     expect(aiApps).toHaveTextContent('Authorize when prompted with an API token from Settings')
     expect(aiApps).toHaveTextContent('Power-user MCP config')
     expect(aiApps).toHaveTextContent(
-      'Ask SpeakerWeave in the organizer app, the Slack bot, and MCP all share the same organization-scoped tool layer',
+      'The in-app assistant, Slack bot, Claude, and ChatGPT all dispatch through the same organization-scoped tool layer',
     )
     expect(within(aiApps).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
       '/developers',
     )
 
-    fireEvent.click(
-      within(aiApps).getByRole('button', { name: 'Copy Add to Claude MCP configuration' }),
-    )
+    fireEvent.click(within(aiApps).getByText('Connect Claude'))
+    fireEvent.click(within(aiApps).getByRole('button', { name: 'Copy Claude MCP configuration' }))
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining(`${window.location.origin}/mcp`)),
     )
@@ -132,9 +170,8 @@ describe('Home landing', () => {
     )
 
     writeText.mockClear()
-    fireEvent.click(
-      within(aiApps).getByRole('button', { name: 'Copy Add to ChatGPT MCP configuration' }),
-    )
+    fireEvent.click(within(aiApps).getByText('Connect ChatGPT'))
+    fireEvent.click(within(aiApps).getByRole('button', { name: 'Copy ChatGPT MCP configuration' }))
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"name": "SpeakerWeave"')),
     )
@@ -151,10 +188,4 @@ describe('Home landing', () => {
     expect(window.localStorage.getItem('dais.token')).toBe('demo.jwt.token')
   })
 
-  it('the secondary "Get started" CTA also enters the demo', async () => {
-    renderHome()
-    fireEvent.click(screen.getByRole('button', { name: /^Get started$/i }))
-    expect(await screen.findByText('Dashboard reached')).toBeInTheDocument()
-    expect(window.localStorage.getItem('dais.token')).toBe('demo.jwt.token')
-  })
 })

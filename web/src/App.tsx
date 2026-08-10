@@ -14,7 +14,6 @@ import { AppShell } from '@/shell/AppShell'
 import { Comms } from '@/pages/Comms'
 import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
-import { Home } from '@/pages/Home'
 import { FormEditor } from '@/pages/FormEditor'
 import { Forms } from '@/pages/Forms'
 import { Onboarding } from '@/pages/Onboarding'
@@ -28,6 +27,7 @@ import { Review } from '@/pages/Review'
 import { Toaster } from '@/ui/toaster'
 
 const LazyAgenda = lazy(() => import('@/pages/Agenda').then(({ Agenda }) => ({ default: Agenda })))
+const LazyHome = lazy(() => import('@/pages/Home').then(({ Home }) => ({ default: Home })))
 const LazyApiDocs = lazy(() =>
   import('@/pages/ApiDocs').then(({ ApiDocs }) => ({ default: ApiDocs })),
 )
@@ -62,6 +62,14 @@ function DeferredPage({ children }: { children: ReactNode }) {
     >
       {children}
     </Suspense>
+  )
+}
+
+function PublicHome() {
+  return (
+    <DeferredPage>
+      <LazyHome />
+    </DeferredPage>
   )
 }
 
@@ -117,9 +125,14 @@ function RequireAuth({
 function HomeEntry() {
   if (peekToken()) return <Navigate to="/submissions" replace />
   if (CLERK_ENABLED) {
-    return <ClerkSignedInSwitch authed={<Navigate to="/submissions" replace />} unauthed={<Home />} />
+    return (
+      <ClerkSignedInSwitch
+        authed={<Navigate to="/submissions" replace />}
+        unauthed={<PublicHome />}
+      />
+    )
   }
-  return <Home />
+  return <PublicHome />
 }
 
 /** Bare /e/:slug → that event's public schedule. */
@@ -143,7 +156,7 @@ export default function App() {
         <Route path="/submit/:slug/manage" element={<SubmitterDashboard />} />
         {/* /demo is the one-click demo entrance — always the landing, even when
             already signed in, so re-entering the demo stays possible. */}
-        <Route path="/demo" element={<Home />} />
+        <Route path="/demo" element={<PublicHome />} />
         <Route
           path="/developers"
           element={

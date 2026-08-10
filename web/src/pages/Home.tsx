@@ -2,17 +2,26 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
+  Bot,
+  BrainCircuit,
   CalendarDays,
   Check,
-  ClipboardList,
+  ChevronDown,
+  ClipboardCheck,
   Code2,
+  ContactRound,
   Copy,
   ExternalLink,
+  FileText,
+  Globe2,
   MessagesSquare,
-  Star,
+  Send,
+  UserRoundCheck,
   Users,
+  Workflow,
 } from 'lucide-react'
 
+import agendaScreenshot from '../../../docs/images/agenda.jpg'
 import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
 import {
@@ -24,22 +33,50 @@ import {
 import { Button } from '@/ui/button'
 
 export const REPO_URL = 'https://github.com/Brandonmchu/speakerweave'
+const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
 
-const HIGHLIGHTS = [
+const CAPABILITIES = [
   {
-    icon: ClipboardList,
-    title: 'Review submissions',
-    body: 'Triage the CFP inbox — accept, decline, and dig into every proposal.',
+    icon: FileText,
+    title: 'Call for Papers',
+    body: 'Smart forms with conditional logic for every submission path.',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: ClipboardCheck,
+    title: 'Review',
+    body: 'Committees, blind rounds, scorecards, and practical AI triage.',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: Send,
+    title: 'Decisions',
+    body: 'One click sends emails and kicks off speaker onboarding.',
+    span: 'lg:col-span-3',
+  },
+  {
+    icon: UserRoundCheck,
+    title: 'Speaker Portal',
+    body: 'Bios, headshots, versioned content, and approvals in one place.',
+    span: 'lg:col-span-3',
   },
   {
     icon: CalendarDays,
-    title: 'Build the agenda',
-    body: 'Schedule sessions across rooms and tracks, conflicts flagged in real time.',
+    title: 'Agenda Builder',
+    body: 'Drag-and-drop planning, live conflict checks, and auto-place.',
+    span: 'lg:col-span-4',
   },
   {
-    icon: Star,
-    title: 'Score & onboard speakers',
-    body: 'Run the evaluation plan, then walk accepted speakers through their tasks.',
+    icon: Globe2,
+    title: 'Publish',
+    body: 'Public schedule, speaker gallery, embeds, and iCal feeds.',
+    span: 'lg:col-span-4',
+  },
+  {
+    icon: ContactRound,
+    title: 'Speaker CRM',
+    body: 'A cross-event directory with sourcing pipeline and segments.',
+    span: 'lg:col-span-4',
   },
 ]
 
@@ -49,16 +86,16 @@ const EXPLORE = [
   { icon: CalendarDays, label: 'Schedule', to: featuredScheduleUrl },
   { icon: Users, label: 'Speakers', to: featuredSpeakersUrl },
   { icon: MessagesSquare, label: 'Call for Speakers', to: CFP_FORM_URL },
-  { icon: Code2, label: 'Developers / API', to: DEVELOPERS_URL },
+  { icon: Code2, label: 'Developers', to: DEVELOPERS_URL },
 ]
 
 const STACK = [
-  { name: 'FastAPI', role: 'typed API and hosted MCP server' },
-  { name: 'React + Vite', role: 'fast, focused web interface' },
-  { name: 'Supabase (Postgres)', role: 'durable program data' },
-  { name: 'Clerk', role: 'organizer authentication' },
-  { name: 'Resend', role: 'transactional speaker email' },
-  { name: 'Railway', role: 'application hosting' },
+  { name: 'FastAPI', role: 'Typed API + hosted MCP' },
+  { name: 'React + Vite', role: 'Fast web interface' },
+  { name: 'Supabase (Postgres)', role: 'Program data' },
+  { name: 'Clerk', role: 'Organizer auth' },
+  { name: 'Resend', role: 'Transactional email' },
+  { name: 'Railway', role: 'Application hosting' },
 ]
 
 function CopyConfigButton({ value, label }: { value: string; label: string }) {
@@ -68,7 +105,7 @@ function CopyConfigButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       aria-label={label}
-      className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/15 active:scale-[0.98]"
+      className="inline-flex items-center gap-1.5 rounded-md border border-background/20 bg-background/10 px-2.5 py-1.5 text-xs font-medium text-background transition-[background-color,transform] hover:bg-background/15 active:scale-[0.98]"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(value)
@@ -87,23 +124,19 @@ function CopyConfigButton({ value, label }: { value: string; label: string }) {
 /**
  * Public marketing landing (routes: `/` when unauthenticated, and `/demo`).
  *
- * Two jobs:
- *  1. Get an organizer (or an eval agent) into the app in one click. Every
- *     primary CTA fetches a short-lived demo token, stores it via setToken(),
- *     and drops straight into the workspace — no Clerk sign-up required.
- *  2. Expose the public conference pages (schedule, speakers, CFP, API docs) as
- *     real, crawlable <a> links so they're discoverable without a guessed slug.
- *
- * Real organizers can still head to /sign-in for their own Clerk account.
+ * The primary CTA gets organizers into a seeded workspace with a short-lived
+ * demo token. Public program links remain real anchors for people, crawlers,
+ * and browser agents, while real organizers can still use Clerk at /sign-in.
  */
 export function Home() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mcpEndpoint = `${window.location.origin}/mcp`
-  const aiApps = [
+  const mcpClients = [
     {
-      title: 'Add to Claude',
+      title: 'Claude (MCP)',
+      summary: 'Connect Claude',
       steps: [
         `In claude.ai or Claude for Work, add a custom connector with URL ${mcpEndpoint}.`,
         'Authorize when prompted with an API token from Settings.',
@@ -124,7 +157,8 @@ export function Home() {
       ),
     },
     {
-      title: 'Add to ChatGPT',
+      title: 'ChatGPT (MCP)',
+      summary: 'Connect ChatGPT',
       steps: [
         `In ChatGPT, add a custom connector with URL ${mcpEndpoint}.`,
         'Authorize when prompted with an API token from Settings.',
@@ -139,6 +173,21 @@ export function Home() {
         null,
         2,
       ),
+    },
+  ]
+
+  const aiSurfaces = [
+    {
+      icon: BrainCircuit,
+      title: 'In-app Ask assistant',
+      body: 'Query the program, take guarded actions, and stay in the organizer workspace.',
+      eyebrow: 'Built in',
+    },
+    {
+      icon: MessagesSquare,
+      title: 'Slack bot',
+      body: 'Bring the same program context and tools into the channel where the team works.',
+      eyebrow: 'Team surface',
     },
   ]
 
@@ -157,280 +206,433 @@ export function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* ── top nav ──────────────────────────────────────────────────────── */}
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4 sm:px-6">
-          <Link to="/" className="flex items-center gap-2" aria-label="dais home">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
+    <div className="min-h-screen overflow-hidden bg-background text-foreground">
+      <a
+        href="#main-content"
+        className="fixed left-4 top-3 z-50 -translate-y-20 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-raised transition-transform focus:translate-y-0"
+      >
+        Skip to content
+      </a>
+
+      <header className="relative z-20 border-b border-border/80 bg-background/90 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-5 sm:px-8">
+          <Link to="/" className="flex items-center gap-2.5" aria-label="dais home">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-soft">
               d
-            </div>
+            </span>
             <span className="text-lg font-semibold tracking-tight text-foreground">dais</span>
           </Link>
 
-          <nav className="ml-auto hidden items-center gap-1 sm:flex">
-            <Link
-              to={featuredScheduleUrl}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Schedule
-            </Link>
-            <Link
-              to={featuredSpeakersUrl}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Speakers
-            </Link>
-            <Link
-              to={CFP_FORM_URL}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Call for Speakers
-            </Link>
-            <Link
-              to={DEVELOPERS_URL}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Developers
-            </Link>
+          <nav aria-label="Public program" className="ml-auto hidden items-center gap-1 md:flex">
+            {EXPLORE.map(({ label, to }) => (
+              <Link
+                key={label}
+                to={to}
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                {label}
+              </Link>
+            ))}
           </nav>
 
           <Link
             to="/speaker-signin"
-            className="ml-auto rounded-md px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-subtle sm:ml-2"
+            className="ml-auto rounded-md px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-subtle hover:text-primary-strong md:ml-2"
           >
             Speaker sign in
           </Link>
         </div>
       </header>
 
-      {/* ── hero ─────────────────────────────────────────────────────────── */}
-      <main className="mx-auto max-w-5xl px-4 pb-20 sm:px-6">
-        <section className="flex flex-col items-center pt-16 text-center sm:pt-24">
-          <span className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-            Open-source conference speaker management
-          </span>
+      <main id="main-content">
+        <section className="relative">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -left-1/4 -top-1/3 h-[48rem] w-[58rem] rounded-full bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.20),transparent_66%)] blur-3xl"
+          />
+          <div className="relative mx-auto grid max-w-7xl gap-12 px-5 pb-16 pt-14 sm:px-8 sm:pb-20 sm:pt-20 lg:grid-cols-[0.82fr_1.18fr] lg:items-center lg:gap-14 lg:pb-24 lg:pt-24">
+            <div className="max-w-2xl">
+              <p className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-subtle px-3 py-1 text-xs font-semibold text-primary-strong">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                Open-source conference operations
+              </p>
+              <h1 className="mt-6 text-balance text-4xl font-semibold leading-[1.04] tracking-[-0.045em] text-foreground sm:text-5xl lg:text-[3.55rem]">
+                Run your conference program, end to end.
+              </h1>
+              <p className="mt-6 max-w-[62ch] text-pretty text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+                From call for papers to a published, staffed, scheduled agenda - submissions,
+                reviews, speaker onboarding, content, and scheduling in one open-source workspace.
+              </p>
 
-          <h1 className="mt-6 max-w-2xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Run your conference program, end to end
-          </h1>
-          <p className="mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
-            From call for papers to a scheduled, onboarded program — dais handles submissions,
-            reviews, the agenda, and speaker comms in one workspace.
-          </p>
-
-          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
-            <Button size="lg" onClick={enterDemo} disabled={loading}>
-              {loading ? 'Starting the demo…' : 'Enter the demo workspace'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </Button>
-            <div className="flex items-center gap-3">
-              <Button size="lg" variant="secondary" onClick={enterDemo} disabled={loading}>
-                Get started
-              </Button>
-              <button
-                type="button"
-                onClick={enterDemo}
-                disabled={loading}
-                className="text-sm font-medium text-primary underline underline-offset-4 hover:text-primary-strong disabled:opacity-50"
-              >
-                Organizer dashboard
-              </button>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            No sign-up — jump into a fully seeded workspace.
-          </p>
-          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-        </section>
-
-        {/* ── what you can do ────────────────────────────────────────────── */}
-        <section className="mt-16 grid gap-4 sm:grid-cols-3">
-          {HIGHLIGHTS.map(({ icon: Icon, title, body }) => (
-            <div
-              key={title}
-              className="rounded-xl border border-border bg-card p-5 text-left shadow-soft"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-                <Icon className="h-[18px] w-[18px]" />
+              <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+                <Button
+                  size="lg"
+                  onClick={enterDemo}
+                  disabled={loading}
+                  className="h-12 px-6 shadow-[0_10px_28px_-10px_hsl(var(--primary)/0.65)]"
+                >
+                  {loading ? 'Starting the demo…' : 'Enter the demo workspace'}
+                  {!loading && <ArrowRight className="h-4 w-4" />}
+                </Button>
+                <Link
+                  to={featuredScheduleUrl}
+                  className="group inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
+                >
+                  View the public program
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </Link>
               </div>
-              <h2 className="mt-3 text-sm font-semibold text-foreground">{title}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+              <p className="mt-3 text-xs text-muted-foreground">
+                No sign-up. Jump into a fully seeded workspace.
+              </p>
+              {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
             </div>
-          ))}
+
+            <figure className="relative lg:translate-x-3">
+              <div
+                aria-hidden="true"
+                className="absolute -inset-4 rounded-[2rem] bg-primary/10 blur-2xl"
+              />
+              <div className="relative overflow-hidden rounded-[1.15rem] border border-border/90 bg-card p-1.5 shadow-lifted lg:[transform:perspective(1200px)_rotateY(-1.5deg)_rotateX(0.5deg)]">
+                <div className="overflow-hidden rounded-xl border border-border bg-card">
+                  <div className="flex h-10 items-center gap-3 border-b border-border bg-muted/70 px-3">
+                    <div className="flex gap-1.5" aria-hidden="true">
+                      <span className="h-2.5 w-2.5 rounded-full bg-destructive/75" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-warning/80" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-success/75" />
+                    </div>
+                    <div className="mx-auto flex h-6 w-[55%] items-center justify-center rounded-md border border-border bg-background/80 px-3 font-mono text-[10px] text-muted-foreground shadow-soft">
+                      speakerweave.com
+                    </div>
+                    <div className="w-12" aria-hidden="true" />
+                  </div>
+                  <img
+                    src={agendaScreenshot}
+                    alt="SpeakerWeave agenda builder showing a multi-track conference schedule"
+                    className="block h-auto w-full bg-card"
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                  />
+                </div>
+              </div>
+              <figcaption className="sr-only">
+                The SpeakerWeave drag-and-drop agenda builder.
+              </figcaption>
+            </figure>
+          </div>
         </section>
 
-        {/* ── public program links (crawlable) ───────────────────────────── */}
-        <section className="mt-16">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Explore the AI Builders Summit
-          </h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {EXPLORE.map(({ icon: Icon, label, to }) => (
-              <Link
-                key={label}
-                to={to}
-                className="group flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-soft transition-shadow hover:shadow-raised"
+        <section aria-label="Project credibility" className="border-y border-border bg-card/55">
+          <ul className="mx-auto grid max-w-7xl divide-y divide-border px-5 sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:px-8 lg:grid-cols-4">
+            <li className="py-4 text-sm font-medium text-foreground sm:pr-6">
+              <a
+                href={REPO_URL}
+                className="inline-flex items-center gap-1.5 transition-colors hover:text-primary"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-                  <Icon className="h-[18px] w-[18px]" />
+                Open source - MIT
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </li>
+            <li className="py-4 text-sm text-muted-foreground sm:px-6">
+              <span className="font-medium tabular-nums text-foreground">982 backend</span> +{' '}
+              <span className="font-medium tabular-nums text-foreground">603 frontend</span> tests
+            </li>
+            <li className="py-4 text-sm text-muted-foreground sm:px-6">
+              Built end-to-end by AI coding agents
+            </li>
+            <li className="py-4 text-sm text-muted-foreground sm:pl-6">
+              REST API + MCP + webhooks-ready
+            </li>
+          </ul>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-5 pb-10 pt-20 sm:px-8 sm:pt-28">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+              The whole program lifecycle
+            </p>
+            <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+              From first proposal to final room assignment.
+            </h2>
+            <p className="mt-4 max-w-[62ch] text-pretty text-base leading-7 text-muted-foreground">
+              One operating system for program teams, review committees, speakers, and attendees.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
+            {CAPABILITIES.map(({ icon: Icon, title, body, span }) => (
+              <article
+                key={title}
+                className={`group rounded-xl border border-border bg-card p-5 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-raised ${span}`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                    <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                  </span>
+                  <h3 className="text-sm font-semibold text-foreground">{title}</h3>
                 </div>
-                <span className="text-sm font-medium text-foreground">{label}</span>
-                <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-              </Link>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">{body}</p>
+              </article>
             ))}
           </div>
         </section>
 
-        {/* ── open source ───────────────────────────────────────────────── */}
-        <section
-          data-testid="open-source-section"
-          className="mt-20 grid gap-6 border-y border-border py-10 sm:grid-cols-[1fr_1.45fr] sm:items-start"
-        >
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+        <section className="mx-auto max-w-7xl px-5 pb-20 pt-12 sm:px-8 sm:pb-28">
+          <div className="flex flex-col gap-5 border-y border-border py-7 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Live public example
+              </p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
+                Explore the AI Builders Summit
+              </h2>
+            </div>
+            <nav
+              aria-label="Explore the AI Builders Summit"
+              className="grid gap-2 sm:grid-cols-2 lg:flex"
+            >
+              {EXPLORE.map(({ icon: Icon, label, to }) => (
+                <Link
+                  key={label}
+                  to={to}
+                  className="group inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-primary"
+                >
+                  <Icon className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" />
+                  {label}
+                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              ))}
+            </nav>
+          </div>
+        </section>
+
+        <section data-testid="ai-apps-section" className="relative border-y border-border bg-card">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(ellipse_at_top,hsl(var(--primary)/0.14),transparent_68%)]"
+          />
+          <div className="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
+            <div className="mx-auto max-w-3xl text-center">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary-subtle text-primary shadow-soft">
+                <Workflow className="h-5 w-5" strokeWidth={1.8} />
+              </div>
+              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+                One brain, four surfaces
+              </p>
+              <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                Your program context travels with you.
+              </h2>
+              <p className="mx-auto mt-4 max-w-[68ch] text-pretty text-base leading-7 text-muted-foreground">
+                The in-app assistant, Slack bot, Claude, and ChatGPT all dispatch through the same
+                organization-scoped tool layer. Permissions and program data stay consistent,
+                whichever surface your team chooses.
+              </p>
+            </div>
+
+            <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {aiSurfaces.map(({ icon: Icon, title, body, eyebrow }) => (
+                <article key={title} className="rounded-xl border border-border bg-background p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                      <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                    </span>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      {eyebrow}
+                    </span>
+                  </div>
+                  <h3 className="mt-6 text-base font-semibold text-foreground">{title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+                </article>
+              ))}
+
+              {mcpClients.map(({ title, summary, steps, config }) => {
+                const Icon = title.startsWith('Claude') ? Bot : BrainCircuit
+                return (
+                  <article
+                    key={title}
+                    className="flex flex-col rounded-xl border border-border bg-background p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                        <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                      </span>
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        MCP client
+                      </span>
+                    </div>
+                    <h3 className="mt-6 text-base font-semibold text-foreground">{title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      Connect to <span className="font-mono text-xs text-foreground">{mcpEndpoint}</span>{' '}
+                      and use SpeakerWeave from this client.
+                    </p>
+
+                    <details className="group mt-5 border-t border-border pt-4">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-primary marker:hidden">
+                        {summary}
+                        <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="mt-4">
+                        <ol className="space-y-2 text-sm leading-5 text-muted-foreground">
+                          {steps.map((step, index) => (
+                            <li key={step} className="flex gap-2.5">
+                              <span className="font-mono text-xs font-semibold text-primary">
+                                {index + 1}.
+                              </span>
+                              <span>{step}</span>
+                            </li>
+                          ))}
+                        </ol>
+                        <div className="relative mt-4 overflow-hidden rounded-lg bg-foreground">
+                          <div className="flex items-center justify-between border-b border-background/15 px-3 py-2">
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-background/60">
+                              Power-user MCP config
+                            </span>
+                            <CopyConfigButton
+                              value={config}
+                              label={`Copy ${title.replace(' (MCP)', '')} MCP configuration`}
+                            />
+                          </div>
+                          <pre className="overflow-x-auto p-3 font-mono text-[11px] leading-relaxed text-background/80">
+                            <code>{config}</code>
+                          </pre>
+                        </div>
+                      </div>
+                    </details>
+                  </article>
+                )
+              })}
+            </div>
+
+            <div className="mt-8 text-center">
+              <Link
+                to="/developers"
+                className="group inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
+              >
+                See the full MCP tool list
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <div className="mx-auto grid max-w-7xl gap-6 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-[0.9fr_1.1fr]">
+          <section
+            data-testid="open-source-section"
+            className="rounded-2xl border border-border bg-card p-7 shadow-soft sm:p-9"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
               Community built
             </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground">
               Open source
             </h2>
-          </div>
-          <div>
-            <p className="text-base leading-relaxed text-foreground">
+            <p className="mt-5 text-base leading-7 text-foreground">
               SpeakerWeave is open source, so organizers and builders can inspect it, extend it,
               and help shape what comes next.
             </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              License posture: source-available for the community.
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              MIT licensed from end to end. Fork it, self-host it, or contribute upstream.
             </p>
             <a
               href={REPO_URL}
               aria-label="SpeakerWeave source repository"
-              className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
+              className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
             >
               View the repository
               <ExternalLink className="h-4 w-4" />
             </a>
-          </div>
-        </section>
+          </section>
 
-        {/* ── stack ─────────────────────────────────────────────────────── */}
-        <section data-testid="stack-section" className="mt-20">
-          <div className="grid gap-4 sm:grid-cols-[1fr_2fr] sm:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
-                Architecture
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                The stack
-              </h2>
-            </div>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              A compact, production-ready foundation with explicit boundaries between the product
-              and its infrastructure.
-            </p>
-          </div>
-
-          <dl className="mt-6 grid border-y border-border sm:grid-cols-2">
-            {STACK.map(({ name, role }, index) => (
-              <div
-                key={name}
-                className={`grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 border-border px-1 py-3.5 sm:py-4 ${
-                  index > 0 ? 'border-t' : ''
-                } ${index === 1 ? 'sm:border-t-0' : ''} ${
-                  index % 2 === 1 ? 'sm:border-l sm:pl-5' : 'sm:pr-5'
-                }`}
-              >
-                <dt className="text-sm font-semibold text-foreground">{name}</dt>
-                <dd className="text-sm text-muted-foreground">{role}</dd>
+          <section
+            data-testid="stack-section"
+            className="rounded-2xl border border-border bg-card p-7 shadow-soft sm:p-9"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                  Bring your own
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold tracking-tight text-foreground">
+                  The stack
+                </h2>
               </div>
-            ))}
-          </dl>
-
-          <div className="mt-5 rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-muted-foreground">
-            <span className="font-semibold text-foreground">Bring your own.</span> Auth (Clerk),
-            email (Resend), and hosting meet the app at clear interfaces—swap them without touching
-            the domain core.
-          </div>
-        </section>
-
-        {/* ── MCP clients ───────────────────────────────────────────────── */}
-        <section data-testid="ai-apps-section" className="mt-20">
-          <div className="grid gap-4 sm:grid-cols-[1fr_2fr] sm:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">AI apps</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                Use it from your AI
-              </h2>
-            </div>
-            <div className="max-w-2xl space-y-2 text-sm leading-relaxed text-muted-foreground">
-              <p>
-                SpeakerWeave ships a hosted MCP server at{' '}
-                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
-                  {mcpEndpoint}
-                </code>
-                . Claude and ChatGPT use the same endpoint.
-              </p>
-              <p>
-                Ask SpeakerWeave in the organizer app, the Slack bot, and MCP all share the same
-                organization-scoped tool layer.
+              <p className="max-w-xs text-sm leading-6 text-muted-foreground">
+                Clear interfaces make the infrastructure swappable.
               </p>
             </div>
-          </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {aiApps.map(({ title, steps, config }) => (
-              <article key={title} className="rounded-xl border border-border bg-card p-5 shadow-soft">
-                <h3 className="text-base font-semibold text-foreground">{title}</h3>
-                <ol className="mt-3 space-y-1.5 text-sm text-muted-foreground">
-                  {steps.map((step, index) => (
-                    <li key={step} className="flex gap-2.5">
-                      <span className="font-mono text-xs font-semibold text-primary">{index + 1}.</span>
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ol>
-                <div className="relative mt-5 overflow-hidden rounded-lg bg-foreground">
-                  <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-                    <span className="font-mono text-[11px] uppercase tracking-wider text-white/60">
-                      Power-user MCP config
-                    </span>
-                    <CopyConfigButton value={config} label={`Copy ${title} MCP configuration`} />
-                  </div>
-                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-primary-subtle">
-                    <code>{config}</code>
-                  </pre>
+            <dl className="mt-6 grid overflow-hidden rounded-xl border border-border sm:grid-cols-2">
+              {STACK.map(({ name, role }, index) => (
+                <div
+                  key={name}
+                  className={`bg-background px-4 py-3.5 ${index > 0 ? 'border-t border-border' : ''} ${index === 1 ? 'sm:border-t-0' : ''} ${index % 2 === 1 ? 'sm:border-l sm:border-border' : ''}`}
+                >
+                  <dt className="text-sm font-semibold text-foreground">{name}</dt>
+                  <dd className="mt-0.5 text-xs text-muted-foreground">{role}</dd>
                 </div>
-              </article>
-            ))}
+              ))}
+            </dl>
+            <p className="mt-4 text-sm leading-6 text-muted-foreground">
+              Swap auth, email, hosting, or data providers without touching the domain core.
+            </p>
+          </section>
+        </div>
+
+        <section className="mx-auto max-w-7xl px-5 pb-20 sm:px-8 sm:pb-28">
+          <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-primary-subtle px-6 py-10 text-center sm:px-10 sm:py-12">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.16),transparent_45%)]"
+            />
+            <div className="relative">
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                Running your own conference?
+              </h2>
+              <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+                Organizers with an account can sign in to manage their events, review teams, and
+                speaker program.
+              </p>
+              <Button asChild variant="secondary" size="lg" className="mt-6">
+                <Link to="/sign-in">
+                  Sign in with your account
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
           </div>
-
-          <Link
-            to="/developers"
-            className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary-strong"
-          >
-            See the full MCP tool list
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </section>
-
-        {/* ── real-account sign in ───────────────────────────────────────── */}
-        <section className="mt-16 rounded-xl border border-border bg-card p-6 text-center shadow-soft">
-          <h2 className="text-base font-semibold text-foreground">
-            Running your own conference?
-          </h2>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Organizers with an account can sign in to manage their own event.
-          </p>
-          <Link
-            to="/sign-in"
-            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-4 hover:text-primary-strong"
-          >
-            Sign in with your account
-            <ArrowRight className="h-4 w-4" />
-          </Link>
         </section>
       </main>
+
+      <footer className="border-t border-border bg-card/60">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-8 sm:px-8 md:flex-row md:items-center">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
+              d
+            </span>
+            <span className="text-sm font-semibold text-foreground">dais by SpeakerWeave</span>
+          </div>
+          <nav
+            aria-label="Footer"
+            className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground md:ml-auto"
+          >
+            {EXPLORE.map(({ label, to }) => (
+              <Link key={label} to={to} className="transition-colors hover:text-foreground">
+                {label}
+              </Link>
+            ))}
+            <Link to="/speaker-signin" className="transition-colors hover:text-foreground">
+              Speaker sign in
+            </Link>
+            <a href={LICENSE_URL} className="transition-colors hover:text-foreground">
+              License
+            </a>
+            <a href={REPO_URL} className="transition-colors hover:text-foreground">
+              GitHub
+            </a>
+          </nav>
+        </div>
+      </footer>
     </div>
   )
 }
