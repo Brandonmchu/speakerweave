@@ -1,9 +1,9 @@
 """Hosted Model Context Protocol surface for conference integrations.
 
-The MCP server is mounted by :mod:`main` at ``/mcp``.  Its HTTP boundary
-accepts the same raw organization API tokens as ``/v1`` (using the standard
-Bearer header expected by MCP clients), resolves the organization once, then
-passes only that trusted organization id to tools and resources.
+The MCP server is mounted by :mod:`main` at ``/mcp``. Its HTTP boundary accepts
+either the same raw organization API tokens as ``/v1`` or OAuth access tokens
+issued by this app, resolves the organization once, then passes only that
+trusted organization id to tools and resources.
 """
 
 from __future__ import annotations
@@ -16,12 +16,14 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.datastructures import Headers
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.settings import settings
 from services import integration_api
 from services.api_keys import resolve_api_key
+from services.oauth import public_origin, resolve_access_token
 
 _ORG_HEADER = b"x-dais-resolved-org"
 
@@ -38,7 +40,7 @@ mcp_server = MCPServer(
 
 
 class ApiTokenAuthMiddleware:
-    """Resolve a Bearer API token and inject a trusted org header downstream."""
+    """Resolve an API/OAuth Bearer token and inject a trusted org downstream."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -52,12 +54,26 @@ class ApiTokenAuthMiddleware:
         scheme, _, raw_token = authorization.partition(" ")
         resolved = None
         if scheme.casefold() == "bearer" and raw_token:
-            resolved = await resolve_api_key(raw_token.strip())
+            token = raw_token.strip()
+            # Keep the established organization API-token path first and
+            # unchanged; connector UIs use the OAuth lookup alongside it.
+            resolved = await resolve_api_key(token)
+            if not resolved:
+                oauth_org_id = await resolve_access_token(token)
+                if oauth_org_id:
+                    resolved = (oauth_org_id, [])
         if not resolved:
+            metadata_url = (
+                f'{public_origin(Request(scope))}/.well-known/oauth-protected-resource'
+            )
             response = JSONResponse(
                 {"detail": "Missing or invalid API token"},
                 status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer resource_metadata="{metadata_url}"'
+                    )
+                },
             )
             await response(scope, receive, send)
             return

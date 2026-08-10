@@ -123,4 +123,9 @@ def test_mcp_rejects_bad_bearer_token(client, mcp_db):
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing or invalid API token"}
-    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["www-authenticate"].startswith(
+        'Bearer resource_metadata="'
+    )
+    assert response.headers["www-authenticate"].endswith(
+        '/.well-known/oauth-protected-resource"'
+    )

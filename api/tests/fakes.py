@@ -39,6 +39,7 @@ PATCH_TARGET_MODULES = (
     "services.integration_api",
     "services.magic_links",
     "services.onboarding",
+    "services.oauth",
     "services.org_scope",
     "services.portal",
     "services.session_revisions",

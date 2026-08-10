@@ -21,6 +21,7 @@ from routes.form_admin_routes import router as form_admin_router
 from routes.health_routes import router as health_router
 from routes.ics_routes import router as ics_router
 from routes.integration_routes import router as integration_router
+from routes.oauth_routes import router as oauth_router
 from routes.portal_admin_routes import router as portal_admin_router
 from routes.portal_routes import router as portal_router
 from routes.portal_session_routes import router as portal_session_router
@@ -113,6 +114,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(oauth_router)
 app.include_router(public_router)
 app.include_router(demo_router)
 app.include_router(program_router)

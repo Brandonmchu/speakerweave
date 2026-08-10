@@ -226,11 +226,19 @@ function McpServer({ endpoint, config }: { endpoint: string; config: string }) {
   return (
     <section id="mcp-server" className="scroll-mt-24 space-y-5">
       <SectionHeading icon={<Bot className="h-4 w-4" />} title="MCP server" />
+      <div className="rounded-xl border border-primary/20 bg-primary-subtle/60 p-5">
+        <p className="text-sm font-semibold text-primary">Connector UI (recommended)</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          In claude.ai, Claude for Work, or ChatGPT, add a custom connector with URL{' '}
+          <Mono>{endpoint}</Mono>. You&rsquo;ll be asked to authorize with an API token from{' '}
+          <span className="font-medium text-foreground">Settings → API tokens</span>. No custom
+          headers are needed.
+        </p>
+      </div>
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Connect Claude or another Streamable-HTTP MCP client to <Mono>{endpoint}</Mono>. MCP uses the
-        same organization API token as REST, supplied as a standard{' '}
-        <Mono>Authorization: Bearer …</Mono> header. Add this entry to your client&rsquo;s MCP JSON
-        configuration:
+        Power-user path: Streamable-HTTP clients that support custom headers can use the same
+        organization API token as REST, supplied as{' '}
+        <Mono>Authorization: Bearer …</Mono>. Add this entry to your client&rsquo;s MCP JSON configuration:
       </p>
       <CodeBlock code={config} />
       <div className="rounded-xl border border-border bg-card p-5 shadow-soft">

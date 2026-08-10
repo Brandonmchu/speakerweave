@@ -105,9 +105,9 @@ export function Home() {
     {
       title: 'Add to Claude',
       steps: [
-        'Create an API token in Settings.',
-        'Add this remote server to your Claude MCP configuration.',
-        'Restart Claude and ask it to list your events.',
+        `In claude.ai or Claude for Work, add a custom connector with URL ${mcpEndpoint}.`,
+        'Authorize when prompted with an API token from Settings.',
+        'For clients that support custom headers, use the power-user JSON below.',
       ],
       config: JSON.stringify(
         {
@@ -126,9 +126,9 @@ export function Home() {
     {
       title: 'Add to ChatGPT',
       steps: [
-        'Create an API token in Settings.',
-        'Add a custom MCP connector with the URL and header below.',
-        'Enable it in a chat and work with your conference.',
+        `In ChatGPT, add a custom connector with URL ${mcpEndpoint}.`,
+        'Authorize when prompted with an API token from Settings.',
+        'For clients that support custom headers, use the power-user JSON below.',
       ],
       config: JSON.stringify(
         {
@@ -387,7 +387,7 @@ export function Home() {
                 <div className="relative mt-5 overflow-hidden rounded-lg bg-foreground">
                   <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
                     <span className="font-mono text-[11px] uppercase tracking-wider text-white/60">
-                      MCP config
+                      Power-user MCP config
                     </span>
                     <CopyConfigButton value={config} label={`Copy ${title} MCP configuration`} />
                   </div>

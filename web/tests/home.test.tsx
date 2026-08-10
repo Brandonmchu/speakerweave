@@ -110,6 +110,9 @@ describe('Home landing', () => {
     expect(within(aiApps).getByRole('heading', { name: 'Add to Claude' })).toBeInTheDocument()
     expect(within(aiApps).getByRole('heading', { name: 'Add to ChatGPT' })).toBeInTheDocument()
     expect(aiApps).toHaveTextContent(`${window.location.origin}/mcp`)
+    expect(aiApps).toHaveTextContent('claude.ai or Claude for Work')
+    expect(aiApps).toHaveTextContent('Authorize when prompted with an API token from Settings')
+    expect(aiApps).toHaveTextContent('Power-user MCP config')
     expect(within(aiApps).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
       '/developers',
