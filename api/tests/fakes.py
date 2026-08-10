@@ -31,6 +31,7 @@ PATCH_TARGET_MODULES = (
     "routes.schedule_routes",
     "routes.taxonomy_routes",
     "services.api_keys",
+    "services.airtable_sync",
     "services.content_pipeline",
     "services.crm",
     "services.evaluations",

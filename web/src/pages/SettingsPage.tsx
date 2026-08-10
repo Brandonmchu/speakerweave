@@ -46,9 +46,19 @@ import {
   timezoneOptions,
   toDateInput,
 } from '@/lib/eventDateTime'
+import {
+  getAirtableConfig,
+  getSlackStatus,
+  saveAirtableConfig,
+  SLACK_MANIFEST,
+  syncAirtable,
+  type AirtableConfig,
+  type AirtableSyncResult,
+} from '@/lib/integrationsApi'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
 import { Button } from '@/ui/button'
+import { Badge } from '@/ui/badge'
 import { Checkbox } from '@/ui/checkbox'
 import {
   Dialog,
@@ -182,10 +192,277 @@ export function SettingsPage() {
             title="Tags"
             description="Free-form labels for filtering and reporting."
           />
+          <AirtableSyncCard />
+          <SlackBotCard />
           <ApiTokensSection />
         </div>
       )}
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Integrations                                                               */
+/* -------------------------------------------------------------------------- */
+
+interface AirtableDraft {
+  token: string
+  base_id: string
+  enabled: boolean
+}
+
+function airtableDraft(config?: AirtableConfig): AirtableDraft {
+  return {
+    token: '',
+    base_id: config?.base_id ?? '',
+    enabled: Boolean(config?.enabled),
+  }
+}
+
+function readableSyncTime(value: string | null | undefined): string {
+  if (!value) return 'Never synced'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function AirtableSyncCard() {
+  const queryClient = useQueryClient()
+  const queryKey = ['integrations', 'airtable'] as const
+  const query = useQuery({ queryKey, queryFn: getAirtableConfig })
+  const [draft, setDraft] = useState<AirtableDraft>(() => airtableDraft())
+  const [baseline, setBaseline] = useState(() => JSON.stringify(airtableDraft()))
+  const [result, setResult] = useState<AirtableSyncResult | null>(null)
+
+  useEffect(() => {
+    if (!query.data) return
+    const next = airtableDraft(query.data)
+    setDraft(next)
+    setBaseline(JSON.stringify(next))
+  }, [query.data])
+
+  const dirty = JSON.stringify(draft) !== baseline
+  const save = useMutation({
+    mutationFn: () =>
+      saveAirtableConfig({
+        ...(draft.token.trim() ? { token: draft.token.trim() } : {}),
+        base_id: draft.base_id.trim(),
+        enabled: draft.enabled,
+      }),
+    onSuccess: (config) => {
+      queryClient.setQueryData(queryKey, config)
+      const next = airtableDraft(config)
+      setDraft(next)
+      setBaseline(JSON.stringify(next))
+      toast({ title: 'Airtable settings saved' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't save Airtable settings", description: error.message }),
+  })
+  const sync = useMutation({
+    mutationFn: syncAirtable,
+    onSuccess: (next) => {
+      setResult(next)
+      queryClient.setQueryData<AirtableConfig | undefined>(queryKey, (current) =>
+        current ? { ...current, last_synced_at: next.last_synced_at } : current
+      )
+    },
+  })
+
+  const configured = Boolean(query.data?.configured)
+  const canSync = configured && Boolean(query.data?.enabled) && !dirty && !save.isPending
+  const syncError = sync.error instanceof Error ? sync.error.message : null
+
+  return (
+    <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="airtable-card">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">Airtable sync</h2>
+            {query.isPending ? (
+              <Badge variant="muted">Checking</Badge>
+            ) : configured ? (
+              <Badge variant="success">Configured</Badge>
+            ) : (
+              <Badge variant="muted">Not configured</Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Mirror speakers and submissions into an Airtable base owned by your organization.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          disabled={!dirty || save.isPending || query.isPending}
+          onClick={() => save.mutate()}
+          data-testid="save-airtable"
+        >
+          {save.isPending ? 'Saving…' : 'Save connection'}
+        </Button>
+      </div>
+
+      <div className="space-y-5 px-5 py-5">
+        {query.error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive-strong">
+            {query.error.message}
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="airtable-token">Personal access token</Label>
+                <Input
+                  id="airtable-token"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  value={draft.token}
+                  placeholder={query.data?.token_hint ? `Configured (${query.data.token_hint})` : 'pat…'}
+                  onChange={(event) => setDraft({ ...draft, token: event.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">Write-only. Leave blank to keep the current token.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="airtable-base">Base ID</Label>
+                <Input
+                  id="airtable-base"
+                  value={draft.base_id}
+                  placeholder="app…"
+                  spellCheck={false}
+                  onChange={(event) => setDraft({ ...draft, base_id: event.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">Found in the base URL or Airtable API documentation.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-background/50 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Enable Airtable sync"
+                  aria-checked={draft.enabled}
+                  onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
+                  className={cn(
+                    'relative h-6 w-11 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 active:scale-[0.98]',
+                    draft.enabled ? 'border-primary bg-primary' : 'border-input bg-muted'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-0.5 h-4.5 w-4.5 rounded-full bg-card shadow-sm transition-transform',
+                      draft.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    )}
+                  />
+                </button>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Sync enabled</p>
+                  <p className="text-xs text-muted-foreground">No automatic writes run while this is off.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground" data-testid="airtable-last-synced">
+                  {readableSyncTime(query.data?.last_synced_at)}
+                </span>
+                <Button
+                  disabled={!canSync || sync.isPending}
+                  onClick={() => sync.mutate()}
+                  data-testid="sync-airtable"
+                >
+                  {sync.isPending ? 'Syncing…' : 'Sync now'}
+                </Button>
+              </div>
+            </div>
+
+            {result && (
+              <div className="grid gap-3 sm:grid-cols-2" data-testid="airtable-sync-result">
+                {(['Speakers', 'Submissions'] as const).map((table) => (
+                  <div key={table} className="border-l-2 border-success px-3 py-1">
+                    <p className="text-sm font-medium text-foreground">{table}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {result.tables[table].created} created · {result.tables[table].updated} updated
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {syncError && (
+              <pre
+                data-testid="airtable-sync-error"
+                className="whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 font-sans text-sm leading-relaxed text-destructive-strong"
+              >
+                {syncError}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function SlackBotCard() {
+  const status = useQuery({
+    queryKey: ['integrations', 'slack', 'status'],
+    queryFn: getSlackStatus,
+  })
+  const configured = Boolean(status.data?.configured)
+
+  return (
+    <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="slack-card">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-foreground">Slack bot</h2>
+            {status.isPending ? (
+              <Badge variant="muted">Checking environment</Badge>
+            ) : configured ? (
+              <Badge variant="success">Environment configured</Badge>
+            ) : (
+              <Badge variant="warning">Environment incomplete</Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Ask SpeakerWeave about submissions, speakers, schedules, or content from a mention or DM.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5 px-5 py-5">
+        <ol className="space-y-2 pl-5 text-sm leading-relaxed text-foreground marker:font-mono marker:text-muted-foreground">
+          <li className="list-decimal">Create a Slack app from the manifest below.</li>
+          <li className="list-decimal">Install the app to your workspace and copy its bot token.</li>
+          <li className="list-decimal">
+            Set <code className="font-mono text-xs">SLACK_BOT_TOKEN</code>,{' '}
+            <code className="font-mono text-xs">SLACK_SIGNING_SECRET</code>, and{' '}
+            <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the API environment.
+          </li>
+        </ol>
+
+        <div className="flex flex-wrap gap-2" aria-label="Slack environment status">
+          <Badge variant={status.data?.signing_secret_configured ? 'success' : 'muted'}>
+            Signing secret {status.data?.signing_secret_configured ? 'set' : 'missing'}
+          </Badge>
+          <Badge variant={status.data?.bot_token_configured ? 'success' : 'muted'}>
+            Bot token {status.data?.bot_token_configured ? 'set' : 'missing'}
+          </Badge>
+          <Badge variant={status.data?.anthropic_configured ? 'success' : 'muted'}>
+            Anthropic key {status.data?.anthropic_configured ? 'set' : 'missing'}
+          </Badge>
+        </div>
+
+        {status.error && (
+          <p className="text-sm text-destructive-strong">{status.error.message}</p>
+        )}
+
+        <SnippetBlock
+          title="Slack app manifest"
+          hint="Paste this JSON into Slack's Create an app from a manifest flow."
+          snippet={SLACK_MANIFEST}
+          testId="slack-manifest"
+        />
+      </div>
+    </section>
   )
 }
 

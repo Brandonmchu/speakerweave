@@ -29,6 +29,14 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 # dev-mode mailer (.eml outbox, no suppression). Set EMPTY (not pop): dotenv
 # never overrides an existing var, but it would re-add a popped one.
 os.environ["RESEND_API_KEY"] = ""
+# External integration tests opt in with fakes. Blank these before importing
+# the app so a developer's .env can never turn a unit test into a real API call.
+os.environ["AIRTABLE_API_KEY"] = ""
+os.environ["AIRTABLE_BASE_ID"] = ""
+os.environ["SLACK_SIGNING_SECRET"] = ""
+os.environ["SLACK_BOT_TOKEN"] = ""
+os.environ["SLACK_DEFAULT_ORG"] = "org_dev"
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 
 def make_token(

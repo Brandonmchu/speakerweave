@@ -20,6 +20,7 @@ from routes.field_routes import router as field_router
 from routes.form_admin_routes import router as form_admin_router
 from routes.health_routes import router as health_router
 from routes.ics_routes import router as ics_router
+from routes.integration_routes import router as integration_router
 from routes.portal_admin_routes import router as portal_admin_router
 from routes.portal_routes import router as portal_router
 from routes.portal_session_routes import router as portal_session_router
@@ -27,6 +28,7 @@ from routes.program_routes import router as program_router
 from routes.public_routes import router as public_router
 from routes.review_routes import router as review_router
 from routes.schedule_routes import router as schedule_router
+from routes.slack_routes import router as slack_router
 from routes.taxonomy_routes import router as taxonomy_router
 from routes.v1_routes import router as v1_router
 from security.rate_limiting import limiter, rate_limit_exceeded_handler
@@ -130,6 +132,8 @@ app.include_router(comms_router)
 app.include_router(crm_router)
 app.include_router(v1_router)
 app.include_router(api_key_admin_router)
+app.include_router(integration_router)
+app.include_router(slack_router)
 if mcp_app is not None:
     app.mount("/mcp", mcp_app, name="mcp")
 
