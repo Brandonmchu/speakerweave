@@ -331,6 +331,43 @@ describe('PublicSchedule', () => {
     expect(within(cardFor('Vector Databases')).getByText('Talk')).toBeInTheDocument()
   })
 
+  it('expands a card description in place via Show more (EMB-01)', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    const card = cardFor('Opening Keynote')
+    const summary = within(card).getByTestId('session-summary')
+    const toggle = within(card).getByTestId('session-show-more')
+
+    // Collapsed: the blurb is clamped to two lines and the control offers more.
+    expect(summary.className).toContain('line-clamp-2')
+    expect(toggle).toHaveTextContent('Show more')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(toggle)
+
+    // Expanded IN PLACE — the clamp is gone and no detail modal opened.
+    expect(within(card).getByTestId('session-summary').className).not.toContain('line-clamp-2')
+    expect(within(card).getByTestId('session-show-more')).toHaveTextContent('Show less')
+    expect(within(card).getByTestId('session-show-more')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByTestId('session-detail-dialog')).not.toBeInTheDocument()
+
+    // And it collapses again.
+    fireEvent.click(within(card).getByTestId('session-show-more'))
+    expect(within(card).getByTestId('session-summary').className).toContain('line-clamp-2')
+  })
+
+  it('leaves the other cards collapsed when one expands', async () => {
+    renderAt('/e/ai-builders-summit/schedule')
+    await screen.findByText('Opening Keynote')
+
+    fireEvent.click(within(cardFor('Opening Keynote')).getByTestId('session-show-more'))
+
+    expect(
+      within(cardFor('Vector Databases')).getByTestId('session-summary').className
+    ).toContain('line-clamp-2')
+  })
+
   it('shows the format in the session detail modal', async () => {
     renderAt('/e/ai-builders-summit/schedule')
     fireEvent.click(await screen.findByText('Opening Keynote'))

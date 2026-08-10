@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html as html_module
 import logging
+import re
 from datetime import datetime, time, timezone
 from typing import Literal
 
@@ -15,7 +16,7 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field, field_validator
 
 from auth import get_current_user_and_org, verify_org_access
-from services import mailer, speaker_crm
+from services import crm, mailer, speaker_crm
 from services.comms import DEFAULT_TEMPLATES, render_template
 from services.evaluations import session_review_aggregate, session_review_scores
 from services.forms import load_form_layout
@@ -46,6 +47,12 @@ SESSION_STATUSES = (
 
 # events.slot_minutes CHECK (migration 001)
 SLOT_MINUTES = (5, 10, 15, 20, 30, 45, 60)
+
+# What an organizer may type into "Public URL slug": the URL-safe alphabet only,
+# with hyphens as separators rather than edges. Checked here rather than by
+# round-tripping `slugify`, so the error says what is wrong instead of quietly
+# rewriting the organizer's answer into something else.
+SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 # A brand-new event with an empty Formats list cannot accept a submission that
 # names one, so every event starts with the four everybody runs.
@@ -115,6 +122,10 @@ class EventCreateRequest(BaseModel):
 
 class EventPatchRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    #: The public URL slug. Editable (unlike at creation, where it is derived and
+    #: silently de-collided) because it IS the event's public identity: rename the
+    #: event and every /e/{slug} link still says the old name until this changes.
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
     timezone: str | None = Field(default=None, max_length=64)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
@@ -243,9 +254,39 @@ async def update_event(
         if key in provided:
             value = getattr(payload, key)
             patch[key] = value.isoformat() if value else None
+    # The slug is the event's PUBLIC identity, so it is editable — but never
+    # silently rewritten. Unlike creation (where `unique_slug` invents a suffix
+    # to get out of the way), an organizer typing a slug means that exact string:
+    # a collision is answered with a 409 so they can choose, rather than landing
+    # on "ai-summit-x7q2" and wondering why their links look like that.
+    if "slug" in provided:
+        normalized = (payload.slug or "").strip().lower()
+        if not SLUG_PATTERN.fullmatch(normalized):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Slug can only contain lowercase letters, numbers and hyphens, "
+                    "and cannot start or end with a hyphen"
+                ),
+            )
+        if normalized != (existing.get("slug") or ""):
+            taken = first(
+                await db(
+                    lambda: supabase.table("events")
+                    .select("id")
+                    .eq("slug", normalized)
+                    .limit(1)
+                    .execute(),
+                    "event_slug_probe",
+                )
+            )
+            if taken and str(taken.get("id")) != str(event_id):
+                raise HTTPException(
+                    status_code=409, detail="That public URL slug is already taken"
+                )
+            patch["slug"] = normalized
     if not patch:
         raise HTTPException(status_code=400, detail="Nothing to update")
-    # slug stays put: it is the public agenda URL people have already shared.
 
     # The merged range, not just the patched half: moving `ends_at` before an
     # untouched `starts_at` is the easy way to get an impossible event.
@@ -736,6 +777,212 @@ async def update_session(
             logger.exception("session PATCH: onboarding provisioning failed session=%s", session_id)
 
     return {"session": updated}
+
+
+# ── session participants (ABS-11) ──────────────────────────────────────────
+# A co-speaker named at submission time is not the end of the story: people
+# join a talk, drop off it, and swap who leads it, all AFTER the CFP closes.
+# These three endpoints are that, from the drawer the organizer already reads
+# the submission in.
+#
+# The storage encoding is left exactly as the CFP writes it (migration 001,
+# public_routes.create_submission): the submitter is stored TWICE, once as the
+# primary 'speaker' and once as the 'submitter' of record, because consumers
+# that resolve a session's speakers filter role='speaker' first. Adding or
+# removing a co-speaker must never disturb that pair, so everything here works
+# on 'speaker' rows and leaves 'submitter' rows alone.
+
+
+class ParticipantCreateRequest(BaseModel):
+    """Add a co-speaker to an existing submission."""
+
+    email: str = Field(..., min_length=3, max_length=320)
+    name: str = Field(default="", max_length=200)
+    first_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    role: Literal["speaker", "moderator", "chairperson"] = "speaker"
+
+    @field_validator("email")
+    @classmethod
+    def looks_like_email(cls, value: str) -> str:
+        value = value.strip()
+        if "@" not in value or value.startswith("@") or value.endswith("@"):
+            raise ValueError("Enter a valid email address")
+        return value
+
+
+def _split_name(name: str, first_name: str, last_name: str) -> tuple[str, str]:
+    """A single "Marcus Okafor" field, or explicit first/last — accept either."""
+    if first_name.strip() or last_name.strip():
+        return first_name.strip(), last_name.strip()
+    parts = name.strip().split()
+    if not parts:
+        return "", ""
+    return parts[0], " ".join(parts[1:])
+
+
+async def _session_for_participants(session_id: str, org_id: str) -> dict:
+    session = first(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, org_id, event_id, title")
+            .eq("id", session_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "participants_session_lookup",
+        )
+    )
+    return verify_org_access(session, org_id, "Session")
+
+
+async def _participant_rows(session_id: str, org_id: str) -> list[dict]:
+    return rows(
+        await db(
+            lambda: supabase.table("session_participants")
+            .select("id, contact_id, role, is_primary")
+            .eq("session_id", session_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "participants_rows",
+        )
+    )
+
+
+@router.post("/sessions/{session_id}/participants", status_code=201)
+async def add_session_participant(
+    session_id: str,
+    payload: ParticipantCreateRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Add a co-speaker after submission — upsert the contact, link the session.
+
+    Never primary: the talk already has one, and promoting somebody is a
+    separate, deliberate call.
+    """
+    _user_id, org_id = auth
+    session = await _session_for_participants(session_id, org_id)
+    first_name, last_name = _split_name(payload.name, payload.first_name, payload.last_name)
+    contact = await _upsert_submission_contact(
+        org_id, session["event_id"], payload.email, first_name, last_name
+    )
+
+    existing = await _participant_rows(session_id, org_id)
+    if any(
+        row.get("contact_id") == contact["id"] and row.get("role") == payload.role
+        for row in existing
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{contact.get('email')} is already a {payload.role} on this submission",
+        )
+
+    try:
+        await db(
+            lambda: supabase.table("session_participants")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "session_id": session_id,
+                    "contact_id": contact["id"],
+                    "role": payload.role,
+                    "is_primary": False,
+                }
+            )
+            .execute(),
+            "participants_create",
+        )
+    except APIError as exc:
+        # UNIQUE (session_id, contact_id, role) is the real arbiter — the
+        # pre-check above races a concurrent identical add.
+        if getattr(exc, "code", "") == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{contact.get('email')} is already a {payload.role} on this submission",
+            ) from exc
+        raise
+
+    return {"participants": await _load_participants(session_id, org_id)}
+
+
+@router.delete("/sessions/{session_id}/participants/{contact_id}")
+async def remove_session_participant(
+    session_id: str,
+    contact_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Drop a non-primary participant from a submission.
+
+    The primary speaker is refused: removing them would leave the talk with no
+    lead on the public program. Promote somebody else first, then remove.
+    """
+    _user_id, org_id = auth
+    await _session_for_participants(session_id, org_id)
+    existing = await _participant_rows(session_id, org_id)
+    mine = [row for row in existing if row.get("contact_id") == contact_id]
+    if not mine:
+        raise HTTPException(status_code=404, detail="That person is not on this submission")
+    if any(bool(row.get("is_primary")) for row in mine):
+        raise HTTPException(
+            status_code=400,
+            detail="Make someone else the primary speaker before removing this one.",
+        )
+    speakers = [row for row in existing if row.get("role") == "speaker"]
+    if len(speakers) <= 1 and any(row.get("role") == "speaker" for row in mine):
+        raise HTTPException(
+            status_code=400, detail="A submission needs at least one speaker."
+        )
+
+    await db(
+        lambda: supabase.table("session_participants")
+        .delete()
+        .eq("session_id", session_id)
+        .eq("contact_id", contact_id)
+        .eq("org_id", org_id)
+        .execute(),
+        "participants_delete",
+    )
+    return {"participants": await _load_participants(session_id, org_id)}
+
+
+@router.post("/sessions/{session_id}/participants/{contact_id}/primary")
+async def set_primary_participant(
+    session_id: str,
+    contact_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Make one speaker the primary one; everybody else on the session drops it.
+
+    Only a 'speaker' row can lead a talk — a submitter-of-record row is
+    bookkeeping, not a stage credit.
+    """
+    _user_id, org_id = auth
+    await _session_for_participants(session_id, org_id)
+    existing = await _participant_rows(session_id, org_id)
+    target = [
+        row
+        for row in existing
+        if row.get("contact_id") == contact_id and row.get("role") == "speaker"
+    ]
+    if not target:
+        raise HTTPException(
+            status_code=404, detail="That person is not a speaker on this submission"
+        )
+
+    for row in existing:
+        wanted = row["id"] in {entry["id"] for entry in target}
+        if bool(row.get("is_primary")) == wanted:
+            continue
+        await db(
+            lambda row=row, wanted=wanted: supabase.table("session_participants")
+            .update({"is_primary": wanted})
+            .eq("id", row["id"])
+            .eq("session_id", session_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "participants_set_primary",
+        )
+    return {"participants": await _load_participants(session_id, org_id)}
 
 
 _DECISION_STATUSES = {
@@ -1383,15 +1630,20 @@ async def import_speakers(
     """Bulk-add speakers by upserting contacts on ``(event_id, email)``.
 
     One bad row never aborts the batch: it lands in ``errors`` and the rest
-    import. Returns ``{created, updated, skipped, errors, total}`` so the UI can
-    show an honest summary of what a paste/upload did.
+    import. Returns ``{created, updated, skipped, errors, ignored_columns,
+    total}`` so the UI can show an honest summary of what a paste/upload did —
+    including which columns of the file were not understood, so a partly-read
+    sheet never passes for a clean success.
     """
     _user_id, org_id = auth
     await fetch_event(event_id, org_id)
 
     parse_errors: list[dict] = []
+    ignored_columns: list[str] = []
     if payload.csv is not None and payload.csv.strip():
-        parsed, header_error, parse_errors = speaker_crm.parse_speaker_csv(payload.csv)
+        parsed, header_error, parse_errors, ignored_columns = speaker_crm.parse_speaker_csv(
+            payload.csv
+        )
         if header_error:
             raise HTTPException(status_code=400, detail=header_error)
     elif payload.rows:
@@ -1459,12 +1711,17 @@ async def import_speakers(
                 "speaker_import_insert",
             )
             created = len(to_insert)
+            # Mirror each new speaker into the org-level directory. Best-effort
+            # by contract (services/crm.py) — never fails the import.
+            for record in to_insert:
+                await crm.sync_contact(org_id, record)
 
     return {
         "created": created,
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
+        "ignored_columns": ignored_columns,
         "total": len(parsed) + len(parse_errors),
     }
 

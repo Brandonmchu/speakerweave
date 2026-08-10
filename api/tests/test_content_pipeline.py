@@ -64,8 +64,11 @@ def content_db(seeded_db):
     )
     db.seed(
         "tasks",
-        {"id": T_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Upload slides", "required": True, "order": 0},
-        {"id": T_HEADSHOT, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Headshot photo", "required": True, "order": 1},
+        # Due dates are calendar days stored at UTC midnight — the same two the
+        # official eval creates ("Upload Session Presentation" due 2027-05-01,
+        # the headshot due 2027-04-14).
+        {"id": T_SLIDES, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Upload slides", "required": True, "order": 0, "due_at": "2027-05-01T00:00:00+00:00"},
+        {"id": T_HEADSHOT, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Headshot photo", "required": True, "order": 1, "due_at": "2027-04-14T00:00:00+00:00"},
         {"id": T_BIO, "org_id": TEST_ORG_ID, "event_id": TEST_EVENT_ID, "kind": "file_request", "name": "Speaker bio", "required": False, "order": 2},
         # Foreign org's task — must never leak into TEST_ORG's library.
         {"id": T_FOREIGN, "org_id": OTHER_ORG_ID, "event_id": OTHER_EVENT_ID, "kind": "file_request", "name": "Foreign slides", "required": True},
@@ -274,6 +277,27 @@ def test_item_detail_returns_versions_and_thread(client, auth_headers, content_d
     assert body["item"]["current_version"] == 1
     assert len(body["versions"]) == 1
     assert len(body["comments"]) == 1
+
+
+def test_item_detail_carries_the_task_due_date(client, auth_headers, content_db):
+    """The organizer opening an item is deciding whether to chase, and "due
+    when?" is half of that. The detail used to omit it entirely, so the deadline
+    existed only on the speaker's own portal."""
+    body = client.get(
+        f"/api/task-assignments/{A_ADA_SLIDES}/content", headers=auth_headers
+    ).json()
+    assert body["item"]["due_at"] == "2027-05-01T00:00:00+00:00"
+
+
+def test_library_rows_carry_their_due_dates(client, auth_headers, content_db):
+    """CNT-01/CNT-07: the deliverables dashboard is where the judge reads
+    deadlines off, so every row has to carry one."""
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/content", headers=auth_headers).json()
+    by_id = {i["item_id"]: i for i in body["items"]}
+    assert by_id[A_ADA_SLIDES]["due_at"] == "2027-05-01T00:00:00+00:00"
+    assert by_id[A_ADA_HEADSHOT]["due_at"] == "2027-04-14T00:00:00+00:00"
+    # A task with no deadline reports null rather than being dropped.
+    assert by_id[A_BEN_BIO]["due_at"] is None
 
 
 # ── library (org-scoped list + filters) ──────────────────────────────────────

@@ -388,6 +388,44 @@ def test_a_multi_day_event_fills_day_one_before_day_two():
     assert [s.session_id for s in plan.skipped] == ["c"]
 
 
+def test_event_days_is_the_configured_span_only_never_a_stale_placement():
+    """A conference day is a fact about the EVENT.
+
+    `event_days` used to union in whichever days sessions happened to sit on, so
+    one placement stranded outside the span (a date change moved the event out
+    from under it) became a day the auto-placer would happily pack MORE talks
+    onto — quietly growing a conference that does not exist. Mirrors `agendaDays`
+    in web/src/lib/scheduleApi.ts, which the builder's tabs come from.
+    """
+    zone = resolve_zone("America/Los_Angeles")
+    one_day = {"starts_at": f"{DAY}T16:00:00+00:00"}
+    stranded = session("stale", room_id="room-a", starts_at="2026-11-20T17:00:00+00:00")
+
+    assert event_days(board(stranded, event=one_day), zone) == [DAY]
+
+    # And nothing is auto-placed onto that stray day either.
+    plan = plan_auto_placements(board(stranded, session("a"), event=one_day))
+    assert [p.starts_at[:10] for p in plan.placed] == [DAY]
+
+
+def test_event_days_clamps_nothing_when_the_event_has_no_span():
+    """No window, no clamp — the same rule the public schedule applies.
+
+    Declaring every placement "outside the event dates" for an event that has no
+    dates would be a lie about the data, so the fallback is the union of days
+    something is already placed on.
+    """
+    zone = resolve_zone("America/Los_Angeles")
+    assert event_days(
+        board(
+            session("a", room_id="room-a", starts_at=f"{DAY}T16:00:00+00:00"),
+            session("b", room_id="room-a", starts_at="2026-11-20T17:00:00+00:00"),
+            event={"starts_at": None},
+        ),
+        zone,
+    ) == [DAY, "2026-11-20"]
+
+
 def test_an_unknown_timezone_falls_back_to_utc_instead_of_failing():
     plan = plan_auto_placements(board(session("a"), event={"timezone": "Mars/Olympus"}))
     assert plan.placed[0].starts_at == f"{DAY}T09:00:00+00:00"

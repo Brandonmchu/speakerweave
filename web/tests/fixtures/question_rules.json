@@ -602,5 +602,63 @@
     "rules": [],
     "answers": { "spoken_before": true },
     "expected": {}
+  },
+  {
+    "name": "CFP-02: the workshop branch opens on the format the form offers",
+    "rules": [
+      {
+        "id": "r-show-prerequisites",
+        "target_field_id": "workshop_prerequisites",
+        "logic": {
+          "when": [
+            { "field": "session_format", "op": "eq", "value": "Workshop (120 min)" }
+          ],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "session_format": "Workshop (120 min)" },
+    "expected": {
+      "workshop_prerequisites": { "visible": true, "required_override": null }
+    }
+  },
+  {
+    "name": "CFP-02: the workshop branch closes on any other format",
+    "rules": [
+      {
+        "id": "r-show-prerequisites",
+        "target_field_id": "workshop_prerequisites",
+        "logic": {
+          "when": [
+            { "field": "session_format", "op": "eq", "value": "Workshop (120 min)" }
+          ],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "session_format": "Talk (30 min)" },
+    "expected": {
+      "workshop_prerequisites": { "visible": false, "required_override": null }
+    }
+  },
+  {
+    "name": "CFP-02: an operand left on a renamed choice matches nothing",
+    "rules": [
+      {
+        "id": "r-show-prerequisites",
+        "target_field_id": "workshop_prerequisites",
+        "logic": {
+          "when": [{ "field": "session_format", "op": "eq", "value": "Workshop" }],
+          "match": "all",
+          "action": "show"
+        }
+      }
+    ],
+    "answers": { "session_format": "Workshop (120 min)" },
+    "expected": {
+      "workshop_prerequisites": { "visible": false, "required_override": null }
+    }
   }
 ]

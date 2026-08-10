@@ -1390,16 +1390,28 @@ function ValueInput({
   }
 
   if (type === 'dropdown' && choices.length > 0) {
+    // `choices` are the question's CURRENT choices — for Track and Session
+    // format the backend resolves them from the event's tables, so a rule is
+    // always authored against a name a speaker will actually be offered.
+    const current = value == null ? '' : String(value)
+    // A saved value the choices no longer contain (its track/format was
+    // renamed away, or deleted) would otherwise make this select display its
+    // FIRST option, so the row would read as a rule it does not say. Keep the
+    // stored value listed, and label it for what it is.
+    const orphaned = current !== '' && !choices.includes(current)
     return (
       <div className="w-[200px]">
         <NativeSelect
           data-testid={testId}
           aria-label="Condition value"
           className="h-8"
-          value={value == null ? '' : String(value)}
+          value={current}
           onValueChange={(v) => onChange(v)}
           placeholder="Choose…"
-          options={choices.map((choice) => ({ value: choice, label: choice }))}
+          options={[
+            ...choices.map((choice) => ({ value: choice, label: choice })),
+            ...(orphaned ? [{ value: current, label: `${current} — no longer a choice` }] : []),
+          ]}
         />
       </div>
     )

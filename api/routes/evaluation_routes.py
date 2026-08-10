@@ -88,10 +88,13 @@ class EvaluatorPatchRequest(BaseModel):
 
 
 class AssignRequest(BaseModel):
-    session_ids: list[str] | None = None
-    evaluator_ids: list[str] | None = None
+    session_ids: list[str] | None = Field(default=None, max_length=500)
+    evaluator_ids: list[str] | None = Field(default=None, max_length=200)
     # by_track pairs each reviewer with the sessions whose tracks they cover.
     mode: Literal["all_to_all", "by_track"] = "all_to_all"
+    # Off by default: round one reviews undecided work, and an organizer who
+    # doesn't ask must never have accepted/declined talks land in the pool.
+    include_decided: bool = False
 
 
 class SingleAssignmentRequest(BaseModel):
@@ -100,6 +103,22 @@ class SingleAssignmentRequest(BaseModel):
 
     evaluator_id: str = Field(..., min_length=1, max_length=64)
     session_id: str = Field(..., min_length=1, max_length=64)
+
+
+class BulkUnassignRequest(BaseModel):
+    """Drop several pairings at once — the undo for an over-broad assignment."""
+
+    assignment_ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class TriageRunRequest(BaseModel):
+    include_decided: bool = False
+
+
+class TriageOverrideRequest(BaseModel):
+    """A human correction to one AI score. null clears the override."""
+
+    score: float | None = Field(default=None, ge=0, le=100)
 
 
 @router.post("/events/{event_id}/evaluation-plans", status_code=201)
@@ -205,6 +224,7 @@ async def assign_sessions(
         mode=payload.mode,
         session_ids=payload.session_ids,
         evaluator_ids=payload.evaluator_ids,
+        include_decided=payload.include_decided,
     )
 
 
@@ -217,11 +237,16 @@ async def assign_sessions(
 @router.get("/evaluation-plans/{plan_id}/assignments")
 async def list_plan_assignments(
     plan_id: str,
+    include_decided: bool = False,
     auth: tuple = Depends(get_current_user_and_org),
 ):
-    """Every reviewable submission with the reviewers currently on it."""
+    """Every reviewable submission with the reviewers currently on it.
+
+    `?include_decided=true` widens the list to accepted/declined submissions so
+    a later round can review work round one already decided.
+    """
     _user_id, org_id = auth
-    return await evaluations.assignment_board(org_id, plan_id)
+    return await evaluations.assignment_board(org_id, plan_id, include_decided=include_decided)
 
 
 @router.post("/plans/{plan_id}/assignments", status_code=201)
@@ -249,6 +274,63 @@ async def delete_plan_assignment(
     _user_id, org_id = auth
     await evaluations.delete_assignment(org_id, plan_id, assignment_id)
     return Response(status_code=204)
+
+
+@router.post("/plans/{plan_id}/unassign")
+@router.post("/evaluation-plans/{plan_id}/unassign")
+async def bulk_unassign(
+    plan_id: str,
+    payload: BulkUnassignRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Remove several reviewer↔submission pairings in one request."""
+    _user_id, org_id = auth
+    return await evaluations.bulk_unassign(org_id, plan_id, payload.assignment_ids)
+
+
+# ── AI triage (ABS-14) ─────────────────────────────────────────────────────
+
+
+@router.post("/plans/{plan_id}/ai-triage")
+@router.post("/evaluation-plans/{plan_id}/ai-triage")
+async def run_ai_triage(
+    plan_id: str,
+    payload: TriageRunRequest | None = None,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Summarize, score and rank every submission on this plan in one model call.
+
+    Degrades to a clearly-labelled score-based heuristic when no
+    ANTHROPIC_API_KEY is configured, so the button always answers.
+    """
+    _user_id, org_id = auth
+    return await evaluations.run_ai_triage(
+        org_id, plan_id, include_decided=bool(payload and payload.include_decided)
+    )
+
+
+@router.get("/plans/{plan_id}/ai-triage")
+@router.get("/evaluation-plans/{plan_id}/ai-triage")
+async def read_ai_triage(
+    plan_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """The last stored triage for this plan. Never calls the model."""
+    _user_id, org_id = auth
+    return await evaluations.get_ai_triage(org_id, plan_id)
+
+
+@router.patch("/plans/{plan_id}/ai-triage/{session_id}")
+@router.patch("/evaluation-plans/{plan_id}/ai-triage/{session_id}")
+async def override_ai_triage(
+    plan_id: str,
+    session_id: str,
+    payload: TriageOverrideRequest,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    """Override one AI score with the chair's own; persists beside the AI value."""
+    _user_id, org_id = auth
+    return await evaluations.override_ai_triage_score(org_id, plan_id, session_id, payload.score)
 
 
 @router.post("/plans/{plan_id}/remind-laggards")

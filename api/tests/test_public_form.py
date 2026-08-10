@@ -1029,6 +1029,275 @@ def test_a_format_answer_is_not_read_as_a_track(client, public_db):
     assert session["format_id"] == FORMAT_WORKSHOP
 
 
+# ── conditional logic authored against a taxonomy choice ───────────────────
+# CFP-02, verbatim: "The 'Workshop prerequisites' field is visible when format
+# 'Workshop (120 min)' is selected and hidden when 'Talk (30 min)' is selected".
+#
+# It never was. The organizer authors the rule from the BUILDER's dropdown,
+# which listed `fields.options.choices` — the names frozen when the question was
+# created ("Workshop"). The public form offers the event's LIVE names
+# ("Workshop (120 min)"). So `equals "Workshop"` was compared against
+# "Workshop (120 min)", never matched, and the field never appeared at all.
+
+F_PREREQ = "55555555-5555-5555-5555-555555555510"
+
+
+def rename_formats_the_way_the_organizer_does(db) -> None:
+    """Settings step 4 of CFP-S1: relabel the formats with their durations."""
+    by_id = {row["id"]: row for row in db.rows("formats")}
+    by_id[FORMAT_TALK]["name"] = "Talk (30 min)"
+    by_id[FORMAT_WORKSHOP]["name"] = "Workshop (120 min)"
+
+
+def add_prerequisites_question(db, required: bool = False) -> None:
+    db.seed(
+        "fields",
+        {
+            "id": F_PREREQ,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Workshop prerequisites",
+            "field_type": "textarea",
+            "options": {},
+            "required": False,
+        },
+    )
+    db.seed(
+        "form_fields",
+        {
+            "id": "ff6",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_PREREQ,
+            "page": 1,
+            "order": 5,
+            "required": required,
+        },
+    )
+
+
+def workshop_cfp(db, required_prereq: bool = False) -> None:
+    """The judge's form: a format question, renamed formats, and a show-rule
+    authored under the OLD format name."""
+    add_format_question(db)
+    add_formats(db)
+    rename_formats_the_way_the_organizer_does(db)
+    add_prerequisites_question(db, required=required_prereq)
+    add_rule(
+        db,
+        {
+            "when": [{"field": F_FORMAT, "op": "eq", "value": "Workshop"}],
+            "match": "all",
+            "action": "show",
+        },
+        target=F_PREREQ,
+    )
+
+
+def test_a_rule_authored_under_the_old_format_name_is_served_against_the_new_one(
+    client, public_db
+):
+    workshop_cfp(public_db)
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    # The renderer is handed a rule it can actually match: the operand names the
+    # same option the select now offers.
+    assert _field(body, F_FORMAT)["options"]["choices"] == [
+        "Talk (30 min)",
+        "Workshop (120 min)",
+    ]
+    assert body["question_rules"][0]["logic"]["when"] == [
+        {"field": F_FORMAT, "op": "eq", "value": "Workshop (120 min)"}
+    ]
+
+
+def test_the_conditional_answer_is_kept_only_for_the_branch_that_was_open(client, public_db):
+    """Both directions, server-side — the half validate_submission owes the
+    renderer. Choosing Workshop keeps the answer; choosing Talk drops it."""
+    workshop_cfp(public_db)
+
+    chose_workshop = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            answers={
+                F_ABSTRACT: "A tour.",
+                F_FORMAT: "Workshop (120 min)",
+                F_PREREQ: "Bring a laptop with Docker.",
+            }
+        ),
+    )
+    assert chose_workshop.status_code == 201
+    assert public_db.rows("sessions")[0]["form_answers"][F_PREREQ] == (
+        "Bring a laptop with Docker."
+    )
+
+    chose_talk = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            email="grace@example.com",
+            answers={
+                F_ABSTRACT: "A tour.",
+                F_FORMAT: "Talk (30 min)",
+                F_PREREQ: "Left over from the branch I abandoned.",
+            },
+        ),
+    )
+    assert chose_talk.status_code == 201
+    assert F_PREREQ not in public_db.rows("sessions")[1]["form_answers"]
+
+
+def test_the_conditional_field_is_only_required_once_its_branch_is_open(client, public_db):
+    """A field nobody was shown can't block a submit; the same field, shown,
+    must. Before the fix the branch never opened, so neither ever happened."""
+    workshop_cfp(public_db, required_prereq=True)
+
+    hidden = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(answers={F_ABSTRACT: "A tour.", F_FORMAT: "Talk (30 min)"}),
+    )
+    assert hidden.status_code == 201
+
+    shown = client.post(
+        f"/public/forms/{SLUG}/submissions",
+        json=submission(
+            email="grace@example.com",
+            answers={F_ABSTRACT: "A tour.", F_FORMAT: "Workshop (120 min)"},
+        ),
+    )
+    assert shown.status_code == 400
+    assert "Workshop prerequisites" in shown.json()["detail"]
+
+
+def test_a_rule_operand_that_matches_a_live_name_outright_is_left_alone(client, public_db):
+    """No rename: the operand already names a live choice and must not move."""
+    add_format_question(public_db)
+    add_formats(public_db)
+    add_prerequisites_question(public_db)
+    add_rule(
+        public_db,
+        {
+            "when": [{"field": F_FORMAT, "op": "eq", "value": "Workshop"}],
+            "match": "all",
+            "action": "show",
+        },
+        target=F_PREREQ,
+    )
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert body["question_rules"][0]["logic"]["when"][0]["value"] == "Workshop"
+
+
+def test_an_operand_naming_a_deleted_choice_is_left_alone(client, public_db):
+    """"Fall back sensibly": a format that no longer exists in any form has no
+    live name to point at, so the rule stays exactly as authored rather than
+    being guessed onto a different branch."""
+    add_format_question(public_db)
+    add_formats(public_db)
+    add_prerequisites_question(public_db)
+    add_rule(
+        public_db,
+        {
+            "when": [{"field": F_FORMAT, "op": "eq", "value": "Fireside chat"}],
+            "match": "all",
+            "action": "show",
+        },
+        target=F_PREREQ,
+    )
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert body["question_rules"][0]["logic"]["when"][0]["value"] == "Fireside chat"
+
+
+def test_a_non_taxonomy_question_keeps_its_own_operands(client, public_db):
+    """'Audience level' is a plain dropdown — no track or format may reach into
+    it, whatever the event's taxonomy is called."""
+    audience = "55555555-5555-5555-5555-555555555511"
+    public_db.seed(
+        "fields",
+        {
+            "id": audience,
+            "org_id": TEST_ORG_ID,
+            "public_name": "Audience level",
+            "field_type": "dropdown",
+            "options": {"choices": ["Beginner", "Intermediate", "Advanced"]},
+            "required": False,
+        },
+    )
+    public_db.seed(
+        "form_fields",
+        {
+            "id": "ff7",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": audience,
+            "page": 1,
+            "order": 6,
+            "required": False,
+        },
+    )
+    add_formats(public_db)
+    rename_formats_the_way_the_organizer_does(public_db)
+    add_prerequisites_question(public_db)
+    add_rule(
+        public_db,
+        {
+            "when": [{"field": audience, "op": "eq", "value": "Advanced"}],
+            "match": "all",
+            "action": "show",
+        },
+        target=F_PREREQ,
+    )
+
+    body = client.get(f"/public/forms/{SLUG}").json()
+
+    assert _field(body, audience)["options"]["choices"] == [
+        "Beginner",
+        "Intermediate",
+        "Advanced",
+    ]
+    assert body["question_rules"][0]["logic"]["when"][0]["value"] == "Advanced"
+
+
+# ── resolve_live_choice, the mapping on its own ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "stored, expected",
+    [
+        # still there, however it is cased or padded
+        ("Workshop", "Workshop"),
+        ("workshop", "Workshop"),
+        ("  Talk  ", "Talk"),
+        # relabelled: the live name extends the stored one, uniquely
+        ("Keynote", "Keynote (45 min)"),
+        # relabelled the other way: the stored name extends the live one
+        ("Workshop (120 min)", "Workshop"),
+        # gone entirely — nothing to point at
+        ("Fireside chat", None),
+        # ambiguous: two live names extend it, so neither is "the" one
+        ("Work", None),
+        # not a choice operand at all
+        ("", None),
+        (None, None),
+        (True, None),
+        (30, None),
+    ],
+)
+def test_resolve_live_choice(stored, expected):
+    from services.forms import resolve_live_choice
+
+    live = ["Talk", "Workshop", "Keynote (45 min)", "Workshop Lab"]
+    assert resolve_live_choice(stored, live) == expected
+
+
+def test_resolve_live_choice_has_nothing_to_say_without_live_names():
+    from services.forms import resolve_live_choice
+
+    assert resolve_live_choice("Workshop", []) is None
+
+
 # ── the abstract the speaker typed reaches sessions.description ─────────────
 # The public form has no separate description input — the abstract is a form
 # QUESTION. Storing only the answer left `description` empty, which is what the

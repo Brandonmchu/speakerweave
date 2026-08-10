@@ -194,25 +194,30 @@ def local_day(value: object, zone: ZoneInfo | timezone) -> str | None:
 def event_days(agenda: dict, zone: ZoneInfo | timezone) -> list[str]:
     """Every conference day the builder shows, in the event zone, sorted.
 
-    The union of the event's own start→end span and any day something is already
-    placed on — the same set as `agendaDays` in the browser, so auto-placement
-    can only ever use days that have a tab.
+    The event's own start→end span and NOTHING else — the same set as
+    `agendaDays` in the browser, so auto-placement can only ever use days that
+    have a tab. It deliberately no longer unions in the days sessions happen to
+    sit on: a stale placement in a month the conference does not run is a defect
+    to fix, not a day to schedule more talks onto.
+
+    An event with NO configured span has no span to clamp to, and falls back to
+    the union of days something is already placed on (else today, in the event's
+    own clock) — a board always has at least one day to fill.
     """
     event = agenda.get("event") or {}
     days: set[str] = set()
 
     start = local_day(event.get("starts_at"), zone)
-    # The event's end is exclusive: an event ending exactly at local midnight
-    # belongs to the previous day, so read the day of the minute before it.
-    end_instant = parse_timestamp(event.get("ends_at"))
-    end = (
-        (end_instant - timedelta(minutes=1)).astimezone(zone).date().isoformat()
-        if end_instant
-        else None
-    )
-
     if start:
         days.add(start)
+        # The event's end is exclusive: an event ending exactly at local midnight
+        # belongs to the previous day, so read the day of the minute before it.
+        end_instant = parse_timestamp(event.get("ends_at"))
+        end = (
+            (end_instant - timedelta(minutes=1)).astimezone(zone).date().isoformat()
+            if end_instant
+            else None
+        )
         if end and end > start:
             cursor = date.fromisoformat(start)
             last = date.fromisoformat(end)
@@ -221,15 +226,13 @@ def event_days(agenda: dict, zone: ZoneInfo | timezone) -> list[str]:
                 cursor += timedelta(days=1)
                 days.add(cursor.isoformat())
                 guard += 1
+        return sorted(days)
 
     for session in agenda.get("sessions") or []:
         placed_day = local_day(session.get("starts_at"), zone)
         if placed_day:
             days.add(placed_day)
-
     if not days:
-        # A board with no event span and nothing placed still has to have one
-        # day to fill: today, in the event's own clock.
         days.add(datetime.now(timezone.utc).astimezone(zone).date().isoformat())
     return sorted(days)
 

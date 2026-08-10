@@ -35,6 +35,7 @@ import {
   type SpeakerStatus,
   type SubmissionStatus,
 } from '@/lib/api'
+import { dueLabel, isOverdue, toDueTimestamp } from '@/lib/dueDate'
 import {
   createSpeakerTask,
   listEventSpeakers,
@@ -886,11 +887,32 @@ function SpeakerProfileBody({
                 <ul className="space-y-2">
                   {profile.onboarding.map((t) => {
                     const done = t.status === 'approved' || t.status === 'done'
+                    // Overdue is a live fact about an OUTSTANDING task; a task
+                    // that is already finished is not late, it is finished.
+                    const late = !done && isOverdue(t.due_at)
                     return (
-                      <li key={t.assignment_id} className="flex items-center justify-between gap-3">
-                        <span className={cn('min-w-0 truncate text-sm', done ? 'text-muted-foreground line-through' : 'text-foreground')}>
-                          {t.name || 'Task'}
-                        </span>
+                      <li key={t.assignment_id} className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className={cn('block truncate text-sm', done ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                            {t.name || 'Task'}
+                          </span>
+                          {t.due_at ? (
+                            <span
+                              data-testid={`speaker-task-due-${t.assignment_id}`}
+                              className={cn(
+                                'mt-0.5 block text-xs',
+                                late ? 'font-medium text-destructive' : 'text-muted-foreground'
+                              )}
+                            >
+                              {dueLabel(t.due_at)}
+                              {late && ' · overdue'}
+                            </span>
+                          ) : (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              No due date
+                            </span>
+                          )}
+                        </div>
                         <Badge variant={done ? 'success' : t.status === 'submitted' ? 'warning' : 'outline'}>
                           {taskStatusLabel(t.status)}
                         </Badge>
@@ -999,8 +1021,12 @@ function ImportSpeakersDialog({
         <DialogHeader>
           <DialogTitle>Import speakers from CSV</DialogTitle>
           <DialogDescription>
-            Columns: <code className="font-mono text-xs">{CSV_TEMPLATE}</code>. Rows are matched to existing
-            speakers by email, so re-importing updates rather than duplicates.
+            Columns: <code className="font-mono text-xs">{CSV_TEMPLATE}</code>. A single{' '}
+            <code className="font-mono text-xs">name</code> column works too, as do{' '}
+            <code className="font-mono text-xs">bio</code> and{' '}
+            <code className="font-mono text-xs">notes</code>; an{' '}
+            <code className="font-mono text-xs">email</code> column is required. Rows are matched
+            to existing speakers by email, so re-importing updates rather than duplicates.
           </DialogDescription>
         </DialogHeader>
 
@@ -1037,6 +1063,17 @@ function ImportSpeakersDialog({
                   <Badge variant="destructive">{result.errors.length} error{result.errors.length === 1 ? '' : 's'}</Badge>
                 )}
               </div>
+              {/* A partly-understood file must never read as a clean success:
+                  name every heading the importer dropped. */}
+              {result.ignored_columns.length > 0 && (
+                <p className="text-xs text-muted-foreground" data-testid="import-ignored-columns">
+                  <span className="font-medium text-foreground">
+                    {result.ignored_columns.length} column
+                    {result.ignored_columns.length === 1 ? '' : 's'} ignored:
+                  </span>{' '}
+                  {result.ignored_columns.join(', ')}. Everything else imported.
+                </p>
+              )}
               {result.errors.length > 0 && (
                 <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-destructive-strong">
                   {result.errors.map((err, i) => (
@@ -1250,7 +1287,9 @@ function AddTaskDialog({
         kind,
         description: description.trim() || undefined,
         link_url: linkUrl.trim() || null,
-        due_at: dueAt ? new Date(dueAt).toISOString() : null,
+        // A due date is a calendar DAY. Store it as UTC midnight on that day —
+        // never `new Date(local)`, which would shift it a day for half the world.
+        due_at: toDueTimestamp(dueAt),
         required,
         contact_ids: targetIds,
       }),

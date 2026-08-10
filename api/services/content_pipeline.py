@@ -560,7 +560,7 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
     task = first(
         await db(
             lambda: supabase.table("tasks")
-            .select("id, name, required, event_id")
+            .select("id, name, required, due_at, event_id")
             .eq("id", assignment.get("task_id"))
             .eq("org_id", org_id)
             .limit(1)
@@ -596,6 +596,9 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
             "type": classify_item_type(task.get("name")),
             "title": task.get("name") or "Content item",
             "required": bool(task.get("required")),
+            # The deadline travels with the item: the organizer opening this
+            # dialog is deciding whether to chase, and "due when?" is half of it.
+            "due_at": task.get("due_at"),
             "assignment_status": assignment.get("status"),
             "status": content_status(assignment.get("status"), has_file=bool(versions)),
             "current_version": current["version"] if current else 0,

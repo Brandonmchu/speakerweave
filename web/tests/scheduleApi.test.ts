@@ -21,6 +21,7 @@ import {
   getAgendaConflicts,
   gridGeometry,
   localEpochMinutes,
+  outsideEventDays,
   parseClockMinutes,
   publishSchedule,
   scheduleSession,
@@ -329,30 +330,98 @@ describe('agendaDays', () => {
     expect(days).toEqual(['2026-10-12', '2026-10-13'])
   })
 
-  it('unions in any day a session already sits on', () => {
-    const days = agendaDays(
-      agenda({
-        event: { id: 'e', starts_at: '2026-10-12T16:00:00+00:00' },
-        sessions: [
-          {
-            id: 's',
-            title: 't',
-            status: 'accepted',
-            duration_min: 30,
-            speakers: [],
-            starts_at: '2026-10-13T16:00:00+00:00',
-          },
-        ],
-      }),
-      LA
-    )
-    expect(days).toEqual(['2026-10-12', '2026-10-13'])
+  it('is the event span ONLY — a stray placement never invents a day tab', () => {
+    // A conference day is a fact about the EVENT. Unioning in whatever days
+    // sessions happened to sit on made the switcher a mirror of the data's
+    // mistakes: one placement left behind by a date change and the builder grew
+    // a tab for a day the conference does not run.
+    const board = agenda({
+      event: { id: 'e', starts_at: '2026-10-12T16:00:00+00:00' },
+      sessions: [
+        {
+          id: 's',
+          title: 't',
+          status: 'accepted',
+          duration_min: 30,
+          speakers: [],
+          starts_at: '2026-10-13T16:00:00+00:00',
+        },
+      ],
+    })
+
+    expect(agendaDays(board, LA)).toEqual(['2026-10-12'])
+    // ...and the stray is not swallowed either: it is reported, so the builder
+    // can show it under "Outside event dates" with a way to fix it.
+    expect(outsideEventDays(board, LA).map((s) => s.id)).toEqual(['s'])
+  })
+
+  it('reports nothing outside the span when every placement is on a real day', () => {
+    const board = agenda({
+      event: {
+        id: 'e',
+        starts_at: '2026-10-12T16:00:00+00:00',
+        ends_at: '2026-10-14T01:00:00+00:00',
+      },
+      sessions: [
+        {
+          id: 'in-range',
+          title: 'Day 2 talk',
+          status: 'accepted',
+          duration_min: 30,
+          speakers: [],
+          starts_at: '2026-10-13T16:00:00+00:00',
+        },
+        {
+          id: 'tray',
+          title: 'Unscheduled',
+          status: 'accepted',
+          duration_min: 30,
+          speakers: [],
+          starts_at: null,
+        },
+      ],
+    })
+
+    expect(agendaDays(board, LA)).toEqual(['2026-10-12', '2026-10-13'])
+    // An unscheduled session sits on no day at all — it belongs to the tray, not
+    // to the out-of-range problem list.
+    expect(outsideEventDays(board, LA)).toEqual([])
   })
 
   it('is a single day for a single-day event', () => {
     expect(
       agendaDays(agenda({ event: { id: 'e', starts_at: '2026-10-12T16:00:00+00:00' } }), LA)
     ).toEqual(['2026-10-12'])
+  })
+
+  it('clamps nothing when the event has no configured span', () => {
+    // No window, no clamp — the same rule the public schedule and the
+    // auto-placer apply. Calling every placement "outside the event dates" for
+    // an event that HAS no dates would be a lie about the data.
+    const board = agenda({
+      event: { id: 'e' },
+      sessions: [
+        {
+          id: 'a',
+          title: 'a',
+          status: 'accepted',
+          duration_min: 30,
+          speakers: [],
+          starts_at: '2026-10-12T16:00:00+00:00',
+        },
+        {
+          id: 'b',
+          title: 'b',
+          status: 'accepted',
+          duration_min: 30,
+          speakers: [],
+          starts_at: '2026-11-20T17:00:00+00:00',
+        },
+      ],
+    })
+
+    expect(agendaDays(board, LA)).toEqual(['2026-10-12', '2026-11-20'])
+    expect(outsideEventDays(board, LA)).toEqual([])
   })
 
   it('does not add a stray day for an event ending exactly at local midnight', () => {

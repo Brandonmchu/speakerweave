@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -103,6 +103,53 @@ def _resolve_timezone(tz: str | None, fallback: str | None) -> tuple[ZoneInfo, s
 
 def _speaker_name(contact: dict) -> str:
     return f"{contact.get('first_name') or ''} {contact.get('last_name') or ''}".strip()
+
+
+def _event_day_window(event: dict) -> tuple[str, str] | None:
+    """The event's configured run of days, as ("YYYY-MM-DD", "YYYY-MM-DD").
+
+    Read in the EVENT's own zone — the zone the organizer configured the span in
+    and the one the builder draws its day tabs from — never the caller's ``?tz``,
+    which would let a query parameter change which sessions are part of the
+    conference. ``None`` when the event has no configured span: there is nothing
+    to clamp to, so nothing is clamped.
+    """
+    start_instant = _parse_dt(event.get("starts_at"))
+    if not start_instant:
+        return None
+    zone, _key = _resolve_timezone(None, event.get("timezone"))
+    first = start_instant.astimezone(zone).date()
+
+    end_instant = _parse_dt(event.get("ends_at"))
+    # The end is exclusive: an event ending exactly at local midnight belongs to
+    # the previous day, so read the day of the minute before it.
+    last = (
+        (end_instant - timedelta(minutes=1)).astimezone(zone).date()
+        if end_instant
+        else first
+    )
+    # A span that ends before it starts is nonsense data, not a reason to publish
+    # nothing: treat it as the single opening day.
+    last = max(last, first)
+    return first.isoformat(), last.isoformat()
+
+
+def _within_event_days(session: dict, event: dict, window: tuple[str, str] | None) -> bool:
+    """Is this placement on a real conference day?
+
+    The public programme is a list of what happens AT the conference. A session
+    left on a date outside the event's span (a date change moved the event out
+    from under it, say) is not on a conference day at all, so it does not belong
+    on the public page — exactly the clamp the builder applies to its day tabs.
+    """
+    if not window:
+        return True
+    at = _parse_dt(session.get("starts_at"))
+    if not at:
+        return False
+    zone, _key = _resolve_timezone(None, event.get("timezone"))
+    day = at.astimezone(zone).date().isoformat()
+    return window[0] <= day <= window[1]
 
 
 async def _load_event(slug: str) -> dict:
@@ -272,9 +319,11 @@ async def _speakers_by_session(
 async def get_schedule(request: Request, event_slug: str, tz: str | None = None):
     """The published programme, grouped by day and ordered by time then room.
 
-    Only ``accepted`` sessions that are scheduled (``starts_at`` set) appear.
-    Days and times are grouped in ``tz`` (an IANA name) when given, else the
-    event's own timezone.
+    Only ``accepted`` sessions that are scheduled (``starts_at`` set) *and placed
+    on one of the event's own days* appear — the same clamp the builder puts on
+    its day tabs. A session stranded outside the event's date span is not on a
+    conference day, so publishing it would invent one. Days and times are grouped
+    in ``tz`` (an IANA name) when given, else the event's own timezone.
     """
     event = await _load_event(event_slug)
     org_id, event_id = event["org_id"], event["id"]
@@ -283,7 +332,10 @@ async def get_schedule(request: Request, event_slug: str, tz: str | None = None)
     sessions = await _accepted_sessions(org_id, event_id)
     room_names, track_meta, format_names = await _name_maps(org_id, event_id)
 
-    scheduled = [s for s in sessions if s.get("starts_at")]
+    window = _event_day_window(event)
+    scheduled = [
+        s for s in sessions if s.get("starts_at") and _within_event_days(s, event, window)
+    ]
     speakers_by_session, _contacts = await _speakers_by_session(
         [str(s["id"]) for s in scheduled], org_id
     )
@@ -384,6 +436,11 @@ async def get_speakers(request: Request, event_slug: str):
         )
         speakers.append(
             {
+                # The contact id, so the gallery has ONE stable identity per
+                # person: its React key, its de-duplication key, and the reason
+                # two different people who happen to share a display name can
+                # never collapse into — or double-render as — one card.
+                "id": contact_id,
                 "name": _speaker_name(contact),
                 "title": contact.get("title") or None,
                 "company": contact.get("company_name") or None,

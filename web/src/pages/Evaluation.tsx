@@ -7,12 +7,14 @@ import {
   CalendarClock,
   Check,
   ClipboardCheck,
+  FileDown,
   Layers,
   Link2,
   ListChecks,
   Mail,
   Plus,
   Send,
+  Sparkles,
   Tags,
   Trash2,
   Users,
@@ -24,16 +26,20 @@ import {
   addEvaluator,
   assignEvaluationSessions,
   assignReviewerToSubmission,
+  bulkUnassignReviewers,
   createEvaluationPlan,
   criterionKind,
   deleteEvaluator,
+  getAiTriage,
   getEvaluationPlan,
   getEvaluationSummary,
   getPlanAssignments,
   getReviewerLinks,
   listEvaluationPlans,
   openEvaluationPlan,
+  overrideAiTriageScore,
   remindLaggingReviewers,
+  runAiTriage,
   unassignReviewerFromSubmission,
   updateEvaluationDecision,
   updateEvaluationPlan,
@@ -49,6 +55,8 @@ import {
   type EvaluationTrack,
   type Evaluator,
   type ReviewerAssignmentStatus,
+  type TriageItem,
+  type TriageSuggestion,
 } from '@/lib/evaluationApi'
 import { CopyButton } from '@/pages/Forms'
 import { cn } from '@/lib/utils'
@@ -526,6 +534,8 @@ function PlanWorkspace({
   const { plan } = detail
   const tracks = detail.tracks ?? []
   const [tab, setTab] = useState('setup')
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [triageOpen, setTriageOpen] = useState(false)
   const assign = useMutation({
     mutationFn: (mode: EvaluationAssignMode) => assignEvaluationSessions(plan.id, { mode }),
     onSuccess: async (result, mode) => {
@@ -564,10 +574,16 @@ function PlanWorkspace({
             <PlanStatusBadge status={plan.status} />
             {plan.anonymized && <Badge variant="outline">Anonymized</Badge>}
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {detail.assignments.total} assignments · {detail.evaluators.length} reviewers ·{' '}
-            {plan.scale === '1_10' ? '10-point' : '5-point'} scale
-          </p>
+          {/* Progress sits beside the nudge on purpose: the number that says
+              who is behind and the button that chases them belong together. */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <p className="text-sm text-muted-foreground">
+              {detail.assignments.total} assignments · {detail.evaluators.length} reviewers ·{' '}
+              {detail.assignments.complete}/{detail.assignments.total} reviews complete ·{' '}
+              {plan.scale === '1_10' ? '10-point' : '5-point'} scale
+            </p>
+            <RemindLaggardsButton plan={plan} evaluators={detail.evaluators} />
+          </div>
           <div className="mt-1">
             <ReviewWindowNote plan={plan} />
           </div>
@@ -575,11 +591,12 @@ function PlanWorkspace({
         <div className="flex flex-wrap gap-2">
           <Button
             variant="secondary"
-            onClick={() => assign.mutate('all_to_all')}
-            disabled={assign.isPending || detail.evaluators.length === 0}
+            onClick={() => setAssignOpen(true)}
+            disabled={detail.evaluators.length === 0}
+            title="Choose which submissions go to which reviewers"
           >
             <ListChecks />
-            {assign.isPending ? 'Assigning…' : 'Assign sessions'}
+            Assign sessions
           </Button>
           {tracks.length > 0 && (
             <Button
@@ -592,6 +609,10 @@ function PlanWorkspace({
               Assign by track
             </Button>
           )}
+          <Button variant="secondary" onClick={() => setTriageOpen(true)}>
+            <Sparkles />
+            AI triage
+          </Button>
           <Button
             onClick={() => openPlan.mutate()}
             disabled={openPlan.isPending || detail.evaluators.length === 0}
@@ -601,6 +622,17 @@ function PlanWorkspace({
           </Button>
         </div>
       </div>
+
+      <AssignSessionsDialog
+        plan={plan}
+        open={assignOpen}
+        onOpenChange={setAssignOpen}
+        onAssigned={async () => {
+          await queryClient.invalidateQueries({ queryKey: ['evaluation-assignments', plan.id] })
+          await onRefresh()
+        }}
+      />
+      <AiTriageDialog plan={plan} open={triageOpen} onOpenChange={setTriageOpen} />
 
       <Tabs value={tab} onValueChange={setTab}>
         <div className="border-b border-border px-5 sm:px-6">
@@ -632,6 +664,71 @@ function PlanWorkspace({
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/**
+ * The nudge for the reviewers who are behind — in the plan header, next to the
+ * progress it acts on.
+ *
+ * It used to live at the bottom of the committee table, which is where nobody
+ * looked: an organizer reading "3/10 reviews complete" wants the chase button
+ * in the same glance, not two sections down. The reminder still goes to
+ * exactly the laggards (server-side, deduped per reviewer per day) and the
+ * toast names them, so it is never mistaken for "email the whole committee".
+ */
+function RemindLaggardsButton({
+  plan,
+  evaluators,
+}: {
+  plan: EvaluationPlan
+  evaluators: Evaluator[]
+}) {
+  // Behind = at least one assignment without a submitted review.
+  const laggards = evaluators.filter(
+    (evaluator) => (evaluator.assignment_count ?? 0) > (evaluator.complete_count ?? 0)
+  )
+  const remind = useMutation({
+    mutationFn: () => remindLaggingReviewers(plan.id),
+    onSuccess: (result) => {
+      if (result.reminded > 0) {
+        toast({
+          title: `Reminded ${result.reminded} ${result.reminded === 1 ? 'reviewer' : 'reviewers'}`,
+          description: result.evaluators.join(', '),
+        })
+      } else if (result.skipped > 0) {
+        toast({
+          title: 'Already reminded today',
+          description: `${result.already_reminded.join(', ')} already got a nudge today.`,
+        })
+      } else {
+        toast({
+          title: 'Everyone is up to date',
+          description: 'No reviewer has an unfinished review.',
+        })
+      }
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not send reminders', description: error.message }),
+  })
+
+  if (evaluators.length === 0) return null
+
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      disabled={laggards.length === 0 || remind.isPending}
+      title={
+        laggards.length === 0
+          ? 'Every reviewer has finished'
+          : 'Email only the reviewers with unfinished reviews'
+      }
+      onClick={() => remind.mutate()}
+    >
+      <BellRing />
+      {remind.isPending ? 'Reminding…' : `Remind incomplete reviewers (${laggards.length})`}
+    </Button>
   )
 }
 
@@ -918,35 +1015,6 @@ function EvaluatorEditor({
     },
   })
 
-  // Who is actually behind: at least one assignment without a submitted review.
-  // The reminder goes to exactly these people, never the whole committee.
-  const laggards = evaluators.filter(
-    (evaluator) => (evaluator.assignment_count ?? 0) > (evaluator.complete_count ?? 0)
-  )
-  const remind = useMutation({
-    mutationFn: () => remindLaggingReviewers(plan.id),
-    onSuccess: (result) => {
-      if (result.reminded > 0) {
-        toast({
-          title: `Reminded ${result.reminded} ${result.reminded === 1 ? 'reviewer' : 'reviewers'}`,
-          description: result.evaluators.join(', '),
-        })
-      } else if (result.skipped > 0) {
-        toast({
-          title: 'Already reminded today',
-          description: `${result.already_reminded.join(', ')} already got a nudge today.`,
-        })
-      } else {
-        toast({
-          title: 'Everyone is up to date',
-          description: 'No reviewer has an unfinished review.',
-        })
-      }
-    },
-    onError: (error: Error) =>
-      toast({ variant: 'destructive', title: 'Could not send reminders', description: error.message }),
-  })
-
   return (
     <section className="border-t border-border px-5 py-6 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -957,24 +1025,6 @@ function EvaluatorEditor({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {evaluators.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={laggards.length === 0 || remind.isPending}
-              title={
-                laggards.length === 0
-                  ? 'Every reviewer has finished'
-                  : 'Email only the reviewers with unfinished reviews'
-              }
-              onClick={() => remind.mutate()}
-            >
-              <BellRing />
-              {remind.isPending
-                ? 'Reminding…'
-                : `Remind incomplete reviewers (${laggards.length})`}
-            </Button>
-          )}
           <Button
             variant="outline"
             size="sm"
@@ -1195,6 +1245,234 @@ const REVIEW_STATUS_LABEL: Record<ReviewerAssignmentStatus, string> = {
   reviewed: 'review complete',
 }
 
+/** A submission whose decision is already made — reviewable only on request. */
+function isDecided(status?: string | null): boolean {
+  return status === 'accepted' || status === 'declined'
+}
+
+/**
+ * "Assign sessions", with a say in what actually gets assigned.
+ *
+ * The one-click version handed every eligible submission to every reviewer,
+ * and taking one back off meant unassigning it by hand — so a chair who wanted
+ * nine of ten got a lot of clicking. This dialog opens with everything ticked
+ * (the old behaviour is still one confirm away) and lets them untick the rest.
+ *
+ * "Include decided submissions" is the second half: round one reviews what is
+ * undecided, but a later round often wants exactly the accepted work back in
+ * front of a different committee.
+ */
+function AssignSessionsDialog({
+  plan,
+  open,
+  onOpenChange,
+  onAssigned,
+}: {
+  plan: EvaluationPlan
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAssigned: () => Promise<void>
+}) {
+  const [includeDecided, setIncludeDecided] = useState(false)
+  const [sessionIds, setSessionIds] = useState<string[]>([])
+  const [evaluatorIds, setEvaluatorIds] = useState<string[]>([])
+
+  const boardQuery = useQuery({
+    queryKey: ['evaluation-assignments', plan.id, includeDecided],
+    queryFn: () => getPlanAssignments(plan.id, { includeDecided }),
+    enabled: open,
+  })
+  const board = boardQuery.data
+
+  // Select-all is the default so the fast path stays one confirm away; the
+  // effect re-runs when the candidate list changes (e.g. decided work joins).
+  useEffect(() => {
+    if (!board) return
+    setSessionIds(board.sessions.map((session) => session.session_id))
+    setEvaluatorIds(board.evaluators.map((evaluator) => evaluator.id))
+  }, [board])
+
+  const assign = useMutation({
+    mutationFn: (scope: 'all' | 'selected') =>
+      assignEvaluationSessions(plan.id, {
+        mode: 'all_to_all',
+        include_decided: includeDecided,
+        ...(scope === 'selected'
+          ? { session_ids: sessionIds, evaluator_ids: evaluatorIds }
+          : {}),
+      }),
+    onSuccess: async (result) => {
+      await onAssigned()
+      onOpenChange(false)
+      toast({
+        title: result.created ? 'Sessions assigned' : 'Assignments already up to date',
+        description: `${result.created} new · ${result.total} assignments across ${result.session_count} submissions.`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Assignment failed', description: error.message }),
+  })
+
+  const toggle = (list: string[], id: string) =>
+    list.includes(id) ? list.filter((value) => value !== id) : [...list, id]
+
+  const allSelected = Boolean(board) && sessionIds.length === (board?.sessions.length ?? 0)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Assign sessions to reviewers</DialogTitle>
+          <DialogDescription>
+            Everything is selected to start. Untick what this round shouldn't cover — existing
+            assignments are never duplicated.
+          </DialogDescription>
+        </DialogHeader>
+
+        <label className="flex items-start gap-3 rounded-md border border-border p-3">
+          <Checkbox
+            checked={includeDecided}
+            onCheckedChange={(value) => setIncludeDecided(value === true)}
+            aria-label="Include decided submissions"
+          />
+          <span>
+            <span className="block text-sm font-medium text-foreground">
+              Include decided submissions
+            </span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              Accepted and declined talks can join this round — for a second pass over work round
+              one already decided.
+            </span>
+          </span>
+        </label>
+
+        {boardQuery.isPending ? (
+          <div className="space-y-2 py-1">
+            {[0, 1, 2].map((item) => (
+              <Skeleton key={item} className="h-10" />
+            ))}
+          </div>
+        ) : boardQuery.error ? (
+          <InlineError>{boardQuery.error.message}</InlineError>
+        ) : !board || board.sessions.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No submissions are eligible for this round yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Submissions ({sessionIds.length}/{board.sessions.length})
+              </p>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  setSessionIds(
+                    allSelected ? [] : board.sessions.map((session) => session.session_id)
+                  )
+                }
+              >
+                {allSelected ? 'Clear all' : 'Select all'}
+              </Button>
+            </div>
+            <ul className="max-h-64 divide-y divide-border overflow-y-auto scrollbar-app rounded-md border border-border">
+              {board.sessions.map((session) => (
+                <li key={session.session_id}>
+                  <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-accent/50">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={sessionIds.includes(session.session_id)}
+                      onCheckedChange={() =>
+                        setSessionIds((current) => toggle(current, session.session_id))
+                      }
+                      aria-label={`Assign ${session.title}`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {session.title}
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        {session.friendly_id && (
+                          <span className="font-mono">{session.friendly_id}</span>
+                        )}
+                        {isDecided(session.status) && (
+                          <Badge variant="outline" className="capitalize">
+                            {session.status}
+                          </Badge>
+                        )}
+                        {session.assignments.length > 0 && (
+                          <span>{session.assignments.length} already assigned</span>
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+
+            {board.evaluators.length > 1 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Reviewers ({evaluatorIds.length}/{board.evaluators.length})
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {board.evaluators.map((evaluator) => {
+                    const label = evaluator.name || evaluator.email || 'Reviewer'
+                    const picked = evaluatorIds.includes(evaluator.id)
+                    return (
+                      <label
+                        key={evaluator.id}
+                        className={cn(
+                          'inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium',
+                          picked ? 'bg-primary-subtle/70 text-foreground' : 'text-muted-foreground'
+                        )}
+                      >
+                        <Checkbox
+                          checked={picked}
+                          onCheckedChange={() =>
+                            setEvaluatorIds((current) => toggle(current, evaluator.id))
+                          }
+                          aria-label={`Assign to ${label}`}
+                        />
+                        {label}
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {assign.error && <InlineError>{assign.error.message}</InlineError>}
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          {/* The old one-click behaviour, kept as the fast path. */}
+          <Button
+            variant="outline"
+            disabled={assign.isPending}
+            onClick={() => assign.mutate('all')}
+          >
+            Assign all to everyone
+          </Button>
+          <Button
+            disabled={assign.isPending || sessionIds.length === 0 || evaluatorIds.length === 0}
+            onClick={() => assign.mutate('selected')}
+          >
+            {assign.isPending
+              ? 'Assigning…'
+              : `Assign ${sessionIds.length} selected`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AssignmentsPanel({
   plan,
   onRefresh,
@@ -1203,9 +1481,13 @@ function AssignmentsPanel({
   onRefresh: () => Promise<void>
 }) {
   const queryClient = useQueryClient()
+  const [includeDecided, setIncludeDecided] = useState(false)
+  // Which pairings are ticked for removal. Kept by assignment id, so it
+  // survives a refetch that reorders rows.
+  const [selected, setSelected] = useState<string[]>([])
   const boardQuery = useQuery({
-    queryKey: ['evaluation-assignments', plan.id],
-    queryFn: () => getPlanAssignments(plan.id),
+    queryKey: ['evaluation-assignments', plan.id, includeDecided],
+    queryFn: () => getPlanAssignments(plan.id, { includeDecided }),
   })
   const refresh = async () => {
     await Promise.all([
@@ -1237,6 +1519,18 @@ function AssignmentsPanel({
     onError: (error: Error) =>
       toast({ variant: 'destructive', title: 'Could not unassign', description: error.message }),
   })
+  const unassignMany = useMutation({
+    mutationFn: (assignmentIds: string[]) => bulkUnassignReviewers(plan.id, assignmentIds),
+    onSuccess: async (result) => {
+      setSelected([])
+      await refresh()
+      toast({
+        title: `Removed ${result.removed} ${result.removed === 1 ? 'assignment' : 'assignments'}`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not unassign', description: error.message }),
+  })
 
   if (boardQuery.isPending) {
     return (
@@ -1259,17 +1553,55 @@ function AssignmentsPanel({
   }
 
   const board = boardQuery.data
-  const busy = assign.isPending || unassign.isPending
+  const busy = assign.isPending || unassign.isPending || unassignMany.isPending
+  const toggleSelected = (assignmentId: string) =>
+    setSelected((current) =>
+      current.includes(assignmentId)
+        ? current.filter((value) => value !== assignmentId)
+        : [...current, assignmentId]
+    )
 
   return (
     <section className="px-5 py-6 sm:px-6">
-      <div>
-        <h3 className="text-base font-semibold text-foreground">Who reviews what</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Assign one reviewer to one submission — on top of, or instead of, the bulk assignment
-          buttons above.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">Who reviews what</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Assign one reviewer to one submission — on top of, or instead of, the bulk assignment
+            buttons above. Tick reviewers to take several off at once.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground">
+          <Checkbox
+            checked={includeDecided}
+            onCheckedChange={(value) => setIncludeDecided(value === true)}
+            aria-label="Include decided submissions"
+          />
+          Include decided submissions
+        </label>
       </div>
+
+      {selected.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary-subtle/50 px-4 py-2.5">
+          <p className="text-sm font-medium text-foreground">
+            {selected.length} {selected.length === 1 ? 'assignment' : 'assignments'} selected
+          </p>
+          <div className="flex gap-2">
+            <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
+              Clear
+            </Button>
+            <Button
+              size="xs"
+              variant="destructive"
+              disabled={unassignMany.isPending}
+              onClick={() => unassignMany.mutate(selected)}
+            >
+              <Trash2 />
+              {unassignMany.isPending ? 'Removing…' : 'Unassign selected'}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 overflow-hidden rounded-md border border-border">
         {board.evaluators.length === 0 ? (
@@ -1300,6 +1632,8 @@ function AssignmentsPanel({
                   session={session}
                   evaluators={board.evaluators}
                   busy={busy}
+                  selected={selected}
+                  onToggleSelected={toggleSelected}
                   onAssign={(evaluatorId) =>
                     assign.mutate({ evaluator_id: evaluatorId, session_id: session.session_id })
                   }
@@ -1318,12 +1652,16 @@ function SubmissionAssignmentRow({
   session,
   evaluators,
   busy,
+  selected,
+  onToggleSelected,
   onAssign,
   onUnassign,
 }: {
   session: AssignableSubmission
   evaluators: Array<{ id: string; name: string; email: string | null }>
   busy: boolean
+  selected: string[]
+  onToggleSelected: (assignmentId: string) => void
   onAssign: (evaluatorId: string) => void
   onUnassign: (assignmentId: string) => void
 }) {
@@ -1336,6 +1674,11 @@ function SubmissionAssignmentRow({
         <p className="font-medium text-foreground">{session.title}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {session.friendly_id && <span className="font-mono">{session.friendly_id}</span>}
+          {isDecided(session.status) && (
+            <Badge variant="outline" className="capitalize">
+              {session.status}
+            </Badge>
+          )}
           <TrackChips tracks={session.tracks} />
         </div>
       </TableCell>
@@ -1349,9 +1692,18 @@ function SubmissionAssignmentRow({
               return (
                 <span
                   key={entry.assignment_id}
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card py-0.5 pl-2 pr-1 text-xs font-medium text-foreground"
+                  className={cn(
+                    'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card py-0.5 pl-1.5 pr-1 text-xs font-medium text-foreground',
+                    selected.includes(entry.assignment_id) && 'border-primary bg-primary-subtle/70'
+                  )}
                   title={`${label} — ${REVIEW_STATUS_LABEL[entry.review_status]}`}
                 >
+                  <Checkbox
+                    className="h-3.5 w-3.5"
+                    checked={selected.includes(entry.assignment_id)}
+                    onCheckedChange={() => onToggleSelected(entry.assignment_id)}
+                    aria-label={`Select ${label} on ${session.title}`}
+                  />
                   <span
                     aria-hidden
                     className={cn(
@@ -1452,11 +1804,70 @@ function ReviewerLinksDialog({
   )
 }
 
+/* ── exporting the scores ──────────────────────────────────────────────────
+ * The scores CSV also lives behind Options on the submissions inbox, but a
+ * chair reading the results table is not going to go looking for it there —
+ * so the same export sits next to the numbers it exports. */
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+/** One row per submission: title, id, status, aggregate, review count. */
+export function buildScoresCsv(rows: EvaluationSessionSummary[]): string {
+  const header = ['ID', 'Session', 'Status', 'Average score', 'Reviews', 'Abstained', 'Score range']
+  const lines = [header.map(csvCell).join(',')]
+  for (const row of rows) {
+    lines.push(
+      [
+        row.friendly_id ?? '',
+        row.title ?? '',
+        row.status ?? '',
+        row.avg_overall === null || row.avg_overall === undefined ? '' : row.avg_overall.toFixed(2),
+        row.review_count ?? 0,
+        row.abstained_count ?? 0,
+        (row.score_range ?? 0).toFixed(2),
+      ]
+        .map((value) => csvCell(String(value)))
+        .join(',')
+    )
+  }
+  return lines.join('\n')
+}
+
+function downloadScoresCsv(planName: string, rows: EvaluationSessionSummary[]): string {
+  const filename = `${planName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'plan'}-scores.csv`
+  if (typeof document === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return filename
+  }
+  const blob = new Blob([buildScoresCsv(rows)], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+  return filename
+}
+
 function SummaryPanel({ plan, onDecision }: { plan: EvaluationPlan; onDecision: () => void }) {
   const summaryQuery = useQuery({
     queryKey: ['evaluation-summary', plan.id],
     queryFn: () => getEvaluationSummary(plan.id),
   })
+  // A read, never a model call — the AI column only shows what a previous
+  // triage run stored, clearly separated from the human average beside it.
+  const triageQuery = useQuery({
+    queryKey: ['ai-triage', plan.id],
+    queryFn: () => getAiTriage(plan.id),
+  })
+  const aiById = useMemo(() => {
+    const map = new Map<string, TriageItem>()
+    for (const item of triageQuery.data?.triage?.items ?? []) map.set(item.session_id, item)
+    return map
+  }, [triageQuery.data])
   const decision = useMutation({
     mutationFn: ({ sessionId, status }: { sessionId: string; status: 'accepted' | 'declined' }) =>
       updateEvaluationDecision(sessionId, status),
@@ -1492,11 +1903,29 @@ function SummaryPanel({ plan, onDecision }: { plan: EvaluationPlan; onDecision: 
 
       <div className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1fr)_280px]">
         <section className="min-w-0">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Session scores</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Final, non-abstained reviews only. Decisions use the existing session status workflow.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">Session scores</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Final, non-abstained reviews only. Decisions use the existing session status
+                workflow.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={summary.per_session.length === 0}
+              onClick={() => {
+                const filename = downloadScoresCsv(plan.name, summary.per_session)
+                toast({
+                  title: 'Exported scores',
+                  description: `${summary.per_session.length} rows → ${filename}`,
+                })
+              }}
+            >
+              <FileDown />
+              Export scores
+            </Button>
           </div>
           <div className="mt-4 overflow-hidden rounded-md border border-border">
             {summary.per_session.length === 0 ? (
@@ -1509,6 +1938,11 @@ function SummaryPanel({ plan, onDecision }: { plan: EvaluationPlan; onDecision: 
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Session</TableHead>
                     <TableHead className="w-[90px] text-right">Average</TableHead>
+                    {aiById.size > 0 && (
+                      <TableHead className="w-[110px] text-right" title="AI-generated first pass">
+                        AI score
+                      </TableHead>
+                    )}
                     <TableHead className="w-[90px] text-right">Reviews</TableHead>
                     <TableHead className="w-[200px]">Decision</TableHead>
                   </TableRow>
@@ -1527,6 +1961,11 @@ function SummaryPanel({ plan, onDecision }: { plan: EvaluationPlan; onDecision: 
                       <TableCell className="text-right font-mono text-sm font-semibold">
                         {session.avg_overall === null ? '—' : session.avg_overall.toFixed(2)}
                       </TableCell>
+                      {aiById.size > 0 && (
+                        <TableCell className="text-right">
+                          <AiScoreCell item={aiById.get(session.session_id)} />
+                        </TableCell>
+                      )}
                       <TableCell className="text-right text-sm tabular-nums text-muted-foreground">
                         {session.review_count}
                       </TableCell>
@@ -1584,6 +2023,251 @@ function DecisionControl({
         Decline
       </Button>
     </div>
+  )
+}
+
+/* ── AI triage (ABS-14) ────────────────────────────────────────────────────
+ * Machine judgement is only useful if it is never mistaken for the
+ * committee's. Everything here is labelled: the score carries an "AI" tag in
+ * the results table, the dialog says which engine wrote it, and a chair's
+ * override is shown as a correction OF the AI value rather than replacing it. */
+
+const SUGGESTION_BADGE: Record<
+  TriageSuggestion,
+  { label: string; variant: 'solid' | 'warning' | 'destructive' }
+> = {
+  advance: { label: 'Advance', variant: 'solid' },
+  discuss: { label: 'Discuss', variant: 'warning' },
+  decline: { label: 'Decline', variant: 'destructive' },
+}
+
+/** The AI's number in the results table — never confusable with the human one. */
+function AiScoreCell({ item }: { item?: TriageItem }) {
+  if (!item) return <span className="text-sm text-muted-foreground">—</span>
+  const overridden = item.override_score !== null && item.override_score !== undefined
+  const shown = overridden ? item.override_score! : item.score
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5">
+      <Badge variant={overridden ? 'outline' : 'muted'} className="font-normal">
+        {overridden ? 'Override' : 'AI'}
+      </Badge>
+      <span className="font-mono text-sm font-semibold text-foreground">
+        {shown === null || shown === undefined ? '—' : shown.toFixed(2)}
+      </span>
+    </span>
+  )
+}
+
+function AiTriageDialog({
+  plan,
+  open,
+  onOpenChange,
+}: {
+  plan: EvaluationPlan
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const [includeDecided, setIncludeDecided] = useState(false)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+
+  const triageQuery = useQuery({
+    queryKey: ['ai-triage', plan.id],
+    queryFn: () => getAiTriage(plan.id),
+    enabled: open,
+  })
+  const triage = triageQuery.data?.triage ?? null
+
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ['ai-triage', plan.id] })
+
+  const run = useMutation({
+    mutationFn: () => runAiTriage(plan.id, { include_decided: includeDecided }),
+    onSuccess: async (response) => {
+      queryClient.setQueryData(['ai-triage', plan.id], response)
+      await invalidate()
+      const count = response.triage?.items.length ?? 0
+      toast({
+        title: `AI triage ready — ${count} ${count === 1 ? 'submission' : 'submissions'}`,
+        description:
+          response.triage?.source === 'anthropic'
+            ? `Generated by ${response.triage.model}.`
+            : 'No AI key configured — ranked from reviewer scores instead.',
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Triage failed', description: error.message }),
+  })
+
+  const override = useMutation({
+    mutationFn: ({ sessionId, score }: { sessionId: string; score: number | null }) =>
+      overrideAiTriageScore(plan.id, sessionId, score),
+    onSuccess: async (response, variables) => {
+      queryClient.setQueryData(['ai-triage', plan.id], response)
+      setDrafts((current) => {
+        const next = { ...current }
+        delete next[variables.sessionId]
+        return next
+      })
+      await invalidate()
+      toast({
+        title: variables.score === null ? 'Override cleared' : 'AI score overridden',
+        description:
+          variables.score === null
+            ? 'The AI score stands again.'
+            : `Saved ${variables.score} in place of the AI value.`,
+      })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: 'Could not save', description: error.message }),
+  })
+
+  const top = plan.scale === '1_10' ? 10 : 5
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>AI triage</DialogTitle>
+          <DialogDescription>
+            A first pass over every submission in this plan — a summary, a 1–{top} score and a
+            suggested disposition, ranked. Advisory only: your reviewers still decide.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <Checkbox
+              checked={includeDecided}
+              onCheckedChange={(value) => setIncludeDecided(value === true)}
+              aria-label="Include decided submissions in triage"
+            />
+            Include decided submissions
+          </label>
+          <Button disabled={run.isPending} onClick={() => run.mutate()}>
+            <Sparkles />
+            {run.isPending ? 'Analyzing…' : triage ? 'Re-run triage' : 'Run AI triage'}
+          </Button>
+        </div>
+
+        {triage && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary-subtle/40 px-3 py-2 text-xs text-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">AI-generated — review before acting.</span>
+            <span className="text-muted-foreground">
+              {triage.source === 'anthropic'
+                ? `Model ${triage.model} · ${new Date(triage.generated_at).toLocaleString()}`
+                : 'No AI key configured: ranked from reviewer scores (heuristic, not model-written).'}
+            </span>
+            {triage.degraded && (
+              <Badge variant="warning">The model call failed — fell back to scores</Badge>
+            )}
+            {triage.stored === false && (
+              <Badge variant="warning">Not saved (migration 012 pending)</Badge>
+            )}
+          </div>
+        )}
+
+        {run.error && <InlineError>{run.error.message}</InlineError>}
+
+        {triageQuery.isPending ? (
+          <div className="space-y-2 py-1">
+            {[0, 1, 2].map((item) => (
+              <Skeleton key={item} className="h-20" />
+            ))}
+          </div>
+        ) : !triage || triage.items.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No triage yet. Run it to get a ranked first pass over this plan's submissions.
+          </p>
+        ) : (
+          <ol className="max-h-[26rem] space-y-2 overflow-y-auto scrollbar-app pr-1">
+            {triage.items.map((item, index) => {
+              const overridden =
+                item.override_score !== null && item.override_score !== undefined
+              const draft = drafts[item.session_id]
+              const badge = SUGGESTION_BADGE[item.suggestion]
+              return (
+                <li
+                  key={item.session_id}
+                  data-testid={`triage-${item.session_id}`}
+                  className="rounded-lg border border-border bg-card px-4 py-3"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {String(index + 1).padStart(2, '0')}
+                      </span>
+                      <p className="min-w-0 text-sm font-semibold text-foreground">{item.title}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                      <AiScoreCell item={item} />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-foreground">{item.summary}</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                    <span className="font-medium text-foreground">Why: </span>
+                    {item.rationale}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Label htmlFor={`override-${item.session_id}`} className="text-xs">
+                      Override score
+                    </Label>
+                    <Input
+                      id={`override-${item.session_id}`}
+                      className="h-8 w-24"
+                      type="number"
+                      min={1}
+                      max={top}
+                      step="0.5"
+                      placeholder={item.score === null ? '—' : String(item.score)}
+                      value={
+                        draft ?? (overridden ? String(item.override_score) : '')
+                      }
+                      onChange={(event) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [item.session_id]: event.target.value,
+                        }))
+                      }
+                    />
+                    <Button
+                      size="xs"
+                      disabled={override.isPending || draft === undefined || draft.trim() === ''}
+                      onClick={() =>
+                        override.mutate({
+                          sessionId: item.session_id,
+                          score: Number(draft),
+                        })
+                      }
+                    >
+                      Save override
+                    </Button>
+                    {overridden && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        disabled={override.isPending}
+                        onClick={() =>
+                          override.mutate({ sessionId: item.session_id, score: null })
+                        }
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

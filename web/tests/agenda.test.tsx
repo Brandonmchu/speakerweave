@@ -87,6 +87,13 @@ const CONFLICTS = {
 
 const SEEDED_MULTI_DAY_AGENDA = {
   ...AGENDA,
+  // A genuinely two-day event: the day tabs come from this span and nothing
+  // else, so the span has to say two days for two tabs to exist.
+  event: {
+    ...AGENDA.event,
+    starts_at: '2026-10-12T08:00:00-07:00',
+    ends_at: '2026-10-13T18:00:00-07:00',
+  },
   rooms: [
     { id: 'room-main', name: 'Main Stage', capacity: 400, order: 0 },
     { id: 'room-a', name: 'Workshop A', capacity: 80, order: 1 },

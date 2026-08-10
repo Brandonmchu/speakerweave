@@ -135,9 +135,14 @@ describe('Evaluation — multi-track', () => {
     expect(posted[0].url).toBe('/api/evaluation-plans/plan-1/assign')
     expect(posted[0].body).toMatchObject({ mode: 'by_track' })
 
+    // "Assign sessions" now opens the subset picker; the old one-click
+    // behaviour is the "Assign all to everyone" button inside it.
     fireEvent.click(screen.getByRole('button', { name: 'Assign sessions' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Assign all to everyone' }))
     await waitFor(() => expect(posted).toHaveLength(2))
     expect(posted[1].body).toMatchObject({ mode: 'all_to_all' })
+    // No session_ids: assign-all still means "everything the plan covers".
+    expect(posted[1].body).not.toHaveProperty('session_ids')
   })
 
   it('edits the tracks a reviewer covers in place', async () => {

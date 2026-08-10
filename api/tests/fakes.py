@@ -21,6 +21,7 @@ from typing import Any
 PATCH_TARGET_MODULES = (
     "routes.admin_routes",
     "routes.api_key_admin_routes",
+    "routes.crm_routes",
     "routes.dashboard_routes",
     "routes.field_routes",
     "routes.form_admin_routes",
@@ -32,6 +33,7 @@ PATCH_TARGET_MODULES = (
     "routes.v1_routes",
     "services.api_keys",
     "services.content_pipeline",
+    "services.crm",
     "services.evaluations",
     "services.forms",
     "services.magic_links",

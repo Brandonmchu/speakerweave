@@ -12,6 +12,7 @@ from app.core.settings import settings
 from routes.admin_routes import router as admin_router
 from routes.api_key_admin_routes import router as api_key_admin_router
 from routes.comms_routes import router as comms_router
+from routes.crm_routes import router as crm_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.demo_routes import router as demo_router
 from routes.evaluation_routes import router as evaluation_router
@@ -103,6 +104,7 @@ app.include_router(review_router)
 app.include_router(portal_router)
 app.include_router(portal_admin_router)
 app.include_router(comms_router)
+app.include_router(crm_router)
 app.include_router(v1_router)
 app.include_router(api_key_admin_router)
 

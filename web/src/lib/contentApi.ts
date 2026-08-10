@@ -87,6 +87,8 @@ export interface ContentItemDetail {
     type: ContentType
     title: string
     required: boolean
+    /** The task's deadline, a calendar day stored at UTC midnight. */
+    due_at: string | null
     assignment_status: string
     status: ContentStatus
     current_version: number

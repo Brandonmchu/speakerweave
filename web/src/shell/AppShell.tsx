@@ -7,10 +7,12 @@ import {
   Check,
   ChevronsUpDown,
   ClipboardList,
+  Contact,
   ExternalLink,
   FileArchive,
   FileText,
   HelpCircle,
+  KanbanSquare,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -62,6 +64,15 @@ const NAV: NavSection[] = [
       { label: 'Speakers', to: '/speakers', icon: Users },
       { label: 'Content', to: '/content', icon: FileArchive },
       { label: 'Comms', to: '/comms', icon: Mail },
+    ],
+  },
+  // Above the event switcher's scope on purpose: the CRM spans every event the
+  // org has run, which is exactly what the per-event Speakers page cannot show.
+  {
+    label: 'CRM',
+    items: [
+      { label: 'Directory', to: '/directory', icon: Contact },
+      { label: 'Pipeline', to: '/pipeline', icon: KanbanSquare },
     ],
   },
   { label: 'Configure', items: [{ label: 'Settings', to: '/settings', icon: Settings }] },

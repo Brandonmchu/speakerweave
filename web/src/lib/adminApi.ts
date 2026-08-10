@@ -287,7 +287,12 @@ export interface CreateEventInput {
   location?: string | null
 }
 
-export type EventPatch = Partial<CreateEventInput>
+/**
+ * `slug` is patch-only: at creation the server derives and de-collides it, but
+ * an existing event's public URL is the organizer's to choose. A collision comes
+ * back as a 409 rather than a silent suffix.
+ */
+export type EventPatch = Partial<CreateEventInput> & { slug?: string | null }
 
 export function createEvent(input: CreateEventInput): Promise<EventRow> {
   return apiPost<{ event: EventRow }>('/api/events', input).then((r) => r.event)

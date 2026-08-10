@@ -514,6 +514,50 @@ export async function getSessionDetail(id: string): Promise<SessionDetail> {
   }
 }
 
+/* ── participants, after submission (ABS-11) ────────────────────────────────
+ * A co-speaker named on the CFP form isn't the end of the story: people join a
+ * talk, drop off it, and swap who leads it after the call closes. All three
+ * writes return the session's participants as the server now holds them, so
+ * the drawer re-renders from the source of truth rather than guessing. */
+
+export interface SessionParticipantsResponse {
+  participants: SessionParticipant[]
+}
+
+/** POST /api/sessions/{id}/participants — add a co-speaker (contact upserted). */
+export function addSessionParticipant(
+  sessionId: string,
+  input: { name: string; email: string; role?: ParticipantRole }
+): Promise<SessionParticipant[]> {
+  return apiPost<SessionParticipantsResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/participants`,
+    { name: input.name, email: input.email, role: input.role ?? 'speaker' }
+  ).then((response) => response.participants ?? [])
+}
+
+/** DELETE /api/sessions/{id}/participants/{contactId} — non-primary only. */
+export function removeSessionParticipant(
+  sessionId: string,
+  contactId: string
+): Promise<SessionParticipant[]> {
+  return request<SessionParticipantsResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/participants/${encodeURIComponent(contactId)}`,
+    { method: 'DELETE' }
+  ).then((response) => response?.participants ?? [])
+}
+
+/** POST /api/sessions/{id}/participants/{contactId}/primary — hand over the lead. */
+export function setPrimaryParticipant(
+  sessionId: string,
+  contactId: string
+): Promise<SessionParticipant[]> {
+  return apiPost<SessionParticipantsResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/participants/${encodeURIComponent(
+      contactId
+    )}/primary`
+  ).then((response) => response.participants ?? [])
+}
+
 export interface ManualSubmissionInput {
   title: string
   submitter_name?: string
@@ -890,6 +934,8 @@ export interface SpeakerImportResult {
   updated: number
   skipped: number
   errors: SpeakerImportError[]
+  /** Headings in the file the importer did not understand and therefore dropped. */
+  ignored_columns: string[]
   total: number
 }
 
@@ -911,6 +957,7 @@ export async function importSpeakers(
     updated: wire.updated ?? 0,
     skipped: wire.skipped ?? 0,
     errors: Array.isArray(wire.errors) ? wire.errors : [],
+    ignored_columns: Array.isArray(wire.ignored_columns) ? wire.ignored_columns : [],
     total: wire.total ?? 0,
   }
 }

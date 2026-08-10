@@ -503,6 +503,11 @@ function SessionCard({
 }) {
   const time = formatTimeRange(session.starts_at, session.ends_at, zone)
   const summary = htmlToText(session.description)
+  // The card shows a two-line snippet; "Show more" un-clamps it right here on
+  // the card (EMB-01), which is a different affordance from opening the card's
+  // full detail modal — a reader can skim the whole abstract without leaving
+  // the list. Collapsed again by "Show less".
+  const [expanded, setExpanded] = useState(false)
 
   const addToCalendar = () => {
     const ics = buildSessionIcs({
@@ -568,12 +573,31 @@ function SessionCard({
             {session.title}
           </h3>
           {summary && (
-            <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+            <p
+              data-testid="session-summary"
+              className={cn(
+                'mt-1 text-sm leading-relaxed text-muted-foreground',
+                !expanded && 'line-clamp-2'
+              )}
+            >
               {summary}
             </p>
           )}
           {summary && (
-            <span className="mt-1 inline-block text-xs font-medium text-primary">Show more</span>
+            <button
+              type="button"
+              data-testid="session-show-more"
+              aria-expanded={expanded}
+              onClick={(e) => {
+                // The card itself opens the detail modal — this button only
+                // grows the description in place, so it must not bubble.
+                e.stopPropagation()
+                setExpanded((value) => !value)
+              }}
+              className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+            >
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
           )}
           {session.speakers.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">

@@ -223,6 +223,204 @@ def test_get_form_returns_its_rules(client, auth_headers, form_db):
     ]
 
 
+# ── the builder's Track / Session format choices are LIVE ──────────────────
+# The builder listed `fields.options.choices`, frozen when the question was
+# created, while the public form has offered the event's real names since the
+# taxonomy went live. An organizer renaming formats in Settings therefore
+# authored `show when Session format equals "Workshop"` against a form that
+# offers "Workshop (120 min)" — a rule that could never fire (CFP-02).
+
+F_FORMAT = "55555555-5555-5555-5555-555555555509"
+F_PREREQ = "55555555-5555-5555-5555-555555555510"
+
+
+def add_renamed_format_cfp(db, operand: str = "Workshop") -> None:
+    """A format question whose snapshot is stale, the event's renamed formats,
+    and a show-rule authored under the OLD name."""
+    db.seed(
+        "fields",
+        {
+            "id": F_FORMAT,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "scope": "session",
+            "public_name": "Session format",
+            "field_type": "dropdown",
+            "options": {"choices": ["Talk", "Workshop"]},
+            "required": False,
+        },
+        {
+            "id": F_PREREQ,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "scope": "session",
+            "public_name": "Workshop prerequisites",
+            "field_type": "textarea",
+            "options": {},
+            "required": False,
+        },
+    )
+    db.seed(
+        "form_fields",
+        {
+            "id": "ff3",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_FORMAT,
+            "page": 1,
+            "order": 2,
+            "required": False,
+        },
+        {
+            "id": "ff4",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": F_PREREQ,
+            "page": 1,
+            "order": 3,
+            "required": False,
+        },
+    )
+    db.seed(
+        "formats",
+        {
+            "id": "fmt-talk",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Talk (30 min)",
+        },
+        {
+            "id": "fmt-workshop",
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "name": "Workshop (120 min)",
+        },
+    )
+    db.seed(
+        "question_rules",
+        {
+            "id": "r-workshop",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "target_field_id": F_PREREQ,
+            "logic": {
+                "when": [{"field": F_FORMAT, "op": "eq", "value": operand}],
+                "match": "all",
+                "action": "show",
+            },
+        },
+    )
+
+
+def _builder_field(body: dict, field_id: str) -> dict:
+    return next(f for f in body["fields"] if f["field_id"] == field_id)
+
+
+def test_the_builder_lists_the_events_current_format_names(client, auth_headers, form_db):
+    add_renamed_format_cfp(form_db)
+
+    body = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+
+    assert _builder_field(body, F_FORMAT)["options"]["choices"] == [
+        "Talk (30 min)",
+        "Workshop (120 min)",
+    ]
+
+
+def test_the_builder_reads_an_old_rule_as_naming_the_renamed_format(
+    client, auth_headers, form_db
+):
+    """The rule was authored as `equals "Workshop"`. It still means the format
+    now called "Workshop (120 min)", and the builder must say so — otherwise the
+    organizer sees a rule pointing at a choice that is no longer on the list."""
+    add_renamed_format_cfp(form_db)
+
+    body = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+
+    assert body["question_rules"][0]["logic"]["when"] == [
+        {"field": F_FORMAT, "op": "eq", "value": "Workshop (120 min)"}
+    ]
+
+
+def test_an_operand_with_no_live_counterpart_is_shown_as_authored(
+    client, auth_headers, form_db
+):
+    """A format that was deleted rather than renamed has nothing to point at.
+    The rule stays exactly as written so the organizer can see and fix it."""
+    add_renamed_format_cfp(form_db, operand="Fireside chat")
+
+    body = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+
+    assert body["question_rules"][0]["logic"]["when"][0]["value"] == "Fireside chat"
+
+
+def test_the_builder_keeps_the_snapshot_when_the_event_has_no_formats(
+    client, auth_headers, form_db
+):
+    add_renamed_format_cfp(form_db)
+    form_db.rows("formats").clear()
+
+    body = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+
+    assert _builder_field(body, F_FORMAT)["options"]["choices"] == ["Talk", "Workshop"]
+    assert body["question_rules"][0]["logic"]["when"][0]["value"] == "Workshop"
+
+
+def test_the_builder_and_the_public_form_offer_the_same_choices(
+    client, auth_headers, form_db
+):
+    """The parity that matters: what the organizer authors against and what the
+    speaker is shown are the same list, resolved the same way."""
+    add_renamed_format_cfp(form_db)
+
+    builder = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+    public = client.get("/public/forms/call-for-speakers").json()
+
+    public_format = next(f for f in public["fields"] if f["id"] == F_FORMAT)
+    assert _builder_field(builder, F_FORMAT)["options"]["choices"] == (
+        public_format["options"]["choices"]
+    )
+    assert builder["question_rules"][0]["logic"] == public["question_rules"][0]["logic"]
+
+
+def test_a_non_taxonomy_dropdown_keeps_its_authored_choices(client, auth_headers, form_db):
+    audience = "55555555-5555-5555-5555-555555555511"
+    add_renamed_format_cfp(form_db)
+    form_db.seed(
+        "fields",
+        {
+            "id": audience,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "scope": "session",
+            "public_name": "Audience level",
+            "field_type": "dropdown",
+            "options": {"choices": ["Beginner", "Intermediate", "Advanced"]},
+            "required": False,
+        },
+    )
+    form_db.seed(
+        "form_fields",
+        {
+            "id": "ff5",
+            "org_id": TEST_ORG_ID,
+            "form_id": FORM_ID,
+            "field_id": audience,
+            "page": 1,
+            "order": 4,
+            "required": False,
+        },
+    )
+
+    body = client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).json()
+
+    assert _builder_field(body, audience)["options"]["choices"] == [
+        "Beginner",
+        "Intermediate",
+        "Advanced",
+    ]
+
+
 def test_get_form_from_another_org_404s(client, auth_headers, form_db):
     form_db.rows("forms")[0]["org_id"] = OTHER_ORG_ID
     assert client.get(f"/api/forms/{FORM_ID}", headers=auth_headers).status_code == 404

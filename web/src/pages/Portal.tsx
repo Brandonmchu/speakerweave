@@ -25,6 +25,7 @@ import {
   type ContentComment,
   type ContentVersion,
 } from '@/lib/contentApi'
+import { dueLabel, isOverdue } from '@/lib/dueDate'
 import {
   completePortalTask,
   fetchPortalMe,
@@ -614,8 +615,12 @@ function TaskRow({
           )}
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             {task.task.due_at && (
-              <span className={overdue ? 'font-medium text-destructive' : 'text-muted-foreground'}>
-                Due {formatDate(task.task.due_at)}
+              <span
+                data-testid={`task-due-${task.assignment_id}`}
+                className={overdue ? 'font-medium text-destructive' : 'text-muted-foreground'}
+              >
+                {dueLabel(task.task.due_at)}
+                {overdue && ' · overdue'}
               </span>
             )}
             {task.task.link_url && (
@@ -926,14 +931,5 @@ function timestamp(value: string): string {
     return format(parseISO(value), 'MMM d, yyyy · HH:mm')
   } catch {
     return value
-  }
-}
-
-function isOverdue(due?: string | null): boolean {
-  if (!due) return false
-  try {
-    return parseISO(due).getTime() < Date.now()
-  } catch {
-    return false
   }
 }

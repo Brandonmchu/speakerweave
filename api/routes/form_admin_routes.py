@@ -16,7 +16,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import get_current_user_and_org
-from services.forms import load_form_layout, load_question_rules, sanitize_html
+from services.forms import (
+    apply_live_choices,
+    classify_taxonomy_fields,
+    live_choice_map,
+    load_form_layout,
+    load_live_taxonomy,
+    load_question_rules,
+    sanitize_html,
+    taxonomy_names,
+    to_public_field,
+    with_live_rule_values,
+)
 from services.org_scope import fetch_event, fetch_scoped
 from services.question_rules import RuleValidationError, validate_logic
 from services.slugs import slugify, unique_slug
@@ -207,13 +218,37 @@ async def create_form(
 
 @router.get("/forms/{form_id}")
 async def get_form(form_id: str, auth: tuple = Depends(get_current_user_and_org)):
-    """Everything the builder loads: the form, its layout, its logic."""
+    """Everything the builder loads: the form, its layout, its logic.
+
+    Track / Session format questions are served with the event's CURRENT names,
+    from the same resolution the public form uses. The builder used to show the
+    choices frozen into `fields.options` when the question was created, which
+    made renaming a format in Settings quietly poisonous: the organizer would
+    author `show when Session format equals "Workshop"` while every speaker was
+    being offered "Workshop (120 min)", so the conditional field never appeared.
+    Existing rules get their operands re-pointed for the same reason — the one
+    stored under the old name must keep reading as the rule it has always been.
+    """
     _user_id, org_id = auth
     form = await fetch_scoped("forms", form_id, org_id, "Form")
+    layout = await load_form_layout(form_id, org_id)
+    rules = await load_question_rules(form_id, org_id)
+
+    tracks, formats = await load_live_taxonomy(org_id, form.get("event_id"))
+    track_names, format_names = taxonomy_names(tracks), taxonomy_names(formats)
+    # Classification reads the public shape (id/label/type), so the builder and
+    # the renderer can never disagree about WHICH question is the format one.
+    public_fields = [to_public_field(entry) for entry in layout]
+    choices = live_choice_map(
+        public_fields,
+        classify_taxonomy_fields(public_fields, track_names, format_names),
+        track_names,
+        format_names,
+    )
     return {
         "form": form,
-        "fields": await load_form_layout(form_id, org_id),
-        "question_rules": await load_question_rules(form_id, org_id),
+        "fields": apply_live_choices(layout, choices, id_key="field_id"),
+        "question_rules": with_live_rule_values(rules, choices),
     }
 
 

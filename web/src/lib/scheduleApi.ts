@@ -389,10 +389,20 @@ export function agendaDay(agenda: Agenda | null | undefined): string {
 
 /**
  * Every conference day the builder can show, as sorted "YYYY-MM-DD" keys in the
- * event zone. The union of the event's own start→end span and any day something
- * is already scheduled on, so a brand-new second day is a tab you can drag onto
- * even before it holds anything. A single-day event yields exactly one key (and
- * the UI shows no switcher).
+ * event zone — and ONLY those: the event's own configured start→end span.
+ *
+ * It used to also union in whichever days sessions happened to sit on, which
+ * made the day switcher a mirror of the data's mistakes: one stale placement in
+ * a month the conference does not run and the builder grew a tab for it, as
+ * though the event had a fourth day. A conference day is a fact about the EVENT,
+ * not about a row, so the span is the whole answer. Placements that fall outside
+ * it are not hidden — they are collected by `outsideEventDays` and shown as an
+ * explicit problem to resolve (see `Agenda.tsx`).
+ *
+ * An event with no configured span has NO span to clamp to, so it keeps the old
+ * union-of-placed-days behaviour rather than declaring every placement stray —
+ * the same "no window, no clamp" rule the public schedule and the auto-placer
+ * apply.
  */
 export function agendaDays(
   agenda: Agenda | null | undefined,
@@ -401,15 +411,15 @@ export function agendaDays(
   const days = new Set<string>()
 
   const start = zonedDay(agenda?.event?.starts_at, tz)
-  // The event's end is exclusive: an event ending exactly at local midnight
-  // belongs to the previous day, so read the calendar day of the instant just
-  // before the end rather than of the end itself (which would add a stray tab).
-  const endInstant = toUtcDate(agenda?.event?.ends_at)
-  const end = endInstant
-    ? zonedDay(new Date(endInstant.getTime() - 60_000).toISOString(), tz)
-    : null
   if (start) {
     days.add(start)
+    // The event's end is exclusive: an event ending exactly at local midnight
+    // belongs to the previous day, so read the calendar day of the instant just
+    // before the end rather than of the end itself (which would add a stray tab).
+    const endInstant = toUtcDate(agenda?.event?.ends_at)
+    const end = endInstant
+      ? zonedDay(new Date(endInstant.getTime() - 60_000).toISOString(), tz)
+      : null
     if (end && end > start) {
       // Walk calendar days start→end inclusive. Dates are tz-independent once
       // we hold the local day strings, so step through UTC midnights.
@@ -425,15 +435,38 @@ export function agendaDays(
         guard += 1
       }
     }
+    return [...days].sort()
   }
 
+  // No span configured. Every day something sits on is a day, because there is
+  // no better answer — and calling them all "outside the event dates" would be
+  // a lie about an event that has no dates.
   for (const session of agenda?.sessions ?? []) {
     const day = zonedDay(session.starts_at, tz)
     if (day) days.add(day)
   }
-
   if (days.size === 0) days.add(agendaDay(agenda))
   return [...days].sort()
+}
+
+/**
+ * Scheduled sessions that sit on a calendar day the event does not run on.
+ *
+ * These are real rows with a real placement — a talk left behind by a date
+ * change, or one placed before the span was set — and they cannot be drawn on
+ * any legitimate day tab. Rather than inventing a tab for them (which reads as
+ * "the conference has a day in March") the builder gathers them here, warns, and
+ * offers to send each one back to the tray.
+ */
+export function outsideEventDays(
+  agenda: Agenda | null | undefined,
+  tz: string | null | undefined
+): AgendaSession[] {
+  const inRange = new Set(agendaDays(agenda, tz))
+  return (agenda?.sessions ?? []).filter((session) => {
+    const day = zonedDay(session.starts_at, tz)
+    return Boolean(day) && !inRange.has(day as string)
+  })
 }
 
 // --- calls ----------------------------------------------------------------

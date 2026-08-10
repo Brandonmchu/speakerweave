@@ -173,6 +173,41 @@ describe('Settings → Embed & share (EMB-15)', () => {
     expect(screen.getByTestId('copy-embed-snippet-script')).not.toHaveTextContent('Copied')
   })
 
+  it('renders a live preview of the widget inside the card', async () => {
+    renderSettings()
+    const preview = await screen.findByTestId('embed-preview')
+
+    // The preview loads the very page the snippets embed — proof the widget
+    // renders before the organizer pastes it anywhere.
+    expect(preview.tagName).toBe('IFRAME')
+    expect(preview).toHaveAttribute('src', `${origin()}/e/ai-builders-summit/schedule?embed=1`)
+    expect(preview).toHaveAttribute('title', 'Preview of the schedule widget')
+  })
+
+  it('switches the live preview with the widget picker', async () => {
+    renderSettings()
+    await screen.findByTestId('embed-preview')
+
+    fireEvent.change(screen.getByLabelText('Widget to embed'), { target: { value: 'speakers' } })
+
+    expect(screen.getByTestId('embed-preview')).toHaveAttribute(
+      'src',
+      `${origin()}/e/ai-builders-summit/speakers?embed=1`
+    )
+  })
+
+  it('offers the public JSON feed as a third output format', async () => {
+    renderSettings()
+    expect(await screen.findByTestId('embed-json-feed')).toHaveTextContent(
+      `${origin()}/public/program/ai-builders-summit/schedule`
+    )
+
+    fireEvent.change(screen.getByLabelText('Widget to embed'), { target: { value: 'speakers' } })
+    expect(screen.getByTestId('embed-json-feed')).toHaveTextContent(
+      `${origin()}/public/program/ai-builders-summit/speakers`
+    )
+  })
+
   it('keeps the copy button inside the block it belongs to', async () => {
     renderSettings()
     await screen.findByTestId('embed-snippet-script')

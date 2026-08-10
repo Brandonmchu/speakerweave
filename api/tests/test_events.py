@@ -166,9 +166,68 @@ def test_patch_event_can_clear_a_date(client, auth_headers, seeded_db):
     assert response.json()["event"]["starts_at"] is None
 
 
-def test_patch_event_never_moves_the_public_slug(client, auth_headers, seeded_db):
-    client.patch(f"/api/events/{TEST_EVENT_ID}", headers=auth_headers, json={"slug": "moved"})
+def test_patch_event_moves_the_public_slug_when_asked(client, auth_headers, seeded_db):
+    """The slug IS the event's public identity, so an organizer can change it.
+
+    It used to be pinned, which quietly broke identity: rename "AI Builders
+    Summit" and every /e/ link, embed snippet and publish confirmation still
+    announced the old name for the rest of the event's life.
+    """
+    response = client.patch(
+        f"/api/events/{TEST_EVENT_ID}", headers=auth_headers, json={"slug": "moved-summit"}
+    )
+    assert response.status_code == 200
+    assert response.json()["event"]["slug"] == "moved-summit"
+    assert seeded_db.rows("events")[0]["slug"] == "moved-summit"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["Has Spaces", "trailing-", "-leading", "under_score", "slash/es", "", "   "],
+)
+def test_patch_event_rejects_a_slug_that_is_not_url_safe(client, auth_headers, seeded_db, bad):
+    """Never silently rewritten: a slug the organizer typed is answered, not
+    corrected into something they did not choose."""
+    response = client.patch(
+        f"/api/events/{TEST_EVENT_ID}", headers=auth_headers, json={"slug": bad}
+    )
+    assert response.status_code in (400, 422)
     assert seeded_db.rows("events")[0]["slug"] == "ai-builders-summit"
+
+
+def test_patch_event_lowercases_a_slug_rather_than_rejecting_the_case(
+    client, auth_headers, seeded_db
+):
+    """Case is the one thing that IS normalised: URLs are case-insensitive by
+    convention here, and refusing "AI-Summit" would be pedantry, not safety."""
+    response = client.patch(
+        f"/api/events/{TEST_EVENT_ID}", headers=auth_headers, json={"slug": "  AI-Summit  "}
+    )
+    assert response.status_code == 200
+    assert response.json()["event"]["slug"] == "ai-summit"
+
+
+def test_patch_event_409s_when_another_event_holds_that_slug(client, auth_headers, seeded_db):
+    """Globally unique (migration 001) — including across orgs, which is exactly
+    why the collision is a 409 the organizer can act on and not a 500."""
+    response = client.patch(
+        f"/api/events/{TEST_EVENT_ID}", headers=auth_headers, json={"slug": "someone-else"}
+    )
+    assert response.status_code == 409
+    assert seeded_db.rows("events")[0]["slug"] == "ai-builders-summit"
+
+
+def test_patch_event_accepts_its_own_slug_unchanged(client, auth_headers, seeded_db):
+    """Re-saving the settings form without touching the slug is not a collision
+    with itself — the uniqueness probe must exempt the row being patched."""
+    response = client.patch(
+        f"/api/events/{TEST_EVENT_ID}",
+        headers=auth_headers,
+        json={"name": "Renamed", "slug": "ai-builders-summit"},
+    )
+    assert response.status_code == 200
+    assert response.json()["event"]["slug"] == "ai-builders-summit"
+    assert response.json()["event"]["name"] == "Renamed"
 
 
 def test_patch_another_orgs_event_404s(client, auth_headers, seeded_db):

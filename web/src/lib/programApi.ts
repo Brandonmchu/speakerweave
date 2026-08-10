@@ -113,6 +113,8 @@ export interface SpeakerSessionRef {
 }
 
 export interface ProgramSpeaker {
+  /** The contact id — one stable identity per person. Absent on older payloads. */
+  id?: string | null
   name: string
   title: string | null
   company: string | null
@@ -131,6 +133,101 @@ export interface ProgramSpeakers {
 /** GET /public/program/{slug}/speakers — the speaker gallery, alpha by last name. */
 export function getProgramSpeakers(slug: string): Promise<ProgramSpeakers> {
   return apiGet<ProgramSpeakers>(`/public/program/${encodeURIComponent(slug)}/speakers`)
+}
+
+// ── speaker identity + de-duplication ────────────────────────────────────────
+// The gallery renders whatever the organizer's roster contains, and a real
+// roster picks up duplicates: the same person added by hand and again by CSV,
+// under two contact rows. The page must survive that without ever showing one
+// contact twice or letting a count disagree with the cards on screen.
+
+/** Trimmed, case-folded, single-spaced — the shape names are compared in. */
+function normText(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** "same human" identity: normalized display name + company. */
+function identityKey(speaker: ProgramSpeaker): string {
+  return `${normText(speaker.name)}|${normText(speaker.company)}`
+}
+
+/** A unique, stable React key for a de-duplicated speaker. */
+export function speakerKey(speaker: ProgramSpeaker): string {
+  return speaker.id || identityKey(speaker)
+}
+
+/** Session identity, so a merge never lists the same talk twice. */
+function sessionKey(session: SpeakerSessionRef): string {
+  return session.id || `${normText(session.title)}|${session.starts_at ?? ''}`
+}
+
+/** Unscheduled last, then chronological, then by title — the server's order. */
+function bySessionOrder(a: SpeakerSessionRef, b: SpeakerSessionRef): number {
+  if (!a.starts_at !== !b.starts_at) return a.starts_at ? -1 : 1
+  const when = (a.starts_at ?? '').localeCompare(b.starts_at ?? '')
+  return when !== 0 ? when : normText(a.title).localeCompare(normText(b.title))
+}
+
+/** Fold `extra` into `base`: union the sessions, fill any blank profile field. */
+function mergeSpeakers(base: ProgramSpeaker, extra: ProgramSpeaker): ProgramSpeaker {
+  const sessions = [...base.sessions]
+  const seen = new Set(sessions.map(sessionKey))
+  for (const session of extra.sessions) {
+    const key = sessionKey(session)
+    if (seen.has(key)) continue
+    seen.add(key)
+    sessions.push(session)
+  }
+  return {
+    ...base,
+    title: base.title || extra.title,
+    company: base.company || extra.company,
+    photo_url: base.photo_url || extra.photo_url,
+    bio: base.bio || extra.bio,
+    linkedin_url: base.linkedin_url || extra.linkedin_url,
+    twitter_url: base.twitter_url || extra.twitter_url,
+    sessions: sessions.sort(bySessionOrder),
+  }
+}
+
+/**
+ * The list the gallery actually renders — the ONE source both the cards and the
+ * result count read, so the two can never disagree.
+ *
+ * Two guarantees:
+ *
+ *  1. **One card per contact id.** A repeated id is the same record arriving
+ *     twice; it is dropped, never rendered again and never a duplicate React
+ *     key (which is how a stale card survives a filter in the first place).
+ *  2. **One card per person.** Two *different* contacts sharing a normalized
+ *     name AND company are one human entered twice — a manual add plus a CSV
+ *     import, say. They merge into a single card owning both their sessions,
+ *     with the richer of the two profiles winning each blank field.
+ *
+ * Speakers who share a name but not a company stay separate cards: they are
+ * probably different people, and the card always shows title and company, so
+ * the two read as distinct on sight.
+ *
+ * Input order (the server's alphabetical-by-surname) is preserved.
+ */
+export function dedupeProgramSpeakers(speakers: ProgramSpeaker[]): ProgramSpeaker[] {
+  const byIdentity = new Map<string, ProgramSpeaker>()
+  const seenIds = new Set<string>()
+
+  for (const speaker of speakers) {
+    if (speaker.id) {
+      if (seenIds.has(speaker.id)) continue
+      seenIds.add(speaker.id)
+    }
+    const key = identityKey(speaker)
+    const existing = byIdentity.get(key)
+    byIdentity.set(
+      key,
+      existing ? mergeSpeakers(existing, speaker) : { ...speaker, sessions: [...speaker.sessions] }
+    )
+  }
+
+  return [...byIdentity.values()]
 }
 
 // ── public links + embed snippets (organizer-facing) ─────────────────────────
@@ -163,6 +260,15 @@ export function publicProgramUrl(slug: string, widget: EmbedWidget = 'schedule')
 /** The loader served by `GET /public/program/{slug}/embed.js`. */
 export function embedScriptUrl(slug: string): string {
   return `${publicProgramOrigin()}/public/program/${encodeURIComponent(slug)}/embed.js`
+}
+
+/**
+ * The public, read-only JSON behind a widget — the same endpoint the page
+ * itself fetches. Offered beside the HTML snippets as a third output format,
+ * for organizers who want to render the programme themselves.
+ */
+export function publicProgramFeedUrl(slug: string, widget: EmbedWidget = 'schedule'): string {
+  return `${publicProgramOrigin()}/public/program/${encodeURIComponent(slug)}/${widget}`
 }
 
 /**

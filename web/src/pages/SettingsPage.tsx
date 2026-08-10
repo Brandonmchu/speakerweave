@@ -32,6 +32,7 @@ import {
 import {
   embedIframeSnippet,
   embedScriptSnippet,
+  publicProgramFeedUrl,
   publicProgramUrl,
   type EmbedWidget,
 } from '@/lib/programApi'
@@ -106,6 +107,7 @@ export function fromDateInput(value: string): string | null {
 
 interface EventDraft {
   name: string
+  slug: string
   timezone: string
   starts_at: string
   ends_at: string
@@ -115,11 +117,25 @@ interface EventDraft {
 function toEventDraft(event: EventSummary): EventDraft {
   return {
     name: event.name ?? '',
+    slug: event.slug ?? '',
     timezone: event.timezone || localTimezone(),
     starts_at: toDateInput(event.starts_at),
     ends_at: toDateInput(event.ends_at),
     location: event.location ?? '',
   }
+}
+
+/** The alphabet a public URL may use — mirrors SLUG_PATTERN in admin_routes.py. */
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+/** null = fine. A string = the reason the Save button should stay down. */
+export function slugError(value: string): string | null {
+  const slug = value.trim()
+  if (!slug) return 'A public URL slug is required.'
+  if (!SLUG_RE.test(slug)) {
+    return 'Use lowercase letters, numbers and hyphens only — no spaces, and not at either end.'
+  }
+  return null
 }
 
 export function SettingsPage() {
@@ -377,8 +393,54 @@ function EmbedSection({ event }: { event: EventSummary }) {
           snippet={iframeSnippet}
           testId="embed-snippet-iframe"
         />
+
+        <EmbedPreview slug={event.slug} widget={widget} />
+
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium text-foreground">JSON feed</p>
+          <p className="text-xs text-muted-foreground">
+            The same data behind the widgets, as public read-only JSON — for a custom
+            rendering on your own site.
+          </p>
+          <PublicLinkRow
+            label="JSON"
+            url={publicProgramFeedUrl(event.slug, widget)}
+            testId="embed-json-feed"
+          />
+        </div>
       </div>
     </section>
+  )
+}
+
+/**
+ * A live rendering of the widget, in a real cross-origin-shaped iframe, right
+ * under the snippet that produces it. The point is proof rather than
+ * decoration: the organizer sees the embed working before pasting it anywhere,
+ * and a broken widget is visible here instead of on their marketing site.
+ */
+function EmbedPreview({ slug, widget }: { slug: string; widget: EmbedWidget }) {
+  const src = `${publicProgramUrl(slug, widget)}?embed=1`
+  return (
+    <div className="space-y-2">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">Live preview</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Exactly what the snippet above renders on your site — live event data, fully
+          interactive.
+        </p>
+      </div>
+      <div className="overflow-hidden rounded-md border border-border bg-background/60">
+        <iframe
+          key={src}
+          src={src}
+          title={`Preview of the ${widget} widget`}
+          data-testid="embed-preview"
+          loading="lazy"
+          className="block h-[420px] w-full border-0"
+        />
+      </div>
+    </div>
   )
 }
 
@@ -560,22 +622,40 @@ function EventCard({ event }: { event: EventSummary }) {
   }, [event])
 
   const dirty = JSON.stringify(draft) !== baseline
+  const slugProblem = slugError(draft.slug)
+  const slugChanged = draft.slug.trim() !== (event.slug ?? '')
 
   const save = useMutation({
     mutationFn: () =>
       updateEvent(event.id, {
         name: draft.name.trim(),
+        slug: draft.slug.trim(),
         timezone: draft.timezone || null,
         starts_at: fromDateInput(draft.starts_at),
         ends_at: fromDateInput(draft.ends_at),
         location: draft.location.trim() || null,
       }),
     onSuccess: () => {
+      // Every public link on this page — the /e/{slug} URLs, the embed snippets,
+      // and the schedule's publish confirmation — reads the event row, so one
+      // invalidation is what makes them all agree with the new slug.
       queryClient.invalidateQueries({ queryKey: ['events'] })
       toast({ title: 'Event updated' })
     },
     onError: (error: Error) =>
-      toast({ variant: 'destructive', title: "Couldn't save event", description: error.message }),
+      toast({
+        variant: 'destructive',
+        // A 409 is a specific, fixable answer ("someone has that URL"), not a
+        // generic failure — say so rather than echoing a status code.
+        title:
+          error instanceof ApiError && error.status === 409
+            ? 'That public URL is taken'
+            : "Couldn't save event",
+        description:
+          error instanceof ApiError && error.status === 409
+            ? 'Another event already uses that slug. Try a different one.'
+            : error.message,
+      }),
   })
 
   const set = (patch: Partial<EventDraft>) => setDraft({ ...draft, ...patch })
@@ -593,7 +673,8 @@ function EventCard({ event }: { event: EventSummary }) {
             unsaved changes; the disabled state (clean form) reads as muted. */}
         <Button
           className="min-w-[104px]"
-          disabled={!dirty || save.isPending}
+          data-testid="save-event"
+          disabled={!dirty || Boolean(slugProblem) || save.isPending}
           onClick={() => save.mutate()}
         >
           {save.isPending ? 'Saving…' : 'Save'}
@@ -617,6 +698,47 @@ function EventCard({ event }: { event: EventSummary }) {
               onChange={(e) => set({ location: e.target.value })}
             />
           </div>
+        </div>
+
+        {/* The public URL. Renaming the event does NOT move it — which is how a
+            published schedule ends up announcing a slug nobody recognises — so
+            it is a field the organizer owns, with the consequence spelled out. */}
+        <div className="space-y-1.5">
+          <Label htmlFor="event-slug" required>
+            Public URL slug
+          </Label>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 font-mono text-sm text-muted-foreground">/e/</span>
+            <Input
+              id="event-slug"
+              data-testid="event-slug"
+              value={draft.slug}
+              placeholder="ai-builders-summit"
+              spellCheck={false}
+              autoCapitalize="none"
+              aria-invalid={slugProblem ? true : undefined}
+              aria-describedby="event-slug-help"
+              onChange={(e) => set({ slug: e.target.value.trim().toLowerCase() })}
+            />
+            <span className="shrink-0 font-mono text-sm text-muted-foreground">/</span>
+          </div>
+          <p
+            id="event-slug-help"
+            data-testid="event-slug-help"
+            className={cn(
+              'text-xs',
+              slugProblem
+                ? 'font-medium text-destructive'
+                : slugChanged
+                  ? 'font-medium text-warning-strong'
+                  : 'text-muted-foreground'
+            )}
+          >
+            {slugProblem ??
+              (slugChanged
+                ? `Heads up: changing this changes every public link. /e/${event.slug}/ will stop working and become /e/${draft.slug.trim()}/.`
+                : 'Lowercase letters, numbers and hyphens. Used in every public and embedded link.')}
+          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">

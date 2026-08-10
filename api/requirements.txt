@@ -8,6 +8,10 @@ PyJWT
 # confirmation_html) rendered on the public form via dangerouslySetInnerHTML.
 bleach
 httpx
+# AI first-pass triage over submitted abstracts (services/ai_triage.py). The
+# module degrades to a score-based heuristic when ANTHROPIC_API_KEY is unset,
+# so a deployment without a key still answers.
+anthropic
 python-multipart
 slowapi
 anyio

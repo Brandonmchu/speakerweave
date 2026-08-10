@@ -235,3 +235,157 @@ describe('FormEditor rule builder — native, agent-drivable controls', () => {
     FORM_DETAIL.question_rules = []
   })
 })
+
+/**
+ * CFP-02, the builder half: the choices an organizer authors logic against.
+ *
+ * Track and Session format questions carry a SNAPSHOT of the taxonomy names
+ * they were created with. The public form has served the event's live names
+ * since wave 6; the builder had not caught up, so renaming formats in Settings
+ * left the organizer picking "Workshop" out of a list nobody would ever be
+ * shown — and the `show when format equals "Workshop"` they saved could never
+ * fire against the "Workshop (120 min)" a speaker actually picks.
+ *
+ * GET /api/forms/{id} now resolves both the choices and the operands of stored
+ * rules against the live taxonomy (api/routes/form_admin_routes.py). What these
+ * tests pin is the builder's side of it: it offers exactly the choices the API
+ * sends, and a value that has fallen off that list stays visible instead of
+ * being silently displayed as some other choice.
+ */
+const FORMAT = 'fld-format'
+const PREREQ = 'fld-prereq'
+
+/** The builder payload after live resolution: renamed formats, re-pointed rule. */
+function formatFormDetail(operand: string) {
+  return {
+    form: { id: 'form-1', slug: 'cfp', name: 'Call for Speakers', settings: {} },
+    fields: [
+      {
+        form_field_id: 'ff-f',
+        field_id: FORMAT,
+        page: 1,
+        order: 0,
+        required: true,
+        public_name: 'Session format',
+        field_type: 'dropdown',
+        options: { choices: ['Talk (30 min)', 'Workshop (120 min)', 'Panel (45 min)'] },
+      },
+      {
+        form_field_id: 'ff-p',
+        field_id: PREREQ,
+        page: 1,
+        order: 1,
+        required: false,
+        public_name: 'Workshop prerequisites',
+        field_type: 'textarea',
+      },
+    ],
+    question_rules: [
+      {
+        id: 'rule-workshop',
+        target_field_id: PREREQ,
+        logic: {
+          when: [{ field: FORMAT, op: 'eq', value: operand }],
+          match: 'all',
+          action: 'show',
+        },
+      },
+    ],
+  }
+}
+
+function stubBuilder(detail: unknown) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/forms/form-1/rules') && (init?.method ?? 'GET') === 'PUT') {
+        savedRules.push(JSON.parse(String(init?.body ?? '{}')))
+        return json({ rules: [] })
+      }
+      if (url.includes('/api/forms/form-1')) return json(detail)
+      return json({}, 404)
+    })
+  )
+}
+
+/** Open the stored rule for editing and return its dialog. */
+async function openStoredRule() {
+  renderEditor()
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: /Logic/ }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit rule' }))
+  return within(await screen.findByRole('dialog'))
+}
+
+describe('FormEditor rule builder — taxonomy choices are the live ones', () => {
+  beforeEach(() => {
+    savedRules = []
+    window.localStorage.setItem('dais.token', 'test-token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it('offers the format choices the API sends, selected on the stored operand', async () => {
+    stubBuilder(formatFormDetail('Workshop (120 min)'))
+    const dialog = await openStoredRule()
+
+    const value = dialog.getByTestId('rule-condition-value-0') as HTMLSelectElement
+    expect(value.tagName).toBe('SELECT')
+    expect(
+      within(value)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Talk (30 min)', 'Workshop (120 min)', 'Panel (45 min)'])
+    // The rule reads as what it does, against a name a speaker will be offered.
+    expect(value.value).toBe('Workshop (120 min)')
+  })
+
+  it('lists the questions page with the live choices, not the snapshot', async () => {
+    stubBuilder(formatFormDetail('Workshop (120 min)'))
+    renderEditor()
+
+    expect(
+      await screen.findByText(/Choices: Talk \(30 min\), Workshop \(120 min\), Panel \(45 min\)/)
+    ).toBeInTheDocument()
+  })
+
+  it('keeps an operand that is no longer a choice visible and flagged', async () => {
+    // The format was deleted rather than renamed, so the backend had nothing to
+    // re-point it at. Dropping it from the list would make the select display
+    // "Talk (30 min)" — a rule saying something it has never said.
+    stubBuilder(formatFormDetail('Fireside chat'))
+    const dialog = await openStoredRule()
+
+    const value = dialog.getByTestId('rule-condition-value-0') as HTMLSelectElement
+    expect(value.value).toBe('Fireside chat')
+    expect(
+      within(value).getByRole('option', { name: 'Fireside chat — no longer a choice' })
+    ).toBeInTheDocument()
+  })
+
+  it('saves the live choice the organizer picks', async () => {
+    stubBuilder(formatFormDetail('Workshop (120 min)'))
+    const dialog = await openStoredRule()
+
+    fireEvent.change(dialog.getByTestId('rule-condition-value-0'), {
+      target: { value: 'Panel (45 min)' },
+    })
+    fireEvent.click(dialog.getByRole('button', { name: 'Update rule' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Save changes/ }))
+
+    await waitFor(() => expect(savedRules).toHaveLength(1))
+    expect(savedRules[0].rules).toEqual([
+      {
+        target_field_id: PREREQ,
+        logic: {
+          when: [{ field: FORMAT, op: 'eq', value: 'Panel (45 min)' }],
+          match: 'all',
+          action: 'show',
+        },
+      },
+    ])
+  })
+})

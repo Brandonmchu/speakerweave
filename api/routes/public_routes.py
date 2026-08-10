@@ -16,16 +16,20 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel, EmailStr, Field
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
-from services import submitter_selfservice
+from services import crm, submitter_selfservice
 from services.forms import (
     abstract_from_answers,
+    apply_live_choices,
     classify_taxonomy_fields,
+    live_choice_map,
     load_form_layout,
+    load_live_taxonomy,
     load_question_rules,
     resolve_taxonomy_ids,
     sanitize_html,
+    taxonomy_names,
     to_public_field,
-    with_live_choices,
+    with_live_rule_values,
 )
 from services.question_rules import validate_submission
 from services.supabase_helpers import db, first, rows
@@ -106,52 +110,6 @@ def _clean_answers(raw: dict[str, Any], field_ids: set[str]) -> dict[str, Any]:
     return cleaned
 
 
-def _ordered_taxonomy(records: list[dict]) -> list[dict]:
-    """`order` then name — the order Settings lists them in (taxonomy_routes)."""
-    return sorted(
-        records,
-        key=lambda row: (
-            row["order"] if isinstance(row.get("order"), int) else 0,
-            str(row.get("name") or "").casefold(),
-        ),
-    )
-
-
-async def _live_taxonomy(org_id: str, event_id: str) -> tuple[list[dict], list[dict]]:
-    """This event's CURRENT tracks and formats, org- and event-scoped.
-
-    The truth behind every Track / Session format question: read at request time
-    so a rename in Settings shows up on the next form load, and so a submitted
-    answer is matched against the names the speaker was actually offered.
-    """
-
-    async def _load(table: str, columns: str) -> list[dict]:
-        try:
-            return _ordered_taxonomy(
-                rows(
-                    await db(
-                        lambda: supabase.table(table)
-                        .select(columns)
-                        .eq("org_id", org_id)
-                        .eq("event_id", event_id)
-                        .execute(),
-                        f"public_live_{table}",
-                    )
-                )
-            )
-        except APIError:
-            # A read that fails costs the live names, not the page: the stored
-            # snapshot still renders and a submission still lands.
-            logger.warning("public: could not read live %s event_id=%s", table, event_id)
-            return []
-
-    return await _load("tracks", "id, name, order"), await _load("formats", "id, name")
-
-
-def _taxonomy_names(records: list[dict]) -> list[str]:
-    return [str(row.get("name")).strip() for row in records if str(row.get("name") or "").strip()]
-
-
 def _clean_co_speakers(
     co_speakers: list[CoSpeakerInput], submitter_email: str
 ) -> list[CoSpeakerInput]:
@@ -205,19 +163,19 @@ async def _public_fields(form: dict) -> list[dict]:
 
 async def _fields_and_taxonomy(
     form: dict,
-) -> tuple[list[dict], dict[str, str], list[dict], list[dict]]:
+) -> tuple[list[dict], dict[str, str], list[dict], list[dict], dict[str, list[str]]]:
     """The form's public fields plus the live taxonomy they are resolved against.
 
     One place decides which questions are the Track and Session format ones, so
-    the choices the renderer shows and the rows a submission maps to come from
-    the same verdict.
+    the choices the renderer shows, the operands its conditional rules compare
+    against, and the rows a submission maps to all come from the same verdict.
     """
     fields = await _public_fields(form)
-    tracks, formats = await _live_taxonomy(form["org_id"], form["event_id"])
-    classified = classify_taxonomy_fields(
-        fields, _taxonomy_names(tracks), _taxonomy_names(formats)
-    )
-    return fields, classified, tracks, formats
+    tracks, formats = await load_live_taxonomy(form["org_id"], form["event_id"])
+    track_names, format_names = taxonomy_names(tracks), taxonomy_names(formats)
+    classified = classify_taxonomy_fields(fields, track_names, format_names)
+    choices = live_choice_map(fields, classified, track_names, format_names)
+    return fields, classified, tracks, formats, choices
 
 
 @router.get("/forms/{slug}")
@@ -248,9 +206,16 @@ async def get_public_form(request: Request, slug: str):
     # Track / Session format choices come from the event's tables, not from the
     # snapshot the question was built with: an organizer who renames a track in
     # Settings must see the new name on the very next load of this form.
-    fields, classified, tracks, formats = await _fields_and_taxonomy(form)
-    fields = with_live_choices(
-        fields, classified, _taxonomy_names(tracks), _taxonomy_names(formats)
+    fields, _classified, _tracks, _formats, choices = await _fields_and_taxonomy(form)
+    fields = apply_live_choices(fields, choices)
+
+    # ...and so must the CONDITIONAL LOGIC keyed off those choices. A rule saved
+    # as `Session format equals "Workshop"` is comparing against a name this page
+    # no longer offers, so it could never fire again; re-pointing the operand at
+    # the live name is what makes "show when format is Workshop" survive the
+    # rename that produced "Workshop (120 min)".
+    rules = with_live_rule_values(
+        await load_question_rules(form["id"], form["org_id"]), choices
     )
 
     return {
@@ -264,7 +229,7 @@ async def get_public_form(request: Request, slug: str):
         },
         "event": event,
         "fields": fields,
-        "question_rules": await load_question_rules(form["id"], form["org_id"]),
+        "question_rules": rules,
     }
 
 
@@ -331,6 +296,10 @@ async def _upsert_contact(
             )
         )
         if created:
+            # Mirror into the org-level speaker directory. Best-effort by
+            # contract (services/crm.py): a directory write may never cost the
+            # submitter their talk.
+            await crm.sync_contact(org_id, created)
             return created
     except APIError as exc:
         if getattr(exc, "code", None) != "23505":
@@ -359,14 +328,16 @@ async def create_submission(request: Request, slug: str, payload: SubmissionRequ
 
     # Whitelist the answer set to the form's own fields before it touches rule
     # evaluation, and reject an oversized/non-scalar payload outright.
-    fields, classified, tracks, formats = await _fields_and_taxonomy(form)
+    fields, classified, tracks, formats, choices = await _fields_and_taxonomy(form)
     field_ids = {field["id"] for field in fields}
     answers_in = _clean_answers(payload.answers, field_ids)
 
     # Re-run the renderer's own validation server-side, rules included: the
     # browser is not a trusted validator, and a hidden branch's leftover answers
-    # must not be stored as if the speaker had given them.
-    rules = await load_question_rules(form["id"], org_id)
+    # must not be stored as if the speaker had given them. The rules are
+    # re-pointed at the live taxonomy names from the SAME map the GET used, so
+    # the two surfaces cannot disagree about which branch was open.
+    rules = with_live_rule_values(await load_question_rules(form["id"], org_id), choices)
     answers, problem = validate_submission(fields, rules, answers_in)
     if problem:
         raise HTTPException(status_code=400, detail=problem)

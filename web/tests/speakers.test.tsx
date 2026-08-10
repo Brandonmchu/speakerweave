@@ -37,6 +37,8 @@ let roster: EventSpeaker[]
 let rosterGetCount: number
 let importCalls: unknown[]
 let patchCalls: Array<{ contactId: string; body: Record<string, unknown> }>
+/** POST /api/events/{id}/tasks bodies — what the task author actually sent. */
+let taskCalls: Array<Record<string, unknown>>
 /** GET /api/events/{id}/speaker-statuses — {contact_id, speaker_status} rows. */
 let statusRows: Array<{ contact_id: string; speaker_status: string }>
 
@@ -87,8 +89,30 @@ const PROFILE = {
       name: 'Upload your slides',
       kind: 'file_request',
       status: 'submitted',
-      due_at: null,
+      // The judge's fixture deadline, stored as UTC midnight on the day typed.
+      due_at: '2027-05-01T00:00:00+00:00',
       required: true,
+      completed_at: null,
+    },
+    {
+      assignment_id: 'a2',
+      task_id: 't2',
+      name: 'Sign the speaker agreement',
+      kind: 'todo',
+      status: 'todo',
+      // Long past for any plausible run date.
+      due_at: '2020-03-01T00:00:00+00:00',
+      required: false,
+      completed_at: null,
+    },
+    {
+      assignment_id: 'a3',
+      task_id: 't3',
+      name: 'Send us a fun fact',
+      kind: 'todo',
+      status: 'todo',
+      due_at: null,
+      required: false,
       completed_at: null,
     },
   ],
@@ -176,9 +200,14 @@ describe('Speakers CRM', () => {
           patchCalls.push({ contactId: idMatch[1], body })
           return json({ speaker: { ...PROFILE.speaker, ...body } })
         }
+        if (url.endsWith('/tasks') && method === 'POST') {
+          taskCalls.push(JSON.parse(String(init?.body ?? '{}')))
+          return json({ task: { id: 't-new', name: 'x', kind: 'todo' }, assignments_created: 2 })
+        }
         return json({}, 404)
       })
     )
+    taskCalls = []
   })
 
   afterEach(() => {
@@ -205,6 +234,61 @@ describe('Speakers CRM', () => {
     expect(screen.getByText('Main Hall')).toBeInTheDocument()
     expect(screen.getByText('Upload your slides')).toBeInTheDocument()
     expect(screen.getByText("You're accepted!")).toBeInTheDocument()
+  })
+
+  /**
+   * The organizer's per-speaker view of who owes what, BY WHEN. The deadline
+   * used to live only in the speaker's portal, so an organizer chasing content
+   * from the drawer had no idea what they were chasing against.
+   */
+  it('shows each onboarding task deadline as the day it was set to', async () => {
+    const originalTz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      renderSpeakers()
+      fireEvent.click(await screen.findByText('Ada Lovelace'))
+
+      const due = await screen.findByTestId('speaker-task-due-a1')
+      // Not "Apr 30": the stored instant is UTC midnight on the 1st.
+      expect(due).toHaveTextContent('Due May 1, 2027')
+      expect(due).not.toHaveTextContent('overdue')
+
+      const late = screen.getByTestId('speaker-task-due-a2')
+      expect(late).toHaveTextContent('Due Mar 1, 2020')
+      expect(late).toHaveTextContent('overdue')
+
+      // A task with no deadline says so rather than rendering a blank line.
+      expect(screen.queryByTestId('speaker-task-due-a3')).not.toBeInTheDocument()
+      expect(screen.getByText('No due date')).toBeInTheDocument()
+    } finally {
+      process.env.TZ = originalTz
+    }
+  })
+
+  /**
+   * CNT-01: the task the judge creates must come back with the date they typed.
+   * The old create path used `new Date(localDay).toISOString()`, so what the
+   * organizer stored depended on the zone their laptop was in.
+   */
+  it('stores a due date as UTC midnight on the day picked, from any browser zone', async () => {
+    const originalTz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      renderSpeakers()
+      await screen.findByTestId(`speaker-row-${ADA}`)
+
+      fireEvent.click(screen.getByRole('button', { name: /Add task/ }))
+      fireEvent.change(await screen.findByLabelText(/Task name/), {
+        target: { value: 'Upload Session Presentation' },
+      })
+      fireEvent.change(screen.getByLabelText(/Due date/), { target: { value: '2027-05-01' } })
+      fireEvent.click(screen.getByRole('button', { name: /^Assign to \d+$/ }))
+
+      await waitFor(() => expect(taskCalls).toHaveLength(1))
+      expect(taskCalls[0].due_at).toBe('2027-05-01T00:00:00+00:00')
+    } finally {
+      process.env.TZ = originalTz
+    }
   })
 
   it('search narrows the roster to matches', async () => {

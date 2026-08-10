@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 # The columns an organizer's export/import speaks. Aliases fold onto these so a
 # spreadsheet exported from anywhere still lands in the right place.
-CANONICAL_COLUMNS = ("first_name", "last_name", "email", "company", "title")
+CANONICAL_COLUMNS = ("first_name", "last_name", "email", "company", "title", "bio", "notes")
+
+# A whole-name column ("name", "Full Name", "Speaker") is NOT canonical: it is
+# split into first/last at parse time, so the row shape downstream never has to
+# know the sheet had one column where ours has two.
+NAME_COLUMN = "name"
 
 # Per-field length caps, mirroring the structured-row Pydantic model so a CSV
 # cannot smuggle in an oversized value that the `rows` path would reject.
@@ -25,6 +31,8 @@ MAX_LENGTHS: dict[str, int] = {
     "email": 320,
     "company": 300,
     "title": 300,
+    "bio": 5_000,
+    "notes": 2_000,
 }
 
 # A generous per-cell ceiling. Python's csv module raises csv.Error the moment a
@@ -46,34 +54,103 @@ def _ensure_field_limit() -> None:
 
 _ensure_field_limit()
 
+# Header keys below are in NORMALIZED form (see `_header_key`): lower-cased,
+# with underscores/hyphens/dots folded to single spaces. So one entry covers
+# "First Name", "first_name", "FIRST-NAME" and "  first name  " at once.
 _HEADER_ALIASES: dict[str, str] = {
-    "first_name": "first_name",
+    # whole-name columns — split into first/last at parse time
+    "name": NAME_COLUMN,
+    "full name": NAME_COLUMN,
+    "fullname": NAME_COLUMN,
+    "display name": NAME_COLUMN,
+    "speaker": NAME_COLUMN,
+    "speaker name": NAME_COLUMN,
+    "contact name": NAME_COLUMN,
+    "person": NAME_COLUMN,
+    # given / family name
     "first name": "first_name",
     "firstname": "first_name",
     "first": "first_name",
     "given name": "first_name",
-    "last_name": "last_name",
+    "forename": "first_name",
     "last name": "last_name",
     "lastname": "last_name",
     "last": "last_name",
     "surname": "last_name",
     "family name": "last_name",
+    # email — the one column an import cannot do without
     "email": "email",
-    "e-mail": "email",
+    "e mail": "email",
     "email address": "email",
+    "emailaddress": "email",
+    "work email": "email",
+    "contact email": "email",
     "mail": "email",
+    # company
     "company": "company",
-    "company_name": "company",
     "company name": "company",
     "organization": "company",
     "organisation": "company",
     "org": "company",
+    "employer": "company",
+    "affiliation": "company",
+    # job title
     "title": "title",
     "job title": "title",
     "jobtitle": "title",
     "role": "title",
     "position": "title",
+    # biography → contacts.about
+    "bio": "bio",
+    "biography": "bio",
+    "about": "bio",
+    "speaker bio": "bio",
+    "short bio": "bio",
+    "profile": "bio",
+    # free-form organizer notes → contacts.logistics_notes
+    "notes": "notes",
+    "note": "notes",
+    "internal notes": "notes",
+    "logistics": "notes",
+    "logistics notes": "notes",
+    "travel notes": "notes",
 }
+
+# Separators a spreadsheet might use inside a header word.
+_HEADER_SEPARATORS = re.compile(r"[\s_\-.]+")
+
+
+def _header_key(cell: object) -> str:
+    """A header cell folded to its lookup form: no BOM, no quotes, one space.
+
+    "First_Name" / "FIRST NAME" / "first-name" all land on "first name", so the
+    alias table needs one entry per concept instead of one per spelling.
+    """
+    text = _clean(cell).lstrip("\ufeff").strip().strip('"').strip("'").lower()
+    return _HEADER_SEPARATORS.sub(" ", text).strip()
+
+
+def split_full_name(value: str) -> tuple[str, str]:
+    """Split a whole-name cell into ``(first, last)``.
+
+    Two shapes are understood, because those are the two spreadsheets people
+    actually have: ``"Priya Raman"`` splits on the LAST space (so multi-word
+    given names stay intact), and ``"Raman, Priya"`` splits on the comma. A
+    single word is a first name with no surname — never a dropped value.
+    """
+    text = (value or "").strip()
+    if not text:
+        return "", ""
+    if "," in text:
+        last, _, first = text.partition(",")
+        last, first = last.strip(), first.strip()
+        if last and first:
+            return first, last
+        return (first or last), ""
+    parts = text.split()
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[:-1]), parts[-1]
 
 
 def looks_like_email(value: str) -> bool:
@@ -105,14 +182,24 @@ def _clean(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
 
-def parse_speaker_csv(text: str) -> tuple[list[dict], str | None, list[dict]]:
+def parse_speaker_csv(text: str) -> tuple[list[dict], str | None, list[dict], list[str]]:
     """Parse pasted/uploaded CSV into normalized row dicts.
 
-    Returns ``(rows, header_error, parse_errors)``. Each row carries the five
-    canonical fields plus a 1-based ``line`` (counting the header) for error
-    reporting. A missing ``email`` column is a header-level error — the one
-    failure that dooms every row, so it is reported once rather than as N bad
-    rows.
+    Returns ``(rows, header_error, parse_errors, ignored_columns)``. Each row
+    carries the canonical fields plus a 1-based ``line`` (counting the header)
+    for error reporting.
+
+    Three header outcomes, and only one of them is silent:
+
+    * **Recognized** columns map onto the canonical fields. A whole-name column
+      ("name", "Full Name") is split into first/last, so a sheet with one name
+      column keeps its names instead of falling back to the email address.
+    * **Unrecognized** columns are ignored — but never silently: their original
+      headings come back in ``ignored_columns`` so the UI can say exactly what
+      it dropped. A partly-understood file must not read as a clean success.
+    * **No email column** is a header-level error. It dooms every row, so it is
+      reported once, as a hard failure, rather than as N bad rows or (worse) an
+      import that "succeeds" with nothing usable in it.
 
     Resilience is the point of ``parse_errors``: a single malformed record (a
     stray NUL, a cell past the ceiling) raises ``csv.Error`` for that row only.
@@ -122,28 +209,36 @@ def parse_speaker_csv(text: str) -> tuple[list[dict], str | None, list[dict]]:
     _ensure_field_limit()
     text = (text or "").strip()
     if not text:
-        return [], "The file is empty.", []
+        return [], "The file is empty.", [], []
 
     reader = csv.reader(io.StringIO(text))
     try:
         raw_header = next(reader)
     except StopIteration:
-        return [], "The file is empty.", []
+        return [], "The file is empty.", [], []
     except csv.Error as exc:
-        return [], f"Could not read the CSV header ({exc}).", []
+        return [], f"Could not read the CSV header ({exc}).", [], []
 
     mapping: dict[int, str] = {}
+    ignored_columns: list[str] = []
     for index, cell in enumerate(raw_header):
-        key = _HEADER_ALIASES.get(_clean(cell).lower())
+        label = _clean(cell).lstrip("\ufeff").strip()
+        key = _HEADER_ALIASES.get(_header_key(cell))
         if key and key not in mapping.values():
             mapping[index] = key
+        elif label:
+            # Unknown, or a second column claiming a slot already taken.
+            ignored_columns.append(label)
 
     if "email" not in mapping.values():
-        return (
-            [],
-            "No 'email' column found. Expected columns: first_name, last_name, email, company, title.",
-            [],
+        found = ", ".join(_clean(cell) for cell in raw_header if _clean(cell)) or "none"
+        detail = (
+            "No 'email' column found — every speaker row needs an email address to "
+            f"import. Columns read: {found}. Use a header named 'email' (or 'e-mail', "
+            "'email address'), plus 'name' (or 'first_name' and 'last_name'), "
+            "'company', 'title', 'bio'."
         )
+        return [], detail, [], ignored_columns
 
     rows: list[dict] = []
     parse_errors: list[dict] = []
@@ -161,12 +256,22 @@ def parse_speaker_csv(text: str) -> tuple[list[dict], str | None, list[dict]]:
         if not any(_clean(cell) for cell in raw_row):
             continue  # a blank spacer line is not a bad row
         row = {column: "" for column in CANONICAL_COLUMNS}
+        whole_name = ""
         for index, key in mapping.items():
-            if index < len(raw_row):
-                row[key] = _clean(raw_row[index])
+            if index >= len(raw_row):
+                continue
+            value = _clean(raw_row[index])
+            if key == NAME_COLUMN:
+                whole_name = value
+            else:
+                row[key] = value
+        # A whole-name column only fills what explicit first/last columns left
+        # empty, so "name" and "first_name" in the same sheet never fight.
+        if whole_name and not row["first_name"] and not row["last_name"]:
+            row["first_name"], row["last_name"] = split_full_name(whole_name)
         row["line"] = reader.line_num
         rows.append(row)
-    return rows, None, parse_errors
+    return rows, None, parse_errors, ignored_columns
 
 
 def collect_import(rows: list[dict]) -> tuple[list[dict], list[dict], int]:
@@ -229,6 +334,8 @@ def collect_import(rows: list[dict]) -> tuple[list[dict], list[dict], int]:
                 "last_name": _clean(row.get("last_name")),
                 "company": _clean(row.get("company")),
                 "title": _clean(row.get("title")),
+                "bio": _clean(row.get("bio")),
+                "notes": _clean(row.get("notes")),
                 "line": line,
             }
         )
@@ -248,6 +355,8 @@ def contact_patch(row: dict, existing: dict) -> dict:
         "last_name": "last_name",
         "company": "company_name",
         "title": "title",
+        "bio": "about",
+        "notes": "logistics_notes",
     }
     for row_key, column in field_map.items():
         value = _clean(row.get(row_key))
@@ -257,8 +366,13 @@ def contact_patch(row: dict, existing: dict) -> dict:
 
 
 def contact_insert(org_id: str, event_id: str, row: dict) -> dict:
-    """A brand-new contact record for an import row."""
-    return {
+    """A brand-new contact record for an import row.
+
+    ``about``/``logistics_notes`` are added only when the CSV actually carried
+    them, so an import never writes a column a pre-migration database may not
+    have yet — and never inserts an explicit null where "unset" is meant.
+    """
+    record = {
         "org_id": org_id,
         "event_id": event_id,
         "email": row["email"],
@@ -267,3 +381,8 @@ def contact_insert(org_id: str, event_id: str, row: dict) -> dict:
         "company_name": _clean(row.get("company")) or None,
         "title": _clean(row.get("title")) or None,
     }
+    if _clean(row.get("bio")):
+        record["about"] = _clean(row.get("bio"))
+    if _clean(row.get("notes")):
+        record["logistics_notes"] = _clean(row.get("notes"))
+    return record

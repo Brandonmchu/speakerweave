@@ -43,6 +43,7 @@ import {
   getAgendaConflicts,
   gridGeometry,
   localEpochMinutes,
+  outsideEventDays,
   publishSchedule,
   scheduleSession,
   zoneHint,
@@ -873,17 +874,29 @@ function formatDayTab(dateKey: string): string {
 }
 
 /**
- * The day switcher for a multi-day event. One tab per conference day; the grid,
- * drag-and-drop and click-to-place all operate on the selected one. A single-day
- * event never renders this (the caller guards on `days.length > 1`).
+ * The pseudo-day the out-of-range placements are gathered under. Deliberately
+ * not a date: it is not a day of the conference, which is the whole point.
+ */
+const OUTSIDE_DAY = '__outside__'
+
+/**
+ * The day switcher for a multi-day event. One tab per CONFERENCE day — the
+ * event's configured span and nothing else — plus, when the data has drifted, a
+ * final tab collecting placements that fall outside it.
+ *
+ * The grid, drag-and-drop and click-to-place all operate on the selected day. A
+ * single-day event with no strays never renders this (the caller guards).
  */
 function DaySwitcher({
   days,
   value,
+  outsideCount,
   onChange,
 }: {
   days: string[]
   value: string
+  /** How many scheduled sessions sit outside the event's dates. 0 hides the tab. */
+  outsideCount: number
   onChange: (day: string) => void
 }) {
   return (
@@ -917,6 +930,90 @@ function DaySwitcher({
           </button>
         )
       })}
+      {outsideCount > 0 && (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={value === OUTSIDE_DAY}
+          data-testid="agenda-day-tab-outside"
+          data-outside-count={outsideCount}
+          onClick={() => onChange(OUTSIDE_DAY)}
+          className={cn(
+            'flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            value === OUTSIDE_DAY
+              ? 'bg-destructive text-destructive-foreground shadow-soft'
+              : 'text-destructive hover:bg-destructive/10'
+          )}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Outside event dates ({outsideCount})
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The stray placements, and the one-click way out of each.
+ *
+ * A session here has a real time and a real room, on a date the conference does
+ * not run. There is no honest grid to draw it on — so it gets a list, a reason,
+ * and a button that puts it back in the tray where it can be scheduled properly.
+ */
+function OutsideEventDatesPanel({
+  sessions,
+  rooms,
+  onUnschedule,
+}: {
+  sessions: GridSession[]
+  rooms: Map<string, string>
+  onUnschedule: (id: string) => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div
+        data-testid="outside-dates-warning"
+        className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <p className="text-foreground">
+          <strong className="font-semibold text-destructive-strong">
+            {sessions.length} session{sessions.length === 1 ? '' : 's'} scheduled outside the
+            event dates.
+          </strong>{' '}
+          These are not on any conference day, so they do not appear on the grid or on your
+          public schedule. Move each one back to the unscheduled tray, then place it on a real
+          day.
+        </p>
+      </div>
+
+      <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+        {sessions.map((session) => (
+          <li
+            key={session.id}
+            data-testid={`outside-session-${session.id}`}
+            className="flex flex-wrap items-center gap-3 px-4 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-foreground">{session.title}</p>
+              <p className="truncate text-xs text-muted-foreground tabular-nums">
+                {session.day ? formatDayTab(session.day) : 'Unknown day'}
+                {session.startMin != null && ` · ${formatMinutes(session.startMin)}`}
+                {session.roomId && ` · ${rooms.get(session.roomId) ?? session.roomId}`}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid={`outside-unschedule-${session.id}`}
+              onClick={() => onUnschedule(session.id)}
+            >
+              <Inbox className="h-3.5 w-3.5" />
+              Move to tray
+            </Button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -1190,19 +1287,31 @@ export function Agenda() {
   const zone = agenda?.event?.timezone ?? null
   const grid = useMemo(() => gridGeometry(agenda?.event), [agenda?.event])
 
-  // Every day the builder can show, and the one currently in view. Keep the
-  // selection valid as data loads or the span changes.
+  // Every day the builder can show: the event's configured span, and only that.
   const days = useMemo(() => agendaDays(agenda, zone), [agenda, zone])
+  // Placements that landed on no conference day at all — a date change left them
+  // behind, or they predate the span. Their own tab, never a fake day tab.
+  const outsideIds = useMemo(
+    () => new Set(outsideEventDays(agenda, zone).map((session) => session.id)),
+    [agenda, zone]
+  )
+  // Every selectable tab, in order. The stray group is last and only exists
+  // while there is something in it.
+  const dayOptions = useMemo(
+    () => (outsideIds.size > 0 ? [...days, OUTSIDE_DAY] : days),
+    [days, outsideIds]
+  )
   useEffect(() => {
-    if (days.length && !days.includes(selectedDay)) setSelectedDay(days[0])
-  }, [days, selectedDay])
+    if (dayOptions.length && !dayOptions.includes(selectedDay)) setSelectedDay(dayOptions[0])
+  }, [dayOptions, selectedDay])
   // The day actually in view: the selection when it is still valid, else the
   // first real day. Guards the frame between the board loading and the effect
   // re-homing a now-stale selection, so the grid never filters on a dead day.
   const day =
-    selectedDay && days.includes(selectedDay)
+    selectedDay && dayOptions.includes(selectedDay)
       ? selectedDay
       : (days[0] ?? new Date().toISOString().slice(0, 10))
+  const showingOutside = day === OUTSIDE_DAY
 
   const sessions = useMemo(
     () => (agenda?.sessions ?? []).map((s) => toCard(s, zone)),
@@ -1247,8 +1356,21 @@ export function Agenda() {
   // tray. Cards on other days are hidden here, but still counted in the header
   // and still swept for conflicts (which compare absolute instants, not days).
   const gridSessions = useMemo(
-    () => sessions.filter((s) => !isScheduled(s) || s.day === day),
-    [sessions, day]
+    () => sessions.filter((s) => !isScheduled(s) || (s.day === day && !outsideIds.has(s.id))),
+    [sessions, day, outsideIds]
+  )
+  /** The stray placements themselves, earliest first — the "Outside" tab's list. */
+  const outsideSessions = useMemo(
+    () =>
+      sessions
+        .filter((s) => outsideIds.has(s.id))
+        .sort(
+          (a, b) =>
+            (a.day ?? '').localeCompare(b.day ?? '') ||
+            (a.startMin ?? 0) - (b.startMin ?? 0) ||
+            a.title.localeCompare(b.title)
+        ),
+    [sessions, outsideIds]
   )
   // A real instant so the tz hint resolves the right abbreviation (PST vs PDT).
   const zoneReferenceIso =
@@ -1437,6 +1559,44 @@ export function Agenda() {
     move.mutate({ id: session.id, patch })
   }
 
+  /* ---- occupancy ---------------------------------------------------------- */
+
+  /**
+   * The card already lying across `[startMin, startMin + durationMin)` in this
+   * room, on the day in view — i.e. the reason a placement cannot go there.
+   *
+   * The grid draws cards ABOVE the droppable lattice, so an occupied slot is
+   * physically un-clickable: the pointer lands on the card, not the cell. That
+   * used to mean click-to-place onto a taken slot did nothing at all and said
+   * nothing either. This is what turns that silence into an answer.
+   */
+  function occupantAt(
+    roomId: string,
+    startMin: number,
+    durationMin: number,
+    excludeId: string
+  ): GridSession | null {
+    const end = startMin + durationMin
+    for (const other of gridSessions) {
+      if (other.id === excludeId) continue
+      if (!isScheduledGrid(other)) continue
+      if (other.roomId !== roomId || other.day !== day) continue
+      if (overlapStart(other.startMin, other.startMin + other.durationMin, startMin, end) !== null) {
+        return other
+      }
+    }
+    return null
+  }
+
+  /** The one message an occupied slot gives back, whether clicked or dropped on. */
+  function refuseOccupied(occupant: GridSession) {
+    toast({
+      variant: 'destructive',
+      title: `Slot occupied by ${occupant.title}`,
+      description: 'Pick a free slot, or move that session out of the way first.',
+    })
+  }
+
   /* ---- click-to-assign: the drag-free path -------------------------------- */
 
   /** Arm a card for placement (or disarm it if it's already the armed one). */
@@ -1445,6 +1605,24 @@ export function Agenda() {
     if (justDragged.current) return
     setSelectedId((prev) => (prev === id ? null : id))
   }, [])
+
+  /**
+   * A click on a card that is already ON the grid.
+   *
+   * With nothing armed this is "pick this up to move it" — the ordinary select.
+   * With something else armed it is an attempted placement onto the slot this
+   * card is sitting in, so it answers instead of silently switching the armed
+   * card out from under the organizer.
+   */
+  function selectGridCard(id: string) {
+    if (justDragged.current) return
+    const occupant = byId.get(id)
+    if (selectedId && selectedId !== id && occupant) {
+      refuseOccupied(occupant)
+      return
+    }
+    setSelectedId((prev) => (prev === id ? null : id))
+  }
 
   /** The "Unschedule" / × affordance on a placed card — back to the tray. */
   function unschedule(id: string) {
@@ -1461,9 +1639,21 @@ export function Agenda() {
   function placeInSlot(roomId: string, slot: number) {
     if (!selectedId) return
     const session = byId.get(selectedId)
-    if (session) {
-      commit(session, { roomId, startSlot: clampSlot(grid, slot, session.durationMin) })
+    if (!session) {
+      setSelectedId(null)
+      return
     }
+    const startSlot = clampSlot(grid, slot, session.durationMin)
+    // A long card can reach into an occupied slot from an empty one, so the
+    // check is on the whole range it would cover, not on the clicked cell.
+    const occupant = occupantAt(roomId, slotToMin(grid, startSlot), session.durationMin, session.id)
+    if (occupant) {
+      // The selection stays armed: the next click should be another slot, not
+      // another trip through the tray.
+      refuseOccupied(occupant)
+      return
+    }
+    commit(session, { roomId, startSlot })
     setSelectedId(null)
   }
 
@@ -1567,7 +1757,18 @@ export function Agenda() {
       commit(session, null)
     } else if (session) {
       const target = resolveTarget(session, data)
-      if (target) commit(session, target)
+      if (target) {
+        // Same rule as click-to-place, same message: a drop onto a taken slot is
+        // refused with the name of what is already there.
+        const occupant = occupantAt(
+          target.roomId,
+          slotToMin(grid, target.startSlot),
+          session.durationMin,
+          session.id
+        )
+        if (occupant) refuseOccupied(occupant)
+        else commit(session, target)
+      }
     }
     endDrag()
   }
@@ -1656,8 +1857,13 @@ export function Agenda() {
     body = (
       <>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          {days.length > 1 ? (
-            <DaySwitcher days={days} value={day} onChange={setSelectedDay} />
+          {days.length > 1 || outsideSessions.length > 0 ? (
+            <DaySwitcher
+              days={days}
+              value={day}
+              outsideCount={outsideSessions.length}
+              onChange={setSelectedDay}
+            />
           ) : (
             <span />
           )}
@@ -1716,8 +1922,19 @@ export function Agenda() {
             </p>
           </div>
 
-          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
-            {rooms.length === 0 ? (
+          <div
+            className={cn(
+              'min-w-0 flex-1',
+              !showingOutside && 'overflow-hidden rounded-lg border border-border bg-card shadow-soft'
+            )}
+          >
+            {showingOutside ? (
+              <OutsideEventDatesPanel
+                sessions={outsideSessions}
+                rooms={roomNames}
+                onUnschedule={unschedule}
+              />
+            ) : rooms.length === 0 ? (
               <EmptyState
                 icon={<Columns3 className="h-6 w-6 text-muted-foreground" />}
                 title="No rooms yet"
@@ -1768,7 +1985,7 @@ export function Agenda() {
                       grid={grid}
                       selectedId={selectedId}
                       selecting={selectedId !== null}
-                      onSelect={selectSession}
+                      onSelect={selectGridCard}
                       onUnschedule={unschedule}
                       onPlaceSlot={onPlaceSlot}
                     />

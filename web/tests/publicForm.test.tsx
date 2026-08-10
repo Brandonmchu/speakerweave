@@ -620,3 +620,189 @@ describe('PublicForm — native select fields (eval-legible)', () => {
     expect(submitted).toHaveLength(0)
   })
 })
+
+/**
+ * CFP-02, end to end in the renderer.
+ *
+ * "The 'Workshop prerequisites' field is visible when format 'Workshop
+ * (120 min)' is selected and hidden when 'Talk (30 min)' is selected —
+ * visibility follows the controlling answer in both directions."
+ *
+ * The rule the backend serves has already had its operand re-pointed at the
+ * event's LIVE format name (services/forms.py `with_live_rule_values`), so what
+ * these tests pin is the other half of that contract: given an operand that
+ * names a choice the select actually offers, the branch opens and closes on
+ * every change with no reload, and the dependent answer reaches the payload
+ * only from the branch that was open when Submit was pressed.
+ */
+const FMT = 'field-session-format'
+const PREREQ = 'field-workshop-prerequisites'
+
+const WORKSHOP_PAYLOAD = {
+  form: { id: 'form-3', slug: 'cfp', name: 'Call for Papers', welcome_html: '', settings: {} },
+  event: { name: 'DevFlow Conf 2027' },
+  fields: [
+    {
+      id: FMT,
+      label: 'Session format',
+      type: 'dropdown',
+      required: true,
+      order: 1,
+      // The event's CURRENT format names, as Settings has them.
+      options: { choices: ['Talk (30 min)', 'Workshop (120 min)', 'Panel (45 min)'] },
+    },
+    {
+      id: PREREQ,
+      label: 'Workshop prerequisites',
+      type: 'textarea',
+      // Required, but only inside the branch — a format nobody picked must
+      // never be able to block a submit.
+      required: true,
+      order: 2,
+    },
+  ],
+  question_rules: [
+    {
+      id: 'rule-workshop',
+      target_field_id: PREREQ,
+      logic: {
+        when: [{ field: FMT, op: 'eq', value: 'Workshop (120 min)' }],
+        match: 'all',
+        action: 'show',
+      },
+    },
+  ],
+}
+
+describe('PublicForm — CFP-02 conditional field keyed to session format', () => {
+  beforeEach(() => {
+    submitted = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/submissions')) {
+          submitted.push(JSON.parse(String(init?.body ?? '{}')))
+          return jsonResponse({ id: 'sub-3', friendly_id: 'DAIS-003' }, 201)
+        }
+        return jsonResponse(WORKSHOP_PAYLOAD)
+      })
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the field on Workshop and hides it on Talk, both directions, no reload', async () => {
+    renderForm()
+    const format = await screen.findByLabelText(/Session format/)
+    // "show when" means hidden by default: nothing is selected yet.
+    expect(screen.queryByLabelText(/Workshop prerequisites/)).not.toBeInTheDocument()
+
+    fireEvent.change(format, { target: { value: 'Workshop (120 min)' } })
+    expect(await screen.findByLabelText(/Workshop prerequisites/)).toBeInTheDocument()
+
+    fireEvent.change(format, { target: { value: 'Talk (30 min)' } })
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/Workshop prerequisites/)).not.toBeInTheDocument()
+    )
+
+    // ...and back again — the same select, same instance, no remount.
+    fireEvent.change(format, { target: { value: 'Workshop (120 min)' } })
+    expect(await screen.findByLabelText(/Workshop prerequisites/)).toBeInTheDocument()
+  })
+
+  it('carries the prerequisites answer only when Workshop is the standing choice', async () => {
+    renderForm()
+    await screen.findByLabelText(/Session format/)
+
+    fill(/First name/, 'Priya')
+    fill(/Last name/, 'Raman')
+    fill(/Email/, 'priya@example.com')
+    fill(/Session title/, 'Build systems that hold')
+    fill(/Session format/, 'Workshop (120 min)')
+    await screen.findByLabelText(/Workshop prerequisites/)
+    fill(/Workshop prerequisites/, 'Bring a laptop with Docker installed.')
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    expect(submitted[0].answers).toEqual({
+      [FMT]: 'Workshop (120 min)',
+      [PREREQ]: 'Bring a laptop with Docker installed.',
+    })
+  })
+
+  it('drops the answer to a branch the speaker backed out of', async () => {
+    renderForm()
+    await screen.findByLabelText(/Session format/)
+
+    fill(/First name/, 'Priya')
+    fill(/Last name/, 'Raman')
+    fill(/Email/, 'priya@example.com')
+    fill(/Session title/, 'Build systems that hold')
+    fill(/Session format/, 'Workshop (120 min)')
+    await screen.findByLabelText(/Workshop prerequisites/)
+    fill(/Workshop prerequisites/, 'Left over from the workshop I withdrew.')
+    fill(/Session format/, 'Talk (30 min)')
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+    await waitFor(() => expect(submitted).toHaveLength(1))
+    // Hidden, so neither required nor submitted — exactly what the server's
+    // validate_submission concludes from the same rule.
+    expect(submitted[0].answers).toEqual({ [FMT]: 'Talk (30 min)' })
+  })
+
+  it('makes the conditional field required only once its branch is open', async () => {
+    renderForm()
+    await screen.findByLabelText(/Session format/)
+
+    fill(/First name/, 'Priya')
+    fill(/Last name/, 'Raman')
+    fill(/Email/, 'priya@example.com')
+    fill(/Session title/, 'Build systems that hold')
+
+    // Branch open, answer blank: it blocks.
+    fill(/Session format/, 'Workshop (120 min)')
+    await screen.findByLabelText(/Workshop prerequisites/)
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+    expect(await screen.findByText('Required')).toBeInTheDocument()
+    expect(submitted).toHaveLength(0)
+
+    // Branch closed, same blank answer: a question nobody was asked cannot
+    // hold a speaker up.
+    fill(/Session format/, 'Talk (30 min)')
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/Workshop prerequisites/)).not.toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Submit proposal/ }))
+    await waitFor(() => expect(submitted).toHaveLength(1))
+  })
+
+  it('never fires a rule still pointing at the pre-rename format name', async () => {
+    // The bug itself, pinned: an operand the select cannot produce matches
+    // nothing, in either direction. This is why the backend re-points it.
+    const stale = {
+      ...WORKSHOP_PAYLOAD,
+      question_rules: [
+        {
+          id: 'rule-workshop',
+          target_field_id: PREREQ,
+          logic: {
+            when: [{ field: FMT, op: 'eq', value: 'Workshop' }],
+            match: 'all',
+            action: 'show',
+          },
+        },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(stale)))
+
+    renderForm()
+    const format = await screen.findByLabelText(/Session format/)
+    fireEvent.change(format, { target: { value: 'Workshop (120 min)' } })
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/Workshop prerequisites/)).not.toBeInTheDocument()
+    )
+  })
+})

@@ -17,6 +17,8 @@ import { Comms } from '@/pages/Comms'
 import { ContentLibrary } from '@/pages/ContentLibrary'
 import { Dashboard } from '@/pages/Dashboard'
 import { DevLogin } from '@/pages/DevLogin'
+import { Directory } from '@/pages/Directory'
+import { Pipeline } from '@/pages/Pipeline'
 import { Home } from '@/pages/Home'
 import { Evaluation } from '@/pages/Evaluation'
 import { FormEditor } from '@/pages/FormEditor'
@@ -124,6 +126,16 @@ export default function App() {
         <Route path="/gallery" element={<Navigate to={featuredSpeakersUrl} replace />} />
         <Route path="/e/:slug" element={<EventScheduleRedirect />} />
 
+        {/* Guessable CRM aliases. Someone looking for the speaker database will
+            type one of these before they find /directory; each lands on the
+            real thing rather than bouncing to the submissions inbox. */}
+        <Route path="/crm" element={<Navigate to="/directory" replace />} />
+        <Route path="/contacts" element={<Navigate to="/directory" replace />} />
+        <Route path="/people" element={<Navigate to="/directory" replace />} />
+        <Route path="/speaker-database" element={<Navigate to="/directory" replace />} />
+        <Route path="/sourcing" element={<Navigate to="/pipeline" replace />} />
+        <Route path="/prospects" element={<Navigate to="/pipeline" replace />} />
+
         {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
         <Route path="/portal/:token" element={<Portal />} />
         <Route path="/portal" element={<Portal />} />
@@ -151,6 +163,9 @@ export default function App() {
           <Route path="/forms/:formId" element={<FormEditor />} />
           <Route path="/evaluation" element={<Evaluation />} />
           <Route path="/comms" element={<Comms />} />
+          {/* Org-level CRM: above events, not inside one. */}
+          <Route path="/directory" element={<Directory />} />
+          <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* First run: no event yet. Forms/Settings redirect here. */}
           <Route path="/onboarding" element={<Onboarding />} />

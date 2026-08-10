@@ -273,6 +273,88 @@ def test_unknown_slug_404s(program_client, program_db):
     assert program_client.get("/public/program/nope/speakers").status_code == 404
 
 
+# ── the event-dates clamp ────────────────────────────────────────────────────
+
+
+def _run_the_event_on(program_db, starts_at: str, ends_at: str) -> None:
+    """Give the seeded event a real span. Without one there is nothing to clamp
+    to, which is why every test above is unaffected by this behaviour."""
+    event = program_db.rows("events")[0]
+    event["starts_at"] = starts_at
+    event["ends_at"] = ends_at
+
+
+def test_schedule_omits_sessions_placed_outside_the_event_dates(program_client, program_db):
+    """A session stranded on a date the conference does not run is not on a
+    conference day, so it must not appear on the public programme — the same
+    clamp the builder puts on its day tabs. Publishing it would announce a day
+    the event does not have."""
+    _run_the_event_on(program_db, "2026-10-12T15:00:00+00:00", "2026-10-14T01:00:00+00:00")
+    program_db.seed(
+        "sessions",
+        _session(
+            "eeeeeeee-0000-0000-0000-0000000000s8",
+            status="accepted",
+            # Five weeks after the conference ends — a date change left it here.
+            starts_at="2026-11-20T17:00:00+00:00",
+            ends_at="2026-11-20T17:30:00+00:00",
+            room=ROOM_A,
+            track=TRACK_ENG,
+            title="Left Behind By A Date Change",
+        ),
+    )
+
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    titles = [s["title"] for day in body["days"] for s in day["sessions"]]
+    assert "Left Behind By A Date Change" not in titles
+    assert "2026-11-20" not in [d["date"] for d in body["days"]]
+    # The real programme is untouched.
+    assert [d["date"] for d in body["days"]] == ["2026-10-12", "2026-10-13"]
+    assert "Opening Keynote" in titles
+
+
+def test_schedule_keeps_the_last_day_when_the_event_ends_at_local_midnight(
+    program_client, program_db
+):
+    """The end is EXCLUSIVE. An event ending at 00:00 on the 14th runs through
+    the 13th, so the 13th's sessions must survive the clamp."""
+    _run_the_event_on(program_db, "2026-10-12T15:00:00+00:00", "2026-10-14T07:00:00+00:00")
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    assert [d["date"] for d in body["days"]] == ["2026-10-12", "2026-10-13"]
+
+
+def test_the_clamp_uses_the_event_zone_not_the_callers_tz(program_client, program_db):
+    """A ?tz parameter regroups the DISPLAY; it must not change which sessions
+    are part of the conference. Otherwise a link with ?tz=Asia/Tokyo would
+    publish a different programme from the same event."""
+    _run_the_event_on(program_db, "2026-10-12T15:00:00+00:00", "2026-10-14T01:00:00+00:00")
+    utc = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    tokyo = program_client.get(f"/public/program/{SLUG}/schedule?tz=Asia/Tokyo").json()
+
+    titles = {s["title"] for day in utc["days"] for s in day["sessions"]}
+    assert titles == {s["title"] for day in tokyo["days"] for s in day["sessions"]}
+
+
+def test_an_event_with_no_configured_span_clamps_nothing(program_client, program_db):
+    """No span, nothing to clamp to. The seeded event has no dates, so this is
+    also what keeps every other test in this module honest."""
+    program_db.seed(
+        "sessions",
+        _session(
+            "eeeeeeee-0000-0000-0000-0000000000s9",
+            status="accepted",
+            starts_at="2027-03-01T17:00:00+00:00",
+            ends_at="2027-03-01T17:30:00+00:00",
+            room=ROOM_A,
+            track=TRACK_ENG,
+            title="Far Future Talk",
+        ),
+    )
+    body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    titles = [s["title"] for day in body["days"] for s in day["sessions"]]
+    assert "Far Future Talk" in titles
+
+
 # ── speakers ─────────────────────────────────────────────────────────────────
 
 
@@ -311,6 +393,18 @@ def test_speaker_sessions_carry_id_and_format(program_client, program_db):
     assert ref["id"] == S1
     assert ref["title"] == "Opening Keynote"
     assert ref["format"] == "Keynote"
+
+
+def test_speakers_carry_their_contact_id(program_client, program_db):
+    """One stable identity per speaker, so the gallery can key and de-duplicate
+    cards by contact rather than by display name — two different people who
+    share a name must stay two cards, and one contact must never render twice."""
+    body = program_client.get(f"/public/program/{SLUG}/speakers").json()
+    by_name = {s["name"]: s for s in body["speakers"]}
+    assert by_name["Alice Alpha"]["id"] == C_ALPHA
+    assert by_name["Zed Zeta"]["id"] == C_ZETA
+    ids = [s["id"] for s in body["speakers"]]
+    assert all(ids) and len(set(ids)) == len(ids)
 
 
 def test_speakers_leak_no_pii(program_client, program_db):

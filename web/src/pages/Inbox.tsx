@@ -18,14 +18,18 @@ import {
   Plus,
   Search,
   Star,
+  Trash2,
   Upload,
 } from 'lucide-react'
 
 import {
+  addSessionParticipant,
   apiGet,
   createSubmission,
   decideSubmission,
   getSessionDetail,
+  removeSessionParticipant,
+  setPrimaryParticipant,
   unwrapList,
   updateSession,
   updateSessionStatus,
@@ -1229,6 +1233,19 @@ export function Inbox() {
                   isPending={detailQuery.isPending}
                   error={detailQuery.error}
                   description={editing ? null : detailSession.description}
+                  // In edit mode the read-only roster is replaced by the
+                  // editable one, so the drawer never shows two of them.
+                  participantsEditor={
+                    editing && detailQuery.data ? (
+                      <ParticipantsEditor
+                        sessionId={detailSession.id}
+                        participants={detailQuery.data.participants}
+                        onChanged={() =>
+                          queryClient.invalidateQueries({ queryKey: ['session', detailSession.id] })
+                        }
+                      />
+                    ) : null
+                  }
                 />
               </div>
 
@@ -1563,11 +1580,14 @@ function SubmissionDetail({
   isPending,
   error,
   description,
+  participantsEditor,
 }: {
   detail?: SessionDetail
   isPending: boolean
   error: Error | null
   description?: string | null
+  /** Replaces the read-only roster while the drawer is in edit mode. */
+  participantsEditor?: ReactNode
 }) {
   if (error) {
     return (
@@ -1633,7 +1653,9 @@ function SubmissionDetail({
 
       <section>
         <PanelHeading title="Participants" />
-        {people.length === 0 ? (
+        {participantsEditor ? (
+          participantsEditor
+        ) : people.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No participants linked yet.</p>
         ) : (
           <ul className="mt-2 space-y-2">
@@ -1665,6 +1687,154 @@ function SubmissionDetail({
           </ul>
         )}
       </section>
+    </div>
+  )
+}
+
+/**
+ * The drawer's participants editor (ABS-11).
+ *
+ * Co-speakers were writable at submission time and frozen forever after, which
+ * is exactly backwards: the CFP form is filled in once, while people join a
+ * talk, drop off it and hand over the lead for months afterwards. This is the
+ * organizer's side of that — add, remove, and re-point the primary speaker —
+ * on the same deduped view the read-only panel shows, so the storage encoding
+ * (primary speaker + submitter-of-record rows for the same human) stays an
+ * implementation detail rather than something to explain in the UI.
+ */
+function ParticipantsEditor({
+  sessionId,
+  participants,
+  onChanged,
+}: {
+  sessionId: string
+  participants: SessionParticipant[]
+  onChanged: () => void
+}) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const people = dedupeParticipants(participants)
+
+  const settle = (title: string) => async () => {
+    setName('')
+    setEmail('')
+    onChanged()
+    toast({ title })
+  }
+  const fail = (title: string) => (error: Error) =>
+    toast({ variant: 'destructive', title, description: error.message })
+
+  const add = useMutation({
+    mutationFn: () =>
+      addSessionParticipant(sessionId, { name: name.trim(), email: email.trim() }),
+    onSuccess: settle('Co-speaker added'),
+    onError: fail("Couldn't add that person"),
+  })
+  const remove = useMutation({
+    mutationFn: (contactId: string) => removeSessionParticipant(sessionId, contactId),
+    onSuccess: settle('Participant removed'),
+    onError: fail("Couldn't remove that person"),
+  })
+  const promote = useMutation({
+    mutationFn: (contactId: string) => setPrimaryParticipant(sessionId, contactId),
+    onSuccess: settle('Primary speaker updated'),
+    onError: fail("Couldn't change the primary speaker"),
+  })
+
+  const busy = add.isPending || remove.isPending || promote.isPending
+
+  return (
+    <div className="mt-2 space-y-3">
+      {people.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No participants linked yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {people.map((person) => (
+            <li
+              key={person.key}
+              data-testid={`edit-participant-${person.key}`}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {contactName(person)}
+                </p>
+                {person.email && (
+                  <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    {person.email}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {person.is_primary ? (
+                  <Badge variant="default">Primary</Badge>
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={busy || !person.contact_id}
+                    onClick={() => promote.mutate(String(person.contact_id))}
+                  >
+                    Make primary
+                  </Button>
+                )}
+                <Badge variant="outline" className="capitalize">
+                  {person.roleLabel}
+                </Badge>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`Remove ${contactName(person)}`}
+                  // The primary speaker can't just be dropped — hand the lead
+                  // over first, which is the same rule the server enforces.
+                  disabled={busy || Boolean(person.is_primary) || !person.contact_id}
+                  title={
+                    person.is_primary
+                      ? 'Make someone else primary before removing this speaker'
+                      : `Remove ${contactName(person)}`
+                  }
+                  onClick={() => remove.mutate(String(person.contact_id))}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="rounded-lg border border-dashed border-border p-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Add a co-speaker
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto]">
+          <Input
+            aria-label="Co-speaker name"
+            placeholder="Marcus Okafor"
+            value={name}
+            disabled={busy}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Input
+            aria-label="Co-speaker email"
+            type="email"
+            placeholder="marcus@example.com"
+            value={email}
+            disabled={busy}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy || !email.includes('@')}
+            onClick={() => add.mutate()}
+          >
+            <Plus />
+            {add.isPending ? 'Adding…' : 'Add'}
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

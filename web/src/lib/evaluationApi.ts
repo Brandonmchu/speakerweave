@@ -214,18 +214,42 @@ export function deleteEvaluator(planId: string, evaluatorId: string): Promise<vo
  * only with the sessions whose tracks they cover. */
 export type EvaluationAssignMode = 'all_to_all' | 'by_track'
 
+/**
+ * Bulk assignment, with a subset when the organizer picked one.
+ *
+ * `session_ids` is the difference between "assign these four" and "assign
+ * everything to everybody" — the same call backs both, so the fast path and
+ * the careful path never drift apart. `include_decided` opts accepted/declined
+ * submissions into the pool for a later round.
+ */
 export function assignEvaluationSessions(
   planId: string,
   input: {
     session_ids?: string[]
     evaluator_ids?: string[]
     mode?: EvaluationAssignMode
+    include_decided?: boolean
   } = {}
 ): Promise<AssignmentResult> {
   const { mode = 'all_to_all', ...selection } = input
   return apiPost<AssignmentResult>(`/api/evaluation-plans/${planId}/assign`, {
     ...selection,
     mode,
+  })
+}
+
+export interface BulkUnassignResult {
+  removed: number
+  assignment_ids: string[]
+}
+
+/** Take several reviewer↔submission pairings back off in one stroke. */
+export function bulkUnassignReviewers(
+  planId: string,
+  assignmentIds: string[]
+): Promise<BulkUnassignResult> {
+  return apiPost<BulkUnassignResult>(`/api/plans/${planId}/unassign`, {
+    assignment_ids: assignmentIds,
   })
 }
 
@@ -253,10 +277,18 @@ export interface AssignableSubmission {
 export interface AssignmentBoard {
   evaluators: Array<{ id: string; name: string; email: string | null; track_ids?: string[] }>
   sessions: AssignableSubmission[]
+  /** Whether accepted/declined work is in this list (echoed by the server). */
+  include_decided?: boolean
 }
 
-export function getPlanAssignments(planId: string): Promise<AssignmentBoard> {
-  return apiGet<AssignmentBoard>(`/api/plans/${planId}/assignments`)
+/** `includeDecided` widens the list to accepted/declined submissions, which is
+ * what a second review round needs and what round one must not have. */
+export function getPlanAssignments(
+  planId: string,
+  options: { includeDecided?: boolean } = {}
+): Promise<AssignmentBoard> {
+  const query = options.includeDecided ? '?include_decided=true' : ''
+  return apiGet<AssignmentBoard>(`/api/plans/${planId}/assignments${query}`)
 }
 
 export interface CreatedAssignment {
@@ -300,6 +332,68 @@ export interface LaggardReminderResult {
  * day server-side, so a second click reminds nobody. */
 export function remindLaggingReviewers(planId: string): Promise<LaggardReminderResult> {
   return apiPost<LaggardReminderResult>(`/api/plans/${planId}/remind-laggards`)
+}
+
+/* ── AI first-pass triage ───────────────────────────────────────────────────
+ * A ranked first read of the whole CFP: what each talk is, a first-pass score,
+ * and advance / discuss / decline with the reasoning. `source` is the honest
+ * bit — 'anthropic' means a model wrote the prose, 'heuristic' means nothing
+ * did and the ranking is arithmetic over the reviewer scores. The UI must
+ * never present the two identically. */
+
+export type TriageSuggestion = 'advance' | 'discuss' | 'decline'
+
+export interface TriageItem {
+  session_id: string
+  title: string
+  summary: string
+  /** The AI's first-pass rating on the plan's own scale; null when unscored. */
+  score: number | null
+  suggestion: TriageSuggestion
+  rationale: string
+  /** The chair's correction, kept beside the AI value rather than replacing it. */
+  override_score?: number | null
+}
+
+export interface TriageResult {
+  generated_at: string
+  source: 'anthropic' | 'heuristic'
+  model: string | null
+  items: TriageItem[]
+  scale?: EvaluationScale
+  /** True when the model call failed and this fell back to scores. */
+  degraded?: boolean
+  /** True when the plan had more submissions than one call may carry. */
+  truncated?: boolean
+  /** False when migration 012 has not been applied, so nothing was persisted. */
+  stored?: boolean
+}
+
+export interface TriageResponse {
+  plan_id: string
+  triage: TriageResult | null
+}
+
+/** The last stored triage. A read — never spends a model call. */
+export function getAiTriage(planId: string): Promise<TriageResponse> {
+  return apiGet<TriageResponse>(`/api/plans/${planId}/ai-triage`)
+}
+
+/** Run triage over the plan's submissions. One model call for the whole set. */
+export function runAiTriage(
+  planId: string,
+  input: { include_decided?: boolean } = {}
+): Promise<TriageResponse> {
+  return apiPost<TriageResponse>(`/api/plans/${planId}/ai-triage`, input)
+}
+
+/** Override one AI score with the chair's own; null clears the override. */
+export function overrideAiTriageScore(
+  planId: string,
+  sessionId: string,
+  score: number | null
+): Promise<TriageResponse> {
+  return apiPatch<TriageResponse>(`/api/plans/${planId}/ai-triage/${sessionId}`, { score })
 }
 
 export function openEvaluationPlan(

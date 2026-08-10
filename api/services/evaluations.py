@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from postgrest.exceptions import APIError
 
 from auth import verify_org_access
-from services import magic_links
+from services import ai_triage, magic_links
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
 
@@ -31,6 +31,12 @@ DEFAULT_CRITERIA = [
     {"name": "Clarity", "weight": 10},
 ]
 REVIEWABLE_STATUSES = {"pending", "accept_queue"}
+# Round 1 reviews what is still undecided. A LATER round often needs the
+# opposite: an accepted talk re-read for the keynote slot, a declined one
+# reconsidered by a second committee. Those statuses are assignable only when
+# the caller asks (`include_decided`), so round-1 semantics never change under
+# an organizer who didn't opt in.
+DECIDED_STATUSES = {"accepted", "declined"}
 ASSIGNMENT_MODES = ("all_to_all", "by_track")
 
 
@@ -903,9 +909,16 @@ async def delete_evaluator(org_id: str, plan_id: str, evaluator_id: str) -> None
     )
 
 
-def _matches_session_filter(session: dict, session_filter: dict) -> bool:
+def _eligible_statuses(*, include_decided: bool) -> set[str]:
+    """Which submission statuses a plan may draw from."""
+    return REVIEWABLE_STATUSES | DECIDED_STATUSES if include_decided else REVIEWABLE_STATUSES
+
+
+def _matches_session_filter(
+    session: dict, session_filter: dict, *, include_decided: bool = False
+) -> bool:
     if not session_filter:
-        return session.get("status") in REVIEWABLE_STATUSES
+        return session.get("status") in _eligible_statuses(include_decided=include_decided)
     statuses = session_filter.get("statuses")
     if statuses is None and session_filter.get("status") is not None:
         statuses = [session_filter["status"]]
@@ -946,6 +959,7 @@ async def assign_sessions(
     mode: str = "all_to_all",
     session_ids: list[str] | None = None,
     evaluator_ids: list[str] | None = None,
+    include_decided: bool = False,
 ) -> dict:
     """Create the missing (evaluator, session) assignments for a plan.
 
@@ -953,6 +967,10 @@ async def assign_sessions(
     only with sessions whose track set intersects the tracks they cover, where
     a reviewer with no tracks selected covers all of them. Both dedupe against
     what already exists, so re-running is a no-op.
+
+    `session_ids` narrows the stroke to a chosen subset — the same call backs
+    both "assign these four" and "assign everything". `include_decided` widens
+    the candidate pool to accepted/declined work for a later review round.
     """
     if mode not in ASSIGNMENT_MODES:
         raise HTTPException(status_code=400, detail=f"Unknown assignment mode: {mode}")
@@ -985,7 +1003,9 @@ async def assign_sessions(
         sessions = [
             session
             for session in sessions
-            if _matches_session_filter(session, plan.get("session_filter") or {})
+            if _matches_session_filter(
+                session, plan.get("session_filter") or {}, include_decided=include_decided
+            )
         ]
 
     existing = rows(
@@ -1189,13 +1209,57 @@ async def delete_assignment(org_id: str, plan_id: str, assignment_id: str) -> No
     )
 
 
-async def assignment_board(org_id: str, plan_id: str) -> dict:
+async def bulk_unassign(org_id: str, plan_id: str, assignment_ids: list[str]) -> dict:
+    """Drop several reviewer↔submission pairings in one stroke.
+
+    The inverse of a bulk assign, and the reason one exists: undoing an
+    over-broad assignment one X at a time is the thing that made bulk assign
+    feel dangerous. Ownership is verified for the whole set BEFORE anything is
+    deleted, so a foreign id fails the request instead of half-applying it.
+    """
+    await fetch_plan(plan_id, org_id)
+    wanted = [str(value) for value in dict.fromkeys(assignment_ids) if str(value).strip()]
+    if not wanted:
+        raise HTTPException(status_code=400, detail="Select at least one assignment to remove")
+    owned = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, org_id")
+            .in_("id", wanted)
+            .eq("plan_id", plan_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_bulk_unassign_lookup",
+        )
+    )
+    owned_ids = {row["id"] for row in owned if row.get("org_id") == org_id}
+    missing = [value for value in wanted if value not in owned_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail="One or more assignments were not found")
+    # reviews.assignment_id is ON DELETE CASCADE, so one scoped delete takes the
+    # reviews with it atomically (same reasoning as delete_assignment).
+    await db(
+        lambda: supabase.table("assignments")
+        .delete()
+        .in_("id", wanted)
+        .eq("plan_id", plan_id)
+        .eq("org_id", org_id)
+        .execute(),
+        "evaluation_bulk_unassign_delete",
+    )
+    return {"removed": len(wanted), "assignment_ids": wanted}
+
+
+async def assignment_board(org_id: str, plan_id: str, *, include_decided: bool = False) -> dict:
     """Every reviewable submission with the reviewers currently on it.
 
     Backs the per-submission assignment UI: one row per candidate submission,
     each carrying its assignments (with reviewer name and how far along they
     are) so the organizer can add or drop a single reviewer without touching
     the bulk modes. A flat set of queries — never one per submission.
+
+    `include_decided` adds accepted/declined submissions to the candidate list,
+    which is what a second review round needs and what round one must not have.
     """
     plan = await fetch_plan(plan_id, org_id)
     evaluators = rows(
@@ -1253,7 +1317,8 @@ async def assignment_board(org_id: str, plan_id: str) -> dict:
     candidates = [
         session
         for session in all_sessions
-        if session["id"] in assigned_ids or _matches_session_filter(session, session_filter)
+        if session["id"] in assigned_ids
+        or _matches_session_filter(session, session_filter, include_decided=include_decided)
     ]
     candidates.sort(key=lambda session: str(session.get("title") or "").casefold())
     session_tracks = await tracks_for_sessions(org_id, candidates)
@@ -1276,6 +1341,7 @@ async def assignment_board(org_id: str, plan_id: str) -> dict:
         entries.sort(key=lambda entry: (str(entry["name"] or entry["email"] or "").casefold()))
 
     return {
+        "include_decided": include_decided,
         "evaluators": [
             {
                 "id": evaluator["id"],
@@ -1674,6 +1740,219 @@ async def get_summary(org_id: str, plan_id: str) -> dict:
         "top_sessions": top_sessions,
         "thought_provoking": thought_provoking,
     }
+
+
+# ── AI first-pass triage (ABS-14) ──────────────────────────────────────────
+# The model never sees the database and the database never sees a model: this
+# section gathers the org-scoped rows, hands them to services.ai_triage, and
+# stores what comes back on the plan. Every query below is org-scoped —
+# the service-role client bypasses RLS, so a dropped predicate leaks abstracts.
+
+# Flipped off the first time the database says evaluation_plans.ai_triage isn't
+# there, so an API running ahead of migration 012 still RUNS triage (and returns
+# it) instead of 500ing; only the persistence is skipped. Never flipped back on:
+# a process restart re-probes.
+_ai_triage_column_present = True
+
+
+def _mentions_ai_triage_column(exc: Exception) -> bool:
+    message = str(getattr(exc, "message", "") or exc).lower()
+    return "ai_triage" in message
+
+
+async def _triage_candidates(org_id: str, plan: dict, *, include_decided: bool) -> list[dict]:
+    """The submissions a triage run covers, with the scores reviewers have given.
+
+    Same candidate rule as the assignment board — what the plan covers, plus
+    anything already assigned — so the triage list and the assignment list
+    never disagree about which submissions belong to this round.
+    """
+    all_sessions = rows(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, title, friendly_id, status, track_id, description")
+            .eq("event_id", plan["event_id"])
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_triage_sessions",
+        )
+    )
+    assignments = rows(
+        await db(
+            lambda: supabase.table("assignments")
+            .select("id, session_id")
+            .eq("plan_id", plan["id"])
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_triage_assignments",
+        )
+    )
+    assigned_ids = {row["session_id"] for row in assignments}
+    session_filter = plan.get("session_filter") or {}
+    candidates = [
+        session
+        for session in all_sessions
+        if session["id"] in assigned_ids
+        or _matches_session_filter(session, session_filter, include_decided=include_decided)
+    ]
+    if not candidates:
+        return []
+
+    assignment_ids = [row["id"] for row in assignments]
+    reviews: list[dict] = []
+    if assignment_ids:
+        reviews = rows(
+            await db(
+                lambda: supabase.table("reviews")
+                .select("assignment_id, scores, is_draft, abstained")
+                .in_("assignment_id", assignment_ids)
+                .eq("org_id", org_id)
+                .execute(),
+                "evaluation_triage_reviews",
+            )
+        )
+    session_by_assignment = {row["id"]: row["session_id"] for row in assignments}
+    criteria = normalize_criteria(plan.get("criteria") or [])
+    scores_by_session: dict[str, list[float]] = {}
+    for review in reviews:
+        if bool(review.get("is_draft")) or bool(review.get("abstained")):
+            continue
+        session_id = session_by_assignment.get(review.get("assignment_id"))
+        if not session_id:
+            continue
+        overall = weighted_overall(review.get("scores") or {}, criteria)
+        if overall is not None:
+            scores_by_session.setdefault(session_id, []).append(overall)
+
+    session_tracks = await tracks_for_sessions(org_id, candidates)
+    candidates.sort(key=lambda session: str(session.get("title") or "").casefold())
+
+    submissions: list[dict] = []
+    for session in candidates:
+        scores = scores_by_session.get(session["id"], [])
+        tracks = session_tracks.get(session["id"], [])
+        submissions.append(
+            {
+                "session_id": session["id"],
+                "title": session.get("title") or "Untitled",
+                "friendly_id": session.get("friendly_id"),
+                "status": session.get("status"),
+                "abstract": session.get("description") or "",
+                "track": ", ".join(str(track.get("name") or "") for track in tracks).strip(", "),
+                "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+                "review_count": len(scores),
+            }
+        )
+    return submissions
+
+
+def _triage_out(plan_id: str, stored: Any) -> dict:
+    """The stored jsonb as the API shape, tolerant of a plan that never ran one."""
+    if not isinstance(stored, dict):
+        return {"plan_id": plan_id, "triage": None}
+    return {"plan_id": plan_id, "triage": stored}
+
+
+async def _store_ai_triage(org_id: str, plan_id: str, result: dict) -> bool:
+    """Persist a triage result on the plan; False when migration 012 is missing."""
+    global _ai_triage_column_present
+    if not _ai_triage_column_present:
+        return False
+    try:
+        await db(
+            lambda: supabase.table("evaluation_plans")
+            .update({"ai_triage": result})
+            .eq("id", plan_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "evaluation_triage_store",
+        )
+    except APIError as exc:
+        if not _mentions_ai_triage_column(exc):
+            raise
+        logger.warning("evaluation: ai_triage column missing (migration 012 not applied)")
+        _ai_triage_column_present = False
+        return False
+    return True
+
+
+async def run_ai_triage(org_id: str, plan_id: str, *, include_decided: bool = False) -> dict:
+    """Score, summarize and rank this plan's submissions with one model call.
+
+    Human overrides already recorded survive the re-run: an organizer who
+    corrected the AI once shouldn't lose that correction the next time they
+    press the button.
+    """
+    plan = await fetch_plan(plan_id, org_id)
+    submissions = await _triage_candidates(org_id, plan, include_decided=include_decided)
+    if not submissions:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no submissions in this plan to triage yet.",
+        )
+
+    result = await ai_triage.triage(
+        submissions,
+        scale=str(plan.get("scale") or "1_5"),
+        criteria=[
+            str(criterion.get("name") or "")
+            for criterion in normalize_criteria(plan.get("criteria") or [])
+            if criterion.get("name")
+        ],
+    )
+
+    previous = plan.get("ai_triage")
+    overrides: dict[str, Any] = {}
+    if isinstance(previous, dict):
+        for item in previous.get("items") or []:
+            if isinstance(item, dict) and item.get("override_score") is not None:
+                overrides[str(item.get("session_id"))] = item["override_score"]
+    for item in result["items"]:
+        item["override_score"] = overrides.get(item["session_id"])
+
+    result["scale"] = str(plan.get("scale") or "1_5")
+    result["stored"] = await _store_ai_triage(org_id, plan_id, result)
+    return _triage_out(plan_id, result)
+
+
+async def get_ai_triage(org_id: str, plan_id: str) -> dict:
+    """The last stored triage for this plan — a read, never a model call."""
+    plan = await fetch_plan(plan_id, org_id)
+    return _triage_out(plan_id, plan.get("ai_triage"))
+
+
+async def override_ai_triage_score(
+    org_id: str, plan_id: str, session_id: str, score: float | None
+) -> dict:
+    """Record a human correction to one AI score, and keep it.
+
+    The override sits beside the AI's own number rather than replacing it, so
+    the results view can keep showing both — which is the whole point of
+    labelling a score as machine-generated in the first place.
+    """
+    plan = await fetch_plan(plan_id, org_id)
+    stored = plan.get("ai_triage")
+    if not isinstance(stored, dict) or not isinstance(stored.get("items"), list):
+        raise HTTPException(status_code=404, detail="Run AI triage before overriding a score")
+    top = ai_triage.scale_max(plan.get("scale"))
+    if score is not None and not (1 <= float(score) <= top):
+        raise HTTPException(status_code=400, detail=f"Score must be between 1 and {top}")
+
+    matched = False
+    for item in stored["items"]:
+        if isinstance(item, dict) and str(item.get("session_id")) == session_id:
+            item["override_score"] = None if score is None else round(float(score), 2)
+            matched = True
+    if not matched:
+        raise HTTPException(status_code=404, detail="That submission is not in the triage results")
+
+    stored["stored"] = await _store_ai_triage(org_id, plan_id, stored)
+    if not stored["stored"]:
+        raise HTTPException(
+            status_code=503,
+            detail="AI triage storage is unavailable (migration 012 has not been applied)",
+        )
+    return _triage_out(plan_id, stored)
 
 
 def _empty_review_aggregate() -> dict:

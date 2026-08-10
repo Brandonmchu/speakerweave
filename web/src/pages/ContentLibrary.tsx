@@ -3,7 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Bell,
+  CalendarClock,
   Download,
   FileArchive,
   FileText,
@@ -17,6 +21,7 @@ import {
 } from 'lucide-react'
 
 import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
+import { dueLabel, dueSortKey, formatDueDate, isOverdue } from '@/lib/dueDate'
 import {
   addContentComment,
   downloadContentBundle,
@@ -28,6 +33,7 @@ import {
   type ContentStatus,
   type ContentType,
 } from '@/lib/contentApi'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import {
@@ -72,10 +78,21 @@ const TYPE_ICON: Record<string, typeof FileText> = {
   other: FileText,
 }
 
+/** Off (server order) -> soonest first -> latest first -> off. */
+type DueSort = 'none' | 'asc' | 'desc'
+
+const NEXT_DUE_SORT: Record<DueSort, DueSort> = { none: 'asc', asc: 'desc', desc: 'none' }
+const DUE_SORT_LABEL: Record<DueSort, string> = {
+  none: 'Sort by due date',
+  asc: 'Sorted by due date, soonest first',
+  desc: 'Sorted by due date, latest first',
+}
+
 export function ContentLibrary() {
   const queryClient = useQueryClient()
   const [type, setType] = useState<ContentType | 'all'>('all')
   const [status, setStatus] = useState<ContentStatus | 'all'>('all')
+  const [dueSort, setDueSort] = useState<DueSort>('none')
   const [openItem, setOpenItem] = useState<ContentItem | null>(null)
 
   const eventsQuery = useQuery({
@@ -92,7 +109,19 @@ export function ContentLibrary() {
   })
 
   const library = libraryQuery.data
-  const items = useMemo(() => library?.items ?? [], [library])
+  const rawItems = useMemo(() => library?.items ?? [], [library])
+  // Sorting is a *view* over the server's order, so turning it off restores that
+  // order exactly rather than leaving the table in whatever the last sort was.
+  const items = useMemo(() => {
+    if (dueSort === 'none') return rawItems
+    const direction = dueSort === 'asc' ? 1 : -1
+    return [...rawItems].sort((a, b) => {
+      const keyA = dueSortKey(a.due_at)
+      const keyB = dueSortKey(b.due_at)
+      if (keyA !== keyB) return keyA < keyB ? -direction : direction
+      return a.speaker.name.localeCompare(b.speaker.name) || a.title.localeCompare(b.title)
+    })
+  }, [rawItems, dueSort])
   const outstanding = library?.outstanding ?? []
 
   // ── multi-select export ───────────────────────────────────────────────────
@@ -276,6 +305,28 @@ export function ContentLibrary() {
                 <TableHead>Speaker</TableHead>
                 <TableHead className="w-[120px]">Type</TableHead>
                 <TableHead>Item</TableHead>
+                <TableHead className="w-[150px]">
+                  {/* Sortable: the organizer's real question here is "what is
+                      due next", which the server's speaker order can't answer. */}
+                  <button
+                    type="button"
+                    data-testid="sort-due"
+                    data-sort={dueSort}
+                    aria-label={DUE_SORT_LABEL[dueSort]}
+                    title={DUE_SORT_LABEL[dueSort]}
+                    onClick={() => setDueSort(NEXT_DUE_SORT[dueSort])}
+                    className="-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium text-inherit transition-colors hover:text-foreground"
+                  >
+                    Due
+                    {dueSort === 'asc' ? (
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    ) : dueSort === 'desc' ? (
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-50" />
+                    )}
+                  </button>
+                </TableHead>
                 <TableHead className="w-[140px]">Status</TableHead>
                 <TableHead className="w-[90px] text-center">Version</TableHead>
                 <TableHead className="w-[110px] text-right">Open</TableHead>
@@ -331,6 +382,9 @@ export function ContentLibrary() {
                           </span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell data-testid={`due-cell-${item.item_id}`}>
+                      <DueCell dueAt={item.due_at} done={item.status === 'received'} />
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={item.status} />
@@ -439,6 +493,11 @@ function ItemDialog({
   })
 
   const detail = detailQuery.data
+  // The detail payload carries its own due date; the row that opened the dialog
+  // is the fallback so the deadline is on screen before the fetch lands.
+  const dueAt = detail?.item.due_at ?? item?.due_at ?? null
+  const received = (detail?.item.status ?? item?.status) === 'received'
+  const late = Boolean(dueAt) && !received && isOverdue(dueAt)
 
   return (
     <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
@@ -450,6 +509,25 @@ function ItemDialog({
             {item ? ` · ${item.type}` : ''}
           </DialogDescription>
         </DialogHeader>
+
+        <div
+          data-testid="content-item-due"
+          data-overdue={late ? 'true' : undefined}
+          className={cn(
+            'flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+            late
+              ? 'border-destructive/40 bg-destructive/5 text-destructive-strong'
+              : 'border-border bg-muted/30 text-foreground'
+          )}
+        >
+          <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="font-medium">{dueAt ? dueLabel(dueAt) : 'No due date set'}</span>
+          {late && (
+            <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] font-medium">
+              overdue
+            </span>
+          )}
+        </div>
 
         {!detail ? (
           <div className="space-y-3 py-2">
@@ -633,6 +711,38 @@ function SelectBox({
       onChange={(e) => onChange(e.target.checked)}
       className="h-4 w-4 cursor-pointer rounded border-input accent-primary disabled:cursor-not-allowed disabled:opacity-40"
     />
+  )
+}
+
+/**
+ * A deliverable's deadline, as a calendar date.
+ *
+ * Rendered through `formatDueDate`, which reads the stored UTC calendar day
+ * rather than converting an instant into the viewer's zone — "due 2027-05-01"
+ * must not read "Apr 30" for an organizer in California.
+ *
+ * "Overdue" is a claim about work that is still OUTSTANDING: once the file is in,
+ * the deadline is history, not a problem, so a received item never turns red.
+ */
+function DueCell({ dueAt, done }: { dueAt: string | null; done: boolean }) {
+  if (!dueAt) return <span className="text-sm text-muted-foreground">—</span>
+  const late = !done && isOverdue(dueAt)
+  return (
+    <span
+      data-overdue={late ? 'true' : undefined}
+      className={cn(
+        'inline-flex items-center gap-1.5 text-sm tabular-nums',
+        late ? 'font-medium text-destructive' : 'text-foreground'
+      )}
+    >
+      {late && <CalendarClock className="h-3.5 w-3.5 shrink-0" />}
+      {formatDueDate(dueAt)}
+      {late && (
+        <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] font-medium text-destructive-strong">
+          overdue
+        </span>
+      )}
+    </span>
   )
 }
 

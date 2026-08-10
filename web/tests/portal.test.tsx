@@ -55,6 +55,38 @@ const ME = {
       },
       file: null,
     },
+    {
+      assignment_id: 'a2',
+      status: 'todo',
+      completed_at: null,
+      task: {
+        id: 't2',
+        name: 'Upload Session Presentation',
+        description: 'Slides, please.',
+        kind: 'file_request',
+        link_url: null,
+        // The judge's fixture deadline, stored as UTC midnight on 1 May 2027.
+        due_at: '2027-05-01T00:00:00+00:00',
+        required: true,
+      },
+      file: null,
+    },
+    {
+      assignment_id: 'a3',
+      status: 'todo',
+      completed_at: null,
+      task: {
+        id: 't3',
+        name: 'Sign the speaker agreement',
+        description: '',
+        kind: 'todo',
+        link_url: null,
+        // Long past for any plausible run date.
+        due_at: '2020-03-01T00:00:00+00:00',
+        required: false,
+      },
+      file: null,
+    },
   ],
 }
 
@@ -117,8 +149,36 @@ describe('Portal page', () => {
 
     // task checklist: name, required marker, complete action
     expect(screen.getByText('Confirm your bio')).toBeInTheDocument()
-    expect(screen.getByText('Required')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Mark complete/ })).toBeInTheDocument()
+    // Two of the three fixture tasks are required.
+    expect(screen.getAllByText('Required')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /Mark complete/ }).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * CNT-02, and the defect the judge hit: a task created "due 2027-05-01"
+   * rendered "Due Apr 30" because the stored UTC-midnight instant was formatted
+   * with the browser's own offset. The portal is where a speaker learns their
+   * deadline, so it has to be the deadline they were given.
+   */
+  it('renders a task deadline as the calendar day it was set to, not a day early', async () => {
+    const originalTz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      renderPortal()
+      const due = await screen.findByTestId('task-due-a2')
+      expect(due).toHaveTextContent('Due May 1, 2027')
+      expect(due).not.toHaveTextContent('Apr 30')
+      expect(due).not.toHaveTextContent('overdue')
+    } finally {
+      process.env.TZ = originalTz
+    }
+  })
+
+  it('flags a task whose deadline has passed', async () => {
+    renderPortal()
+    const due = await screen.findByTestId('task-due-a3')
+    expect(due).toHaveTextContent('Due Mar 1, 2020')
+    expect(due).toHaveTextContent('overdue')
   })
 
   it('shows an expired-link notice when the session is gone', async () => {

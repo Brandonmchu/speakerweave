@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 import bleach
+from postgrest.exceptions import APIError
 
 from services.supabase_helpers import db, rows
 from supabase_client import supabase
@@ -138,8 +139,10 @@ def to_public_field(entry: dict) -> dict:
 # is offered names that no longer exist (and whose answers then map to no track).
 #
 # Everything below treats the taxonomy TABLES as the truth and the snapshot as a
-# fallback: the same classification decides what choices the public form renders
-# and which live row a submitted answer means, so the two can never disagree.
+# fallback: the same classification decides what choices the PUBLIC form renders,
+# what choices the BUILDER offers, which live row a submitted answer means, and
+# which name a conditional rule compares against — so none of the four can
+# disagree with the others.
 
 CHOICE_FIELD_TYPES = {"dropdown", "multi_select"}
 LONG_TEXT_FIELD_TYPES = {"textarea", "long_text"}
@@ -233,26 +236,52 @@ def taxonomy_candidate_ids(
     ]
 
 
-def with_live_choices(
+def live_choice_map(
     fields: list[dict],
     classified: dict[str, str],
     track_names: list[str],
     format_names: list[str],
-) -> list[dict]:
-    """`fields` with every taxonomy question offering the event's CURRENT names.
+) -> dict[str, list[str]]:
+    """``{field_id: the choices that question should offer RIGHT NOW}``.
 
-    The snapshot is kept only as a fallback — an event with no tracks yet must
-    still render the question the organizer built rather than an empty select.
+    The one place the live names are attached to questions. Everything that has
+    to speak the same value space — the public select, the builder's select, the
+    operands of a conditional rule — reads this map, so a rename can never move
+    one of them without the others.
+
+    A taxonomy with no rows yields no entry: an event that has not set its
+    formats up yet must still render the question the organizer built rather
+    than an empty select, and the stored snapshot is what does that.
     """
     live = {"track": track_names, "format": format_names}
-    out: list[dict] = []
+    mapped: dict[str, list[str]] = {}
     for field in fields:
-        kind = classified.get(str(field.get("id")))
-        names = live.get(kind or "") or []
-        if not kind or not names:
-            out.append(field)
+        names = live.get(classified.get(str(field.get("id"))) or "") or []
+        if names:
+            mapped[str(field.get("id"))] = list(names)
+    return mapped
+
+
+def apply_live_choices(
+    entries: list[dict], choices_by_field: dict[str, list[str]], id_key: str = "id"
+) -> list[dict]:
+    """`entries` with every taxonomy question's `options.choices` made current.
+
+    Two shapes carry a form's questions — the public field (`id`, from
+    `to_public_field`) and the builder's layout row (`field_id`, from
+    `load_form_layout`) — and both must offer the same choices. When they don't,
+    an organizer authors conditional logic against names the speaker is never
+    shown, and the rule can never fire.
+    """
+    if not choices_by_field:
+        return list(entries)
+    out: list[dict] = []
+    for entry in entries:
+        names = choices_by_field.get(str(entry.get(id_key)))
+        if not names:
+            out.append(entry)
             continue
-        out.append({**field, "options": {**(field.get("options") or {}), "choices": list(names)}})
+        out.append({**entry, "options": {**(entry.get("options") or {}), "choices": list(names)}})
     return out
 
 
@@ -294,6 +323,107 @@ def resolve_taxonomy_ids(
     return chosen
 
 
+# ── conditional logic authored against a taxonomy choice ───────────────────
+#
+# A rule operand is a STRING the organizer picked out of the builder's dropdown
+# ("show Workshop prerequisites when Session format equals Workshop"), frozen
+# into `question_rules.logic`. Rename the format in Settings and the public form
+# starts offering "Workshop (120 min)" — so `equals "Workshop"` can never match
+# what the speaker actually picks, and the conditional field silently stops
+# appearing. That is the whole of the bug.
+#
+# Re-pointing the operand at the live name is what keeps a rule authored under
+# the old names working. It is applied to the rules the renderer evaluates AND
+# to the rules `validate_submission` re-runs, from the same map — so the browser
+# and the server can never reach different verdicts about what was asked.
+
+# Ops whose operand is one of the question's own choices. `gt`/`lt` against a
+# dropdown is a builder mistake, not a choice, and rewriting it would be
+# meddling with a comparison we do not understand.
+CHOICE_OPERAND_OPS: frozenset[str] = frozenset(("eq", "neq", "contains"))
+
+
+def resolve_live_choice(value: object, live_names: list[str]) -> str | None:
+    """The live choice a stored operand means, or None when it can't be told.
+
+    Two readings, in order:
+
+    1. The name still exists — matched case- and whitespace-insensitively, so a
+       rule authored as "workshop" tracks a choice displayed as "Workshop".
+    2. The choice was RELABELLED. A rename in practice extends or trims the same
+       option ("Workshop" -> "Workshop (120 min)"), so a live name that extends
+       the stored one — or that the stored one extends — is that option, as long
+       as exactly ONE does.
+
+    Anything ambiguous, or gone entirely, returns None and leaves the operand
+    untouched: a rule that cannot fire is a visible bug the organizer can fix,
+    where a rule silently re-pointed at the wrong branch is not.
+    """
+    if not isinstance(value, str) or not value.strip() or not live_names:
+        return None
+    folded = _fold(value)
+    for name in live_names:
+        if _fold(name) == folded:
+            return name
+    key = _letters(value)
+    if not key:
+        return None
+    relabelled = [
+        name
+        for name in live_names
+        if _letters(name) and (_letters(name).startswith(key) or key.startswith(_letters(name)))
+    ]
+    return relabelled[0] if len(relabelled) == 1 else None
+
+
+def _with_live_condition_values(logic: dict, choices_by_field: dict[str, list[str]]) -> dict:
+    """One rule's `when` clauses, operands re-pointed at the live names."""
+    conditions = logic.get("when")
+    if not isinstance(conditions, list):
+        return logic
+    rewritten: list[object] = []
+    changed = False
+    for condition in conditions:
+        if not isinstance(condition, dict) or condition.get("op") not in CHOICE_OPERAND_OPS:
+            rewritten.append(condition)
+            continue
+        names = choices_by_field.get(str(condition.get("field")))
+        live = resolve_live_choice(condition.get("value"), names or [])
+        if live is None or live == condition.get("value"):
+            rewritten.append(condition)
+            continue
+        rewritten.append({**condition, "value": live})
+        changed = True
+    return {**logic, "when": rewritten} if changed else logic
+
+
+def with_live_rule_values(
+    rules: list[dict], choices_by_field: dict[str, list[str]]
+) -> list[dict]:
+    """`rules` with every taxonomy operand rewritten to the name now on screen.
+
+    Non-taxonomy questions are absent from `choices_by_field` and so pass
+    through untouched — an "Audience level" rule keeps comparing against
+    "Beginner" whatever the event's tracks are called.
+    """
+    if not choices_by_field:
+        return list(rules or [])
+    out: list[dict] = []
+    for rule in rules or []:
+        if not isinstance(rule, dict):
+            out.append(rule)
+            continue
+        logic = rule.get("logic")
+        if not isinstance(logic, dict):
+            # Hand-written / seeded rules inline their logic next to the target;
+            # `evaluate_rules` accepts both shapes, so this must too.
+            out.append(_with_live_condition_values(rule, choices_by_field))
+            continue
+        updated = _with_live_condition_values(logic, choices_by_field)
+        out.append(rule if updated is logic else {**rule, "logic": updated})
+    return out
+
+
 def choice_values(value: object) -> list[str]:
     """A choice answer as a list. A multi_select posts its picks as one
     comma-separated string (the answer map is scalar-only by design)."""
@@ -330,6 +460,57 @@ def abstract_from_answers(fields: list[dict], answers: dict) -> str:
         if not fallback and field_type in LONG_TEXT_FIELD_TYPES:
             fallback = value.strip()
     return fallback
+
+
+def _ordered_taxonomy(records: list[dict]) -> list[dict]:
+    """`order` then name — the order Settings lists them in (taxonomy_routes)."""
+    return sorted(
+        records,
+        key=lambda row: (
+            row["order"] if isinstance(row.get("order"), int) else 0,
+            str(row.get("name") or "").casefold(),
+        ),
+    )
+
+
+async def load_live_taxonomy(org_id: str, event_id: str | None) -> tuple[list[dict], list[dict]]:
+    """This event's CURRENT tracks and formats, org- and event-scoped.
+
+    The truth behind every Track / Session format question, read at request time
+    by both surfaces: the public form so a rename in Settings shows up on the
+    next load and a submitted answer maps to the row it was offered under, and
+    the builder so an organizer authors logic against the names a speaker will
+    actually be shown.
+    """
+    if not event_id:
+        return [], []
+
+    async def _load(table: str, columns: str) -> list[dict]:
+        try:
+            return _ordered_taxonomy(
+                rows(
+                    await db(
+                        lambda: supabase.table(table)
+                        .select(columns)
+                        .eq("org_id", org_id)
+                        .eq("event_id", event_id)
+                        .execute(),
+                        f"live_{table}",
+                    )
+                )
+            )
+        except APIError:
+            # A read that fails costs the live names, not the page: the stored
+            # snapshot still renders and a submission still lands.
+            logger.warning("forms: could not read live %s event_id=%s", table, event_id)
+            return []
+
+    return await _load("tracks", "id, name, order"), await _load("formats", "id, name")
+
+
+def taxonomy_names(records: list[dict]) -> list[str]:
+    """The display names of taxonomy rows, blanks dropped."""
+    return [str(row.get("name")).strip() for row in records if str(row.get("name") or "").strip()]
 
 
 async def load_question_rules(form_id: str, org_id: str) -> list[dict]:

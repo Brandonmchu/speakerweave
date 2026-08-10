@@ -13,7 +13,9 @@ const LIBRARY = {
       type: 'slides',
       title: 'Upload slides',
       required: true,
-      due_at: null,
+      // The judge's own fixture deadline, stored the way the API stores it:
+      // UTC midnight on the calendar day the organizer typed.
+      due_at: '2027-05-01T00:00:00+00:00',
       assignment_status: 'submitted',
       status: 'received',
       current_version: 2,
@@ -28,7 +30,24 @@ const LIBRARY = {
       type: 'headshot',
       title: 'Headshot photo',
       required: true,
-      due_at: null,
+      due_at: '2027-04-14T00:00:00+00:00',
+      assignment_status: 'todo',
+      status: 'missing',
+      current_version: 0,
+      versions_count: 0,
+      current_file: null,
+      comment_count: 0,
+      updated_at: null,
+      speaker: { contact_id: 'ben', name: 'Ben Franklin', email: 'ben@example.com', photo_url: null },
+    },
+    {
+      item_id: 'a3',
+      type: 'bio',
+      title: 'Speaker bio',
+      required: false,
+      // Long past for any plausible run date — the overdue treatment has to be
+      // provable without freezing the clock.
+      due_at: '2020-03-01T00:00:00+00:00',
       assignment_status: 'todo',
       status: 'missing',
       current_version: 0,
@@ -39,7 +58,7 @@ const LIBRARY = {
       speaker: { contact_id: 'ben', name: 'Ben Franklin', email: 'ben@example.com', photo_url: null },
     },
   ],
-  counts: { received: 1, missing: 1, needs_changes: 0 },
+  counts: { received: 1, missing: 2, needs_changes: 0 },
   outstanding: [{ contact_id: 'ben', name: 'Ben Franklin', email: 'ben@example.com', missing: ['Headshot photo'] }],
 }
 
@@ -49,6 +68,7 @@ const DETAIL = {
     type: 'slides',
     title: 'Upload slides',
     required: true,
+    due_at: '2027-05-01T00:00:00+00:00',
     assignment_status: 'submitted',
     status: 'received',
     current_version: 2,
@@ -152,7 +172,8 @@ describe('ContentLibrary', () => {
     const table = screen.getByRole('table')
     expect(within(table).getByText('Upload slides')).toBeInTheDocument()
     expect(within(table).getByText('Received')).toBeInTheDocument()
-    expect(within(table).getByText('Missing')).toBeInTheDocument()
+    // Two rows are outstanding, so the badge is not unique any more.
+    expect(within(table).getAllByText('Missing')).toHaveLength(2)
     // the Version column is populated for received items and dashed when missing
     const versionCells = screen.getAllByTestId('content-version-cell')
     expect(versionCells[0]).toHaveTextContent('v2')
@@ -317,6 +338,69 @@ describe('ContentLibrary', () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url.endsWith('/content/export'))).toBe(true)
     )
+  })
+
+  /**
+   * CNT-01/CNT-07: the judge reads deadlines off THIS table. Before, the
+   * organizer's deliverables view carried no due date at all — the only place a
+   * deadline appeared was the speaker's own portal, and there it rendered a day
+   * early.
+   */
+  it('shows a DUE column with the calendar day each task was created with', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    // Not "Apr 30": the stored instant is UTC midnight on the 1st, and that is
+    // the day the organizer typed.
+    expect(screen.getByTestId('due-cell-a1')).toHaveTextContent('May 1, 2027')
+    expect(screen.getByTestId('due-cell-a2')).toHaveTextContent('Apr 14, 2027')
+  })
+
+  it('marks a past-due outstanding item overdue, and leaves delivered ones alone', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    const overdue = screen.getByTestId('due-cell-a3')
+    expect(overdue).toHaveTextContent('Mar 1, 2020')
+    expect(overdue).toHaveTextContent('overdue')
+    expect(within(overdue).getByText('overdue').closest('span')).toBeTruthy()
+
+    // A received item is not "late" — the work is in; the deadline is history.
+    expect(screen.getByTestId('due-cell-a1')).not.toHaveTextContent('overdue')
+  })
+
+  it('sorts by due date on demand, and back to the server order', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+
+    const dueOrder = () =>
+      screen
+        .getAllByTestId(/^due-cell-/)
+        .map((cell) => cell.getAttribute('data-testid'))
+
+    // Default: whatever order the server sent, untouched.
+    expect(dueOrder()).toEqual(['due-cell-a1', 'due-cell-a2', 'due-cell-a3'])
+
+    fireEvent.click(screen.getByTestId('sort-due'))
+    expect(screen.getByTestId('sort-due')).toHaveAttribute('data-sort', 'asc')
+    expect(dueOrder()).toEqual(['due-cell-a3', 'due-cell-a2', 'due-cell-a1'])
+
+    fireEvent.click(screen.getByTestId('sort-due'))
+    expect(dueOrder()).toEqual(['due-cell-a1', 'due-cell-a2', 'due-cell-a3'])
+
+    // A third press turns sorting off rather than cycling forever.
+    fireEvent.click(screen.getByTestId('sort-due'))
+    expect(screen.getByTestId('sort-due')).toHaveAttribute('data-sort', 'none')
+    expect(dueOrder()).toEqual(['due-cell-a1', 'due-cell-a2', 'due-cell-a3'])
+  })
+
+  it('repeats the deadline in the item detail dialog', async () => {
+    renderLibrary()
+    await screen.findByText('Ada Lovelace')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open' })[0])
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByTestId('content-item-due')).toHaveTextContent('Due May 1, 2027')
   })
 
   it('select-all ticks every downloadable row, and clearing empties the selection', async () => {

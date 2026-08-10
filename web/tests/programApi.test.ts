@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildScheduleIcs,
   buildSessionIcs,
+  dedupeProgramSpeakers,
   embedIframeSnippet,
   embedScriptSnippet,
   embedScriptUrl,
@@ -10,11 +11,14 @@ import {
   getProgramSchedule,
   getProgramSession,
   getProgramSpeakers,
+  publicProgramFeedUrl,
   publicProgramPath,
   publicProgramUrl,
   readStarredIds,
+  speakerKey,
   toggleStarredId,
   writeStarredIds,
+  type ProgramSpeaker,
 } from '@/lib/programApi'
 
 interface Call {
@@ -264,5 +268,135 @@ describe('personal schedule (localStorage stars)', () => {
   it('tolerates corrupt stored JSON', () => {
     window.localStorage.setItem('dais.mySchedule.broken', '{not json')
     expect(readStarredIds('broken')).toEqual([])
+  })
+})
+
+// ── speaker de-duplication ───────────────────────────────────────────────────
+// The gallery has to survive a roster that contains the same human twice, and
+// has to keep two different humans who share a name apart. Both guarantees are
+// what makes "N speakers match" agree with the cards underneath it.
+
+function speaker(overrides: Partial<ProgramSpeaker> = {}): ProgramSpeaker {
+  return {
+    id: null,
+    name: 'Priya Raman',
+    title: 'Principal Engineer',
+    company: 'Latticework Systems',
+    photo_url: null,
+    bio: null,
+    linkedin_url: null,
+    twitter_url: null,
+    sessions: [],
+    ...overrides,
+  }
+}
+
+describe('dedupeProgramSpeakers', () => {
+  it('drops a repeated contact id outright', () => {
+    const result = dedupeProgramSpeakers([
+      speaker({ id: 'c-1' }),
+      speaker({ id: 'c-1' }),
+      speaker({ id: 'c-2', name: 'Marcus Okafor', company: 'Northwind' }),
+    ])
+    expect(result.map((s) => s.id)).toEqual(['c-1', 'c-2'])
+  })
+
+  it('merges two contacts sharing a normalized name and company', () => {
+    const [merged, ...rest] = dedupeProgramSpeakers([
+      speaker({
+        id: 'c-manual',
+        sessions: [{ id: 's-1', title: 'Taming CI', starts_at: '2027-05-12T17:00:00Z', room: 'Room 2A', format: 'Talk' }],
+      }),
+      speaker({
+        id: 'c-import',
+        name: '  PRIYA   raman  ',
+        bio: 'Builds CI at scale.',
+        photo_url: 'https://cdn.test/priya.png',
+        sessions: [{ id: 's-2', title: 'Monorepo Q&A', starts_at: '2027-05-13T17:00:00Z', room: 'Room 3B', format: 'Panel' }],
+      }),
+    ])
+    expect(rest).toEqual([])
+    expect(merged.id).toBe('c-manual') // the first record keeps its identity
+    expect(merged.sessions.map((s) => s.id)).toEqual(['s-1', 's-2'])
+    // Blank fields on the first record are filled from the second.
+    expect(merged.bio).toBe('Builds CI at scale.')
+    expect(merged.photo_url).toBe('https://cdn.test/priya.png')
+  })
+
+  it('never lists the same session twice after a merge', () => {
+    const session = { id: 's-1', title: 'Taming CI', starts_at: '2027-05-12T17:00:00Z', room: 'Room 2A', format: 'Talk' }
+    const [merged] = dedupeProgramSpeakers([
+      speaker({ id: 'c-1', sessions: [session] }),
+      speaker({ id: 'c-2', sessions: [session] }),
+    ])
+    expect(merged.sessions).toHaveLength(1)
+  })
+
+  it('orders merged sessions chronologically, unscheduled last', () => {
+    const [merged] = dedupeProgramSpeakers([
+      speaker({
+        id: 'c-1',
+        sessions: [{ id: 's-late', title: 'Late', starts_at: '2027-05-14T17:00:00Z', room: null, format: null }],
+      }),
+      speaker({
+        id: 'c-2',
+        sessions: [
+          { id: 's-tba', title: 'Unplaced', starts_at: null, room: null, format: null },
+          { id: 's-early', title: 'Early', starts_at: '2027-05-12T17:00:00Z', room: null, format: null },
+        ],
+      }),
+    ])
+    expect(merged.sessions.map((s) => s.id)).toEqual(['s-early', 's-late', 's-tba'])
+  })
+
+  it('keeps same-name speakers at different companies apart', () => {
+    const result = dedupeProgramSpeakers([
+      speaker({ id: 'c-1', company: 'Latticework Systems' }),
+      speaker({ id: 'c-2', company: 'Northwind Labs' }),
+    ])
+    expect(result).toHaveLength(2)
+  })
+
+  it('still de-duplicates a payload with no ids at all', () => {
+    const result = dedupeProgramSpeakers([speaker(), speaker(), speaker({ name: 'Marcus Okafor' })])
+    expect(result).toHaveLength(2)
+  })
+
+  it('preserves the incoming (surname-alphabetical) order', () => {
+    const result = dedupeProgramSpeakers([
+      speaker({ id: 'c-1', name: 'Alice Alpha', company: 'Alpha Corp' }),
+      speaker({ id: 'c-2', name: 'Bob Beta', company: 'Beta Inc' }),
+      speaker({ id: 'c-3', name: 'Cara Gamma', company: 'Gamma Ltd' }),
+    ])
+    expect(result.map((s) => s.name)).toEqual(['Alice Alpha', 'Bob Beta', 'Cara Gamma'])
+  })
+
+  it('gives every de-duplicated speaker a unique key', () => {
+    const result = dedupeProgramSpeakers([
+      speaker({ id: 'c-1', company: 'Latticework Systems' }),
+      speaker({ id: 'c-2', company: 'Northwind Labs' }),
+      speaker({ id: null, name: 'Marcus Okafor', company: null }),
+    ])
+    const keys = result.map(speakerKey)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('handles an empty roster', () => {
+    expect(dedupeProgramSpeakers([])).toEqual([])
+  })
+})
+
+describe('publicProgramFeedUrl', () => {
+  it('points at the public JSON endpoint for each widget', () => {
+    expect(publicProgramFeedUrl('ai-builders-summit')).toBe(
+      `${window.location.origin}/public/program/ai-builders-summit/schedule`
+    )
+    expect(publicProgramFeedUrl('ai-builders-summit', 'speakers')).toBe(
+      `${window.location.origin}/public/program/ai-builders-summit/speakers`
+    )
+  })
+
+  it('encodes the slug', () => {
+    expect(publicProgramFeedUrl('a b')).toContain('/program/a%20b/')
   })
 })
