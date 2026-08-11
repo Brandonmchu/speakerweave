@@ -243,7 +243,10 @@ async def _slack_api_post(
     payload: dict[str, Any],
     *,
     timeout_seconds: float,
+    form: bool = False,
 ) -> dict[str, Any]:
+    """POST to the Slack Web API. Write methods take JSON; read methods like
+    users.info ignore JSON bodies entirely and need form encoding (form=True)."""
     token = (os.getenv("SLACK_BOT_TOKEN") or "").strip()
     if not token:
         raise RuntimeError("SLACK_BOT_TOKEN is not configured")
@@ -252,7 +255,10 @@ async def _slack_api_post(
         headers={"Authorization": f"Bearer {token}"},
         timeout=timeout_seconds,
     ) as client:
-        response = await client.post(path, json=payload)
+        if form:
+            response = await client.post(path, data=payload)
+        else:
+            response = await client.post(path, json=payload)
         response.raise_for_status()
         result = response.json()
     if not result.get("ok"):
@@ -305,6 +311,7 @@ async def slack_display_name(slack_user_id: str) -> str | None:
             "/users.info",
             {"user": slack_user_id},
             timeout_seconds=5.0,
+            form=True,
         )
         user = result.get("user") or {}
         profile = user.get("profile") or {}
