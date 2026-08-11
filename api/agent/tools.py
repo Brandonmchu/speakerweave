@@ -481,6 +481,7 @@ async def invoke_tool(
             tool_name=tool_name,
             tool_input=clean_arguments,
             progress_queue=context.progress_queue,
+            context=context,
         )
         if not approved:
             result_text = denied_tool_result(tool_name)

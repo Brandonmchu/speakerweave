@@ -1,6 +1,6 @@
 # The in-app chat agent
 
-SpeakerWeave ships an optional, Every-style chat agent: a right-side panel available on every organizer page, with threads, streaming responses, `@`-mention context tagging, clickable entity badges, agent-driven navigation, and inline Approve/Deny confirmation for sensitive actions. It shares one org-scoped tool layer with the Slack bot, the hosted MCP server, the REST assistant endpoint, and the `sw` CLI — one brain, many surfaces.
+SpeakerWeave ships an optional, Every-style agent with two transports. In-app Ask is a right-side panel available on every organizer page, with threads, streaming responses, `@`-mention context tagging, clickable entity badges, agent-driven navigation, and inline Approve/Deny confirmation for sensitive actions. The Slack bot enters the exact same agent turn service, tool registry, MCP connectors, thread store, and permission gate through signed Slack events and interactive buttons.
 
 This document covers how to turn it on, how to turn it off, how to run it on OpenAI or Anthropic, and how to remove it from the codebase entirely.
 
@@ -19,18 +19,22 @@ The frontend needs no configuration at all: it asks `GET /api/agent/capabilities
 
 ## Architecture (and how it stays deletable)
 
-All chat-agent code is quarantined in two directories:
+The agent runtime and in-app UI are concentrated in two directories, with Slack kept as a transport at the service boundary:
 
-- `api/agent/` — the FastAPI module: router, both provider runtimes, SSE event vocabulary, thread persistence, permission gate, context search, and MCP connector framework. Mounted from a single guarded `include_router` line in `api/main.py`.
+- `api/agent/` — the FastAPI module: shared `service.run_turn`, the in-app SSE router, both provider runtimes, event vocabulary, thread persistence, permission gate, context search, and MCP connector framework. The router is mounted from a single guarded `include_router` line in `api/main.py`; the Slack transport calls `service.run_turn` directly.
 - `web/src/agent/` — the React module: panel shell, threads, composer with `@` mentions, streaming consumer + pacer, markdown renderer, work trace, permission prompt. Mounted from a single conditional block in `web/src/shell/AppShell.tsx`.
 
 **Don't want it?** Set no keys — it stays dormant, costs nothing, imports nothing.
 
-**Want it gone from the codebase?** Delete `api/agent/` and its one mount line in `main.py`; delete `web/src/agent/` and the one conditional in `AppShell.tsx`; drop migration `016_agent_chat.sql` from new deployments (or leave the two empty tables — nothing else references them). The SDK entries in `requirements.txt` (`openai`, `openai-agents`) and the markdown packages in `web/package.json` can then be removed too. Nothing else in the app touches the module in either direction.
+**Want only the in-app panel gone?** Delete `web/src/agent/` and its conditional mount in `AppShell.tsx`; the Slack transport can continue using the shared API runtime.
+
+**Want the entire agent gone from the codebase?** Remove the Slack bridge and route along with `api/agent/`, its mount line, `web/src/agent/`, and the web mount. New deployments can also omit the agent and Slack thread migrations; existing deployments may leave their empty tables. The SDK entries in `requirements.txt` (`openai`, `openai-agents`) and the markdown packages in `web/package.json` can then be removed.
 
 ## OpenAI or Anthropic — the same harness
 
 The runtime follows Every's production pattern: a provider-neutral harness (threads, SSE streaming, permission gate, tool registry, persistence) with the model loop as the only swappable part.
+
+`api/agent/service.py:run_turn` is the shared entry point. It claims the thread, loads history, persists the user message, builds the prompt, drives the selected runtime, emits public events, persists the reply, and releases pending permissions in `finally`. The in-app route only adapts those events to SSE. Slack adapts signed Events API messages to the same call and listens for `permission_request` events so it can render native buttons. `api/services/assistant.py` is a separate legacy boundary used only by `/api/assistant/chat`; Slack does not use it.
 
 - **Tool registry**: one declarative list of `{name, description, input_schema}` in Anthropic schema format, shared by every surface. The OpenAI lane adapts each entry to a hand-built `FunctionTool` (`strict_json_schema=False` so schemas pass through unmodified); the Anthropic lane sends the list natively.
 - **Events**: both lanes emit the same SSE vocabulary (`message_delta`, `progress`, `reasoning`, `permission_request`, `navigate`, `entity_update`, `complete`, …). The frontend cannot tell providers apart.
@@ -48,7 +52,7 @@ If you default to the Anthropic lane (or point the OpenAI lane at a different mo
 
 ## Sensitive actions require approval
 
-Tools that send email, record accept/decline decisions, publish the schedule, delete data, or invoke a mutating external MCP tool are permission-gated: the run pauses, the composer becomes an Approve/Deny card (180-second expiry), and a denial is returned to the model as a structured refusal so the conversation continues gracefully. The gated list lives in `api/agent/permissions.py` — extend it as you add tools.
+Tools that send email, record accept/decline decisions, publish the schedule, delete data, or invoke a mutating external MCP tool are permission-gated. The same pending permission is resolved through either transport: in-app Ask renders an Approve/Deny card with a 180-second expiry, while Slack posts native Approve/Deny buttons and waits up to 300 seconds. A denial is returned to the model as a structured refusal so the conversation continues gracefully. The gated list and shared resolver live in `api/agent/permissions.py` — extend them as you add tools.
 
 ## MCP connectors (optional layer)
 

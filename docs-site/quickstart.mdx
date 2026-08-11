@@ -45,5 +45,5 @@ Each activates with configuration alone and stays dormant otherwise:
 | AI chat agent | `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` ([details](/ai/chat-agent)) |
 | Email delivery | `RESEND_API_KEY` (without it, mail writes local `.eml` files) |
 | Clerk auth | `VITE_CLERK_PUBLISHABLE_KEY` + a `supabase` JWT template |
-| Slack bot | Manifest at `api/slack_manifest.json` + two secrets ([details](/ai/slack)) |
+| Slack agent | Manifest at `api/slack_manifest.json`; Events + Interactivity on the same URL; `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_DEFAULT_ORG`, and the agent provider key ([details](/ai/slack)) |
 | Airtable sync | Per-organization settings in the UI ([details](/integrations/airtable)) |

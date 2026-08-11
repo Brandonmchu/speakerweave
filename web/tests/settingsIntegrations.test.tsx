@@ -76,6 +76,9 @@ function stubFetch() {
           signing_secret_configured: true,
           bot_token_configured: true,
           anthropic_configured: false,
+          provider: 'openai',
+          agent_backed: true,
+          model_key_configured: false,
           default_org: 'org_dev',
           source: 'environment',
         })
@@ -163,12 +166,20 @@ describe('Settings integrations', () => {
     expect(await screen.findByText('Environment configured')).toBeInTheDocument()
     expect(screen.getByText('Signing secret set')).toBeInTheDocument()
     expect(screen.getByText('Bot token set')).toBeInTheDocument()
-    expect(screen.getByText('Anthropic key missing')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI key missing')).toBeInTheDocument()
+    expect(screen.getByText('Agent bridge active')).toBeInTheDocument()
+    expect(screen.getByText(/same agent as in-app Ask/i)).toBeInTheDocument()
+    expect(screen.getByText(/Approve/).closest('div')).toHaveTextContent(
+      'Slack conversations also appear in in-app Ask history'
+    )
 
     const manifest = screen.getByTestId('slack-manifest').textContent ?? ''
     expect(manifest).toContain('"name": "SpeakerWeave"')
     expect(manifest).toContain('"app_mentions:read"')
     expect(manifest).toContain('"message.im"')
+    expect(manifest).toContain('"users:read"')
+    expect(manifest).toContain('"interactivity"')
+    expect(manifest).toContain('"is_enabled": true')
     expect(manifest).toContain('https://speakerweave.com/api/slack/events')
     expect(screen.getByTestId('copy-slack-manifest')).toBeInTheDocument()
   })

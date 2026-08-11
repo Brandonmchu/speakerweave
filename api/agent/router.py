@@ -5,37 +5,32 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agent import context_search, mcp_connectors, permissions, threads, titles
+from agent import context_search, mcp_connectors, permissions, service, threads
 from agent.events import PUBLIC_EVENT_TYPES, format_sse_event
-from agent.prompt import build_system_prompt
-from agent.tools import TurnContext
 from auth import get_current_user_or_api_org
 from services.oauth import public_origin as oauth_public_origin
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
+# Compatibility exports for callers and frozen tests that historically used
+# the router module as the active-turn control surface.
+_ACTIVE_TURNS = service._ACTIVE_TURNS
+ActiveTurn = service.ActiveTurn
+cancel_turn = service.cancel_turn
+claim_turn = service.claim_turn
+release_turn = service.release_turn
+resolve_provider = service.resolve_provider
+run_turn = service.run_turn
+
 MAX_MESSAGE_CHARS = 8_000
 KEEPALIVE_SECONDS = 15.0
-
-
-def resolve_provider() -> str | None:
-    explicit = (os.getenv("ASSISTANT_PROVIDER") or "").strip().casefold()
-    if explicit in {"openai", "anthropic"}:
-        return explicit
-    if (os.getenv("OPENAI_API_KEY") or "").strip():
-        return "openai"
-    if (os.getenv("ANTHROPIC_API_KEY") or "").strip():
-        return "anthropic"
-    return None
 
 
 def assistant_enabled() -> bool:
@@ -53,13 +48,6 @@ def require_enabled() -> str:
     if provider is None:
         raise HTTPException(status_code=404, detail="Not found")
     return provider
-
-
-def valid_turn_id(value: str | None) -> str:
-    try:
-        return str(uuid.UUID(str(value)))
-    except (TypeError, ValueError, AttributeError):
-        return str(uuid.uuid4())
 
 
 class EmptyRequest(BaseModel):
@@ -138,45 +126,6 @@ class MCPConnectorRequest(BaseModel):
         if self.auth_kind == "bearer" and not (self.bearer_token or "").strip():
             raise ValueError("Bearer token is required")
         return self
-
-
-@dataclass
-class ActiveTurn:
-    thread_id: str
-    turn_id: str
-    context: TurnContext
-    completion_task: asyncio.Task[None] | None = None
-
-
-_ACTIVE_TURNS: dict[str, ActiveTurn] = {}
-_ACTIVE_TURNS_LOCK = asyncio.Lock()
-
-
-async def claim_turn(active: ActiveTurn) -> bool:
-    async with _ACTIVE_TURNS_LOCK:
-        if active.thread_id in _ACTIVE_TURNS:
-            return False
-        _ACTIVE_TURNS[active.thread_id] = active
-        return True
-
-
-async def release_turn(thread_id: str, turn_id: str) -> None:
-    async with _ACTIVE_TURNS_LOCK:
-        active = _ACTIVE_TURNS.get(thread_id)
-        if active and active.turn_id == turn_id:
-            _ACTIVE_TURNS.pop(thread_id, None)
-
-
-async def cancel_turn(thread_id: str, turn_id: str) -> bool:
-    async with _ACTIVE_TURNS_LOCK:
-        active = _ACTIVE_TURNS.get(thread_id)
-        if not active or active.turn_id != turn_id:
-            return False
-        active.context.cancel_event.set()
-        producer = active.context.producer_task
-        if producer and not producer.done():
-            producer.cancel()
-        return True
 
 
 @router.get("/capabilities")
@@ -275,15 +224,6 @@ async def search_context(
     return {"results": await context_search.search_context(org_id, q, type)}
 
 
-async def _busy_stream(thread_id: str, turn_id: str) -> AsyncIterator[str]:
-    yield format_sse_event(
-        "thread_started", {"thread_id": thread_id, "turn_id": turn_id}
-    )
-    yield format_sse_event(
-        "error", {"message": "This thread already has a live turn.", "code": "thread_busy"}
-    )
-
-
 def _streaming_response(generator: AsyncIterator[str]) -> StreamingResponse:
     return StreamingResponse(
         generator,
@@ -301,7 +241,7 @@ async def chat_stream(
     payload: ChatRequest,
     auth: tuple = Depends(get_current_user_or_api_org),
 ) -> StreamingResponse:
-    provider = require_enabled()
+    require_enabled()
     user_id, org_id = auth
     if payload.thread_id:
         thread = await threads.fetch_thread(payload.thread_id, org_id)
@@ -309,196 +249,25 @@ async def chat_stream(
         thread = await threads.create_thread(org_id, user_id)
     thread_id = str(thread["id"])
     metadata = payload.metadata.model_dump()
-    turn_id = valid_turn_id(metadata.get("client_turn_id"))
     progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    stream_open = asyncio.Event()
-    stream_open.set()
-    context = TurnContext(
-        org_id=org_id,
-        user_id=user_id,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        metadata=metadata,
-        progress_queue=progress_queue,
-        cancel_event=asyncio.Event(),
-    )
-    active = ActiveTurn(thread_id=thread_id, turn_id=turn_id, context=context)
-    if not await claim_turn(active):
-        return _streaming_response(_busy_stream(thread_id, turn_id))
 
-    try:
-        history_result, event_result, connector_result = await asyncio.gather(
-            threads.load_history(thread_id, org_id),
-            threads.current_event_context(org_id),
-            mcp_connectors.connected_count(org_id),
-            return_exceptions=True,
-        )
-        if isinstance(history_result, BaseException):
-            raise history_result
-        history = history_result
-        event = None if isinstance(event_result, BaseException) else event_result
-        connector_count = 0 if isinstance(connector_result, BaseException) else connector_result
-        await threads.persist_user_message(
-            thread_id=thread_id,
+    async def enqueue_event(event: dict[str, Any]) -> None:
+        await progress_queue.put(event)
+
+    # The task owns persistence and cleanup and deliberately outlives an SSE
+    # reader that disconnects before the turn completes.
+    asyncio.create_task(
+        run_turn(
             org_id=org_id,
             user_id=user_id,
-            turn_id=turn_id,
-            content=payload.message,
+            thread_id=thread_id,
+            message=payload.message,
             metadata=metadata,
+            on_event=enqueue_event,
         )
-    except BaseException:
-        await release_turn(thread_id, turn_id)
-        raise
-
-    system_prompt = build_system_prompt(
-        org_id=org_id,
-        user_id=user_id,
-        metadata=metadata,
-        event=event,
-        mcp_connectors_connected=int(connector_count),
     )
-    full_prompt = threads.format_history(history, payload.message)
-
-    async def completion() -> None:
-        accumulated: list[str] = []
-        usage: dict[str, Any] = {}
-        status = "complete"
-        error_message = "The conference assistant could not finish this turn."
-        try:
-            if provider == "openai":
-                from agent.runtime_openai import stream_response
-            else:
-                from agent.runtime_anthropic import stream_response
-
-            async for event_item in stream_response(
-                context=context,
-                system_prompt=system_prompt,
-                full_prompt=full_prompt,
-            ):
-                event_type = str(event_item.get("type") or "")
-                if event_type == "message_delta":
-                    accumulated.append(str(event_item.get("message") or ""))
-                    await progress_queue.put(event_item)
-                elif event_type == "runtime_complete":
-                    usage = dict(event_item.get("usage") or {})
-                elif event_type == "runtime_cancelled":
-                    status = "cancelled"
-                    break
-                elif event_type == "error":
-                    status = "error"
-                    error_message = str(event_item.get("message") or error_message)
-                    break
-                elif event_type in PUBLIC_EVENT_TYPES:
-                    await progress_queue.put(event_item)
-
-            if context.cancel_event.is_set():
-                status = "cancelled"
-            response_text = "".join(accumulated).strip()
-            if status == "complete" and not response_text:
-                response_text = "I couldn't produce a response for that request."
-                await progress_queue.put(
-                    {"type": "message_delta", "message": response_text}
-                )
-                await progress_queue.put({"type": "message_complete"})
-
-            if status == "complete" or response_text:
-                await threads.persist_agent_message(
-                    thread_id=thread_id,
-                    org_id=org_id,
-                    turn_id=turn_id,
-                    content=response_text,
-                    metadata={
-                        "turn_id": turn_id,
-                        "usage": usage,
-                        "agent_sdk": (
-                            "openai_agents_sdk"
-                            if provider == "openai"
-                            else "anthropic_sdk"
-                        ),
-                        "activity": context.activity,
-                        **({"cancelled": True} if status == "cancelled" else {}),
-                    },
-                    reasoning_context={
-                        "tool_calls": context.tool_calls,
-                        "provider": provider,
-                    },
-                    response_type="error" if status == "error" else "completion",
-                )
-
-            if status == "complete" and response_text:
-                asyncio.create_task(
-                    titles.maybe_generate_title(
-                        provider=provider,
-                        thread_id=thread_id,
-                        org_id=org_id,
-                        user_message=payload.message,
-                        assistant_reply=response_text,
-                        prior_history=history,
-                        progress_queue=progress_queue,
-                        stream_open=stream_open,
-                    )
-                )
-            await progress_queue.put(
-                {
-                    "type": "stream_done",
-                    "status": status,
-                    "message_to_user": response_text,
-                    "error_message": error_message,
-                }
-            )
-        except asyncio.CancelledError:
-            # The harness itself is never cancelled for a client disconnect. If
-            # cancellation reaches here, treat it as the explicit stop path.
-            response_text = "".join(accumulated).strip()
-            if response_text:
-                await threads.persist_agent_message(
-                    thread_id=thread_id,
-                    org_id=org_id,
-                    turn_id=turn_id,
-                    content=response_text,
-                    metadata={
-                        "turn_id": turn_id,
-                        "usage": usage,
-                        "agent_sdk": (
-                            "openai_agents_sdk"
-                            if provider == "openai"
-                            else "anthropic_sdk"
-                        ),
-                        "activity": context.activity,
-                        "cancelled": True,
-                    },
-                    reasoning_context={
-                        "tool_calls": context.tool_calls,
-                        "provider": provider,
-                    },
-                )
-            await progress_queue.put(
-                {
-                    "type": "stream_done",
-                    "status": "cancelled",
-                    "message_to_user": response_text,
-                }
-            )
-        except Exception:  # noqa: BLE001 - convert provider/persistence failure to SSE
-            await progress_queue.put(
-                {
-                    "type": "stream_done",
-                    "status": "error",
-                    "message_to_user": "".join(accumulated).strip(),
-                    "error_message": error_message,
-                }
-            )
-        finally:
-            await permissions.deny_pending_for_turn(thread_id, turn_id)
-            await release_turn(thread_id, turn_id)
-
-    completion_task = asyncio.create_task(completion())
-    active.completion_task = completion_task
 
     async def event_stream() -> AsyncIterator[str]:
-        yield format_sse_event(
-            "thread_started", {"thread_id": thread_id, "turn_id": turn_id}
-        )
         last_keepalive = time.monotonic()
         try:
             while True:
@@ -513,39 +282,18 @@ async def chat_stream(
                 except TimeoutError:
                     continue
                 event_type = str(event_item.get("type") or "")
-                if event_type == "stream_done":
-                    while not progress_queue.empty():
-                        trailing = progress_queue.get_nowait()
-                        trailing_type = str(trailing.get("type") or "")
-                        if trailing_type in PUBLIC_EVENT_TYPES:
-                            yield format_sse_event(
-                                trailing_type,
-                                {key: value for key, value in trailing.items() if key != "type"},
-                            )
-                    status = event_item.get("status")
-                    if status == "cancelled":
-                        yield format_sse_event("cancelled")
-                    elif status == "error":
-                        yield format_sse_event(
-                            "error",
-                            {"message": event_item.get("error_message") or "Agent error"},
-                        )
-                    else:
-                        yield format_sse_event(
-                            "complete",
-                            {"message_to_user": event_item.get("message_to_user") or ""},
-                        )
-                    return
                 if event_type in PUBLIC_EVENT_TYPES:
                     yield format_sse_event(
                         event_type,
                         {key: value for key, value in event_item.items() if key != "type"},
                     )
                 progress_queue.task_done()
+                if event_type in {"complete", "error", "cancelled"}:
+                    return
         finally:
             # A CancelledError from client disconnect passes through this
             # generator. Deliberately leave the completion task alive.
-            stream_open.clear()
+            pass
 
     return _streaming_response(event_stream())
 

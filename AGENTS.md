@@ -11,8 +11,8 @@ api/
 ├── main.py                    FastAPI assembly and process lifecycle
 ├── auth.py                    organizer JWT verification and org boundary
 ├── routes/                    HTTP surfaces: organizer, public, portal, v1, OAuth, Slack
-├── services/                  domain logic and external-provider boundaries
-├── agent/                     optional in-app chat agent (see docs/chat-agent.md); one guarded mount in main.py; delete whole dir to remove the feature
+├── services/                  domain logic, Slack transport, and external-provider boundaries
+├── agent/                     shared agent runtime for in-app Ask and Slack (see docs/chat-agent.md), plus the guarded in-app router
 ├── migrations/               ordered additive SQL migrations, NNN_description.sql
 ├── scripts/seed_demo.py       deterministic demo reset/seed command
 ├── mcp_server.py              hosted MCP surface
@@ -114,6 +114,12 @@ Audit/history recording, background provisioning, notifications, and other secon
 
 Invitation and reminder endpoints write an organization-scoped `email_outbox` row and return without waiting on a provider. `api/services/outbox_worker.py` polls due rows, claims them with an optimistic compare-and-set, retries failures with backoff, and passes the row ID as the provider idempotency key. `api/services/mailer.py:send_email()` is the only delivery boundary; without `RESEND_API_KEY` it writes `.eml` files locally. Preserve queue durability, retry state, and idempotency when changing email behavior.
 
+### Slack is a transport over the agent runtime
+
+Slack mentions and DMs do not have a separate prompt, model loop, or tool list. Signed Slack events enter through `api/routes/slack_routes.py`; `api/services/slack_bridge.py` resolves the organization-scoped Slack thread mapping and calls `api/agent/service.run_turn`. In-app Ask adapts the same function to SSE. Both transports therefore share the provider runtime, built-in tools, connected MCP servers, `agent_threads` history, and `api/agent/permissions.py` gate.
+
+Permission requests in Slack render native Approve/Deny buttons. Interactivity returns to the same signed `/api/slack/events` endpoint and resolves the same pending request as the in-app permission route. Keep button values opaque, keep Slack mappings organization-scoped, and keep the event and Interactivity request URLs identical in both manifest copies. `api/services/assistant.py` remains only for `/api/assistant/chat`; never route Slack through it.
+
 ## (d) ADAPTING TO YOUR ORG'S STACK
 
 The reference providers are replaceable, but their contracts are not.
@@ -124,8 +130,8 @@ The reference providers are replaceable, but their contracts are not.
 | Auth | Any issuer is acceptable if it produces an HS256 JWT signed by `SUPABASE_JWT_SECRET` with `aud: authenticated`, `sub`, `exp`, and `org_id`. Change only `api/auth.py` (`verify_token`, `get_current_user_and_org`) and `web/src/auth/*` (`ClerkTokenBridge`, provider/pages) for an auth swap. | The API derives `org_id` from a verified token, never from request data; missing/invalid claims fail closed; foreign resources still return 404 rather than leaking existence. |
 | Email | Keep `api/services/mailer.py:send_email()` as the public boundary. Replace `_send_via_resend()` and provider-specific configuration there; the caller remains `api/services/outbox_worker.py`. | No provider call blocks the primary write; the worker can retry; a stable `idempotency_key` reaches the provider; one bad recipient cannot sink an unrelated batch. |
 | Hosting | Two web tiers ship ready-made: `web/Dockerfile` + `web/nginx/default.conf` (Railway reference) and `web/wrangler.jsonc` + `web/worker/index.js` (Cloudflare Workers edge). For another host, replace `api/railway.json` and/or the web tier while keeping the proxy contract. The API entrypoint is `uvicorn main:app`; the web artifact is Vite's `web/dist`. | Serve the SPA with history fallback, route backend/OAuth/MCP paths correctly, keep secrets server-only, inject `VITE_*` values at build time, expose health checks, and run migrations before code that requires them. |
-| AI | Replace `api/services/ai_triage.py:_call_anthropic()` and `api/services/assistant.py:_call_anthropic()` plus their model constants/schema translation. | Triage still returns a complete, labelled heuristic result when AI is absent or fails; in-app and Slack tools still dispatch through organization-scoped `services.integration_api`; human decisions remain authoritative. |
-| Chat agent | Provider choice is configuration, not code: `ASSISTANT_PROVIDER` selects between `api/agent/runtime_openai.py` and `api/agent/runtime_anthropic.py`; both share the harness, tool registry, SSE vocabulary, and permission gate (see `docs/chat-agent.md`). A third provider means one new runtime module implementing the same semantic event stream. | The feature stays absent-by-default (no key → no routes, no UI, no SDK imports); permission-gated tools never execute without an explicit approval; all tool execution stays org-scoped through the shared registry. |
+| AI | Replace `api/services/ai_triage.py:_call_anthropic()` for triage or `api/services/assistant.py:_call_anthropic()` for the legacy `/api/assistant/chat` boundary, plus their model constants/schema translation. | Triage still returns a complete, labelled heuristic result when AI is absent or fails; `services/assistant.py` remains isolated from the in-app/Slack agent runtime; human decisions remain authoritative. |
+| Chat agent | Provider choice is configuration, not code: `ASSISTANT_PROVIDER` selects between `api/agent/runtime_openai.py` and `api/agent/runtime_anthropic.py`; both run behind `api/agent/service.run_turn` and share the tool registry, event vocabulary, thread persistence, and permission gate (see `docs/chat-agent.md`). A third provider means one new runtime module implementing the same semantic event stream. | In-app Ask and Slack remain transports over `run_turn`; the feature stays absent-by-default; permission-gated tools never execute without explicit approval; all built-in and MCP tool execution stays org-scoped through the shared registry. |
 
 Optional Slack and Airtable integrations are separate from these core swap points and must remain nonessential to conference workflows.
 
@@ -168,7 +174,7 @@ venv/bin/python scripts/mint_dev_token.py   # print a short-lived organizer toke
 - **CLI:** the standalone `speakerweave-cli` package and `sw` command live in `cli/`; follow [`cli/README.md`](cli/README.md) for install, commands, and its isolated pytest gate.
 - **MCP:** Streamable HTTP tools/resources and bearer/OAuth auth live in `api/mcp_server.py` and mount at `/mcp` from `api/main.py`.
 - **OAuth:** discovery, dynamic registration, PKCE authorization, and token rotation live in `api/routes/oauth_routes.py`, `api/services/oauth.py`, and `api/migrations/015_oauth.sql`.
-- **Assistant:** shared prompts, tools, guarded execution, and the model loop live in `api/services/assistant.py`; the authenticated in-app boundary is `api/routes/assistant_routes.py` and Slack stays a thin transport in `api/services/slack_agent.py`.
-- **Chat agent:** the streaming in-app panel is `api/agent/` (SSE harness, provider runtimes, permissions, MCP connector framework) + `web/src/agent/`; it reuses the assistant tool registry and is documented in `docs/chat-agent.md`.
-- **Slack:** import `api/slack_manifest.json`; signed events enter through `api/routes/slack_routes.py` and delegate to the shared assistant engine.
+- **Assistant:** `api/services/assistant.py` and `api/routes/assistant_routes.py` serve only the authenticated `/api/assistant/chat` surface; Slack does not use this model loop.
+- **Chat agent:** `api/agent/service.py:run_turn` is the shared turn lifecycle for in-app Ask and Slack. The in-app SSE adapter, provider runtimes, permissions, and MCP connector framework live in `api/agent/`; the panel lives in `web/src/agent/`. See `docs/chat-agent.md`.
+- **Slack:** import `api/slack_manifest.json`; signed events and Interactivity enter through the same `/api/slack/events` route, then `api/services/slack_bridge.py` maps Slack threads and delegates to `agent/service.run_turn`.
 - **Airtable:** per-organization configuration enters through `api/routes/integration_routes.py` and sync/upsert behavior lives in `api/services/airtable_sync.py`.

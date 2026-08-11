@@ -49,6 +49,7 @@ PATCH_TARGET_MODULES = (
     "services.org_scope",
     "services.portal",
     "services.session_revisions",
+    "services.slack_bridge",
     "services.slugs",
     "services.submitter_selfservice",
 )

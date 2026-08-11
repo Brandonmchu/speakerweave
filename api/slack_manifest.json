@@ -16,7 +16,8 @@
         "chat:write",
         "im:history",
         "im:read",
-        "im:write"
+        "im:write",
+        "users:read"
       ]
     }
   },
@@ -27,6 +28,10 @@
         "app_mention",
         "message.im"
       ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://speakerweave.com/api/slack/events"
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": false,

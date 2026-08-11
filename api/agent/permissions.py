@@ -230,12 +230,24 @@ async def request_permission(
     tool_name: str,
     tool_input: dict[str, Any],
     progress_queue: asyncio.Queue[dict[str, Any]],
-    timeout_seconds: float = PERMISSION_APPROVAL_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = None,
+    context: Any | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Emit an approval card and wait once for approval, denial, or expiry."""
     action = permission_action_for_tool(tool_name)
     if not action:
         return True, strip_display_fields(tool_input)
+
+    if timeout_seconds is None:
+        configured_timeout = (
+            context.metadata.get("permission_timeout_seconds")
+            if context is not None
+            else None
+        )
+        try:
+            timeout_seconds = float(configured_timeout)
+        except (TypeError, ValueError):
+            timeout_seconds = PERMISSION_APPROVAL_TIMEOUT_SECONDS
 
     resolved_input = await resolve_display_fields(org_id, tool_name, tool_input)
     request_id = str(uuid.uuid4())

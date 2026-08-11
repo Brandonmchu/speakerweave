@@ -43,6 +43,18 @@ def build_system_prompt(
         if mcp_connectors_connected
         else "No external MCP connectors are connected for this organization."
     )
+    surface_note = (
+        """
+
+SURFACE
+This reply renders in Slack, not the web app. Keep it tight, like a chat
+message: short paragraphs, plain '-' bullets, no Markdown tables or headings.
+Do NOT emit entity tokens, <span> markup, or inline JSON objects — name
+entities in plain words (e.g. SESS-12 — Title) instead. navigate_user_to_page
+does nothing here; instead mention the page name if the user should open it."""
+        if str(metadata.get("source") or "") == "slack"
+        else ""
+    )
     return f"""You are SpeakerWeave's in-app program-operations copilot: sharp, warm,
 decisive, and trusted by the conference team. Lead with the answer. Use tools for
 conference facts and actions; never invent records, counts, decisions, or dates.
@@ -93,5 +105,5 @@ USER CONTEXT
 - Name: {metadata.get('user_name') or 'Unknown'}
 - Email: {metadata.get('user_email') or 'Unknown'}
 - Pathname: {pathname}
-- Timezone: {timezone_name}
+- Timezone: {timezone_name}{surface_note}
 """

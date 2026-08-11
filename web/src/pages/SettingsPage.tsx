@@ -807,6 +807,20 @@ function SlackBotCard() {
     queryFn: getSlackStatus,
   })
   const configured = Boolean(status.data?.configured)
+  const providerName =
+    status.data?.provider === 'openai'
+      ? 'OpenAI'
+      : status.data?.provider === 'anthropic'
+        ? 'Anthropic'
+        : 'Anthropic'
+  const providerKey =
+    status.data?.provider === 'openai'
+      ? 'OPENAI_API_KEY'
+      : status.data?.provider === 'anthropic'
+        ? 'ANTHROPIC_API_KEY'
+        : 'OPENAI_API_KEY or ANTHROPIC_API_KEY'
+  const modelKeyConfigured =
+    status.data?.model_key_configured ?? status.data?.anthropic_configured
 
   return (
     <section className="border-t border-border pt-8" data-testid="slack-card">
@@ -823,21 +837,41 @@ function SlackBotCard() {
             )}
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Ask SpeakerWeave about submissions, speakers, schedules, or content from a mention or DM.
+            The Slack bot is the same agent as in-app Ask, with the same tools and connected MCP
+            servers. Slack is simply another place to talk to it.
           </p>
         </div>
       </div>
 
       <div className="space-y-5 px-5 py-5">
-        <ol className="space-y-2 pl-5 text-sm leading-relaxed text-foreground marker:font-mono marker:text-muted-foreground">
-          <li className="list-decimal">Create a Slack app from the manifest below.</li>
-          <li className="list-decimal">Install the app to your workspace and copy its bot token.</li>
-          <li className="list-decimal">
-            Set <code className="font-mono text-xs">SLACK_BOT_TOKEN</code>,{' '}
-            <code className="font-mono text-xs">SLACK_SIGNING_SECRET</code>, and{' '}
-            <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> in the API environment.
-          </li>
-        </ol>
+        <div className="border-b border-border pb-5 text-sm leading-relaxed text-muted-foreground">
+          Sensitive actions arrive as <span className="font-medium text-foreground">Approve</span>{' '}
+          and <span className="font-medium text-foreground">Deny</span> buttons in Slack. Messages
+          stay in the same persisted threads, so Slack conversations also appear in in-app Ask
+          history.
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-foreground">Setup</p>
+          <ol className="space-y-2 pl-5 text-sm leading-relaxed text-foreground marker:font-mono marker:text-muted-foreground">
+            <li className="list-decimal">Create a Slack app from the manifest below.</li>
+            <li className="list-decimal">
+              In Event Subscriptions, confirm the request URL is{' '}
+              <code className="font-mono text-xs">https://speakerweave.com/api/slack/events</code>.
+              Then enable Interactivity &amp; Shortcuts with that same request URL.
+            </li>
+            <li className="list-decimal">
+              Install the app to your workspace, invite it to any shared channels, and copy its bot
+              token.
+            </li>
+            <li className="list-decimal">
+              Set <code className="font-mono text-xs">SLACK_BOT_TOKEN</code>,{' '}
+              <code className="font-mono text-xs">SLACK_SIGNING_SECRET</code>,{' '}
+              <code className="font-mono text-xs">SLACK_DEFAULT_ORG</code>, and{' '}
+              <code className="font-mono text-xs">{providerKey}</code> in the API environment.
+            </li>
+          </ol>
+        </div>
 
         <div className="flex flex-wrap gap-2" aria-label="Slack environment status">
           <Badge variant={status.data?.signing_secret_configured ? 'success' : 'muted'}>
@@ -846,9 +880,14 @@ function SlackBotCard() {
           <Badge variant={status.data?.bot_token_configured ? 'success' : 'muted'}>
             Bot token {status.data?.bot_token_configured ? 'set' : 'missing'}
           </Badge>
-          <Badge variant={status.data?.anthropic_configured ? 'success' : 'muted'}>
-            Anthropic key {status.data?.anthropic_configured ? 'set' : 'missing'}
+          <Badge variant={modelKeyConfigured ? 'success' : 'muted'}>
+            {providerName} key {modelKeyConfigured ? 'set' : 'missing'}
           </Badge>
+          {typeof status.data?.agent_backed === 'boolean' && (
+            <Badge variant={status.data.agent_backed ? 'success' : 'warning'}>
+              {status.data.agent_backed ? 'Agent bridge active' : 'Agent bridge unavailable'}
+            </Badge>
+          )}
         </div>
 
         {status.error && (

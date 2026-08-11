@@ -1,20 +1,82 @@
 ---
-title: Slack bot
-description: The same program brain answering mentions and DMs in your workspace.
+title: Slack agent
+description: Run the same agent as in-app Ask from Slack mentions and DMs, including tools, MCP connectors, approvals, and shared thread history.
 ---
 
-The Slack bot shares the chat agent's organization-scoped tool layer — ask about submissions, speakers, schedules, or content from a mention or DM and it answers with live workspace data in native Slack formatting.
+The Slack bot **is the SpeakerWeave agent**, not a separate assistant. A mention or DM enters the same `agent/service.run_turn` runtime as in-app Ask, with the same organization-scoped tool registry, connected MCP servers, provider, thread store, and permission gate.
 
-## Setup
+That means you can start a conversation in Slack, approve a sensitive action without leaving Slack, and find the persisted thread later in the in-app Ask history.
 
-1. Create a Slack app **from a manifest** and paste `api/slack_manifest.json` (it subscribes to `app_mention` and `message.im`, and points Slack at `/api/slack/events`).
-2. Install it to your workspace and invite the bot to a channel.
-3. Configure the API environment:
-   - `SLACK_SIGNING_SECRET` — request signature verification
-   - `SLACK_BOT_TOKEN` — the `xoxb-…` token
-   - `SLACK_DEFAULT_ORG` — the organization the workspace binds to
-   - a model key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) for real answers
+## How the bridge works
+
+```text
+Slack mention or DM
+        ↓ signed event
+/api/slack/events
+        ↓ Slack transport
+agent/service.run_turn
+        ↓
+same provider runtime + tool registry + MCP connectors
+        ↓
+one final Slack reply + persisted Ask thread
+```
+
+Slack acknowledges Events API requests immediately and finishes the agent turn in the background. The bridge converts the final answer to Slack mrkdwn and posts it once. Slack delivery failures are logged without undoing the persisted agent turn.
+
+The in-app Ask panel is an SSE adapter over `run_turn`; Slack is an Events API and Interactivity adapter over that same function. Neither transport owns a second prompt, model loop, or tool list.
+
+## Approvals in Slack
+
+When the agent reaches a permission-gated action—such as sending email, recording a decision, publishing, deleting data, or calling a mutating MCP tool—it posts an **Approval needed** card with **Approve** and **Deny** buttons.
+
+The turn waits for up to **300 seconds**. Clicking either button resolves the same permission gate used by in-app Ask, then replaces the card with a terminal approved or denied state. If the request was already handled or expired, Slack says so and does not execute the action.
+
+<Warning>
+The approval button value contains only an opaque request ID. Keep Interactivity pointed at the signed SpeakerWeave endpoint; do not put tool arguments or credentials in Slack action values.
+</Warning>
+
+## Threads and identity
+
+SpeakerWeave stores the Slack-to-agent relationship in `slack_agent_threads`:
+
+| Slack conversation | Agent behavior |
+|---|---|
+| Channel mention | Creates or resumes the mapping for that channel thread and replies in the Slack thread |
+| Reply in a channel thread | Resumes the same agent thread |
+| Top-level DM | Resumes the most recent agent thread for that DM channel, or creates one; replies stay unthreaded |
+
+Channel messages are attributed with the sender's Slack display name when `users.info` is available. Agent threads use `slack:<user_id>` as their user identity, remain organization-scoped, and appear in the in-app Ask thread history.
+
+## Set up the Slack app
+
+1. In Slack, choose **Create New App → From an app manifest** and paste `api/slack_manifest.json` (or copy the manifest from **Settings → Integrations**).
+2. Under **Event Subscriptions**, enable events and set the request URL to:
+
+   ```text
+   https://speakerweave.com/api/slack/events
+   ```
+
+   For a self-hosted deployment, replace `https://speakerweave.com` with your public web origin.
+3. Subscribe to the bot events `app_mention` and `message.im`.
+4. Under **Interactivity & Shortcuts**, turn on Interactivity and use the **same request URL** as Event Subscriptions.
+5. Confirm these bot token scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, and `users:read`. Socket Mode stays off.
+6. Install or reinstall the app to the workspace, copy the bot token, and invite the bot to any shared channels where it should respond.
 
 <Note>
-Re-install the app after registering scopes or the events URL — Slack only starts delivering events after the reinstall. The current implementation binds each deployment to one organization; add a workspace-to-organization table before serving multiple Slack workspaces from one deployment.
+Reinstall the app after changing scopes, event subscriptions, or Interactivity so the workspace receives the updated configuration.
 </Note>
+
+## Configure the API environment
+
+| Variable | Purpose |
+|---|---|
+| `SLACK_SIGNING_SECRET` | Verifies the raw body of Events API and Interactivity requests |
+| `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-…`) used to read display names and post replies |
+| `SLACK_DEFAULT_ORG` | Organization that this Slack workspace is allowed to access; defaults to `org_dev` |
+| `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | Enables the selected agent provider; `ASSISTANT_PROVIDER` can choose explicitly |
+
+You can verify the detected provider and key state under **Settings → Integrations → Slack bot**.
+
+## Deployment boundary
+
+The reference configuration intentionally binds one deployment to one Slack workspace and one `SLACK_DEFAULT_ORG`; there is no Slack OAuth installation flow. Before serving multiple workspaces from one deployment, add a workspace-to-organization installation table and resolve the organization from the verified Slack workspace instead of a global environment value.

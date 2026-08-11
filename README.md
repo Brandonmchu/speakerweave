@@ -20,7 +20,7 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 - **Public program:** schedule and speaker pages, responsive script/iframe widgets, read-only JSON feeds, per-session calendar downloads, and a subscribable iCal feed.
 - **Full REST API:** organization-scoped API tokens, a stable `/v1` integration surface, and interactive FastAPI OpenAPI docs.
 - **Hosted MCP server:** remote Streamable HTTP at `/mcp`, with bearer-token access and OAuth 2.1 discovery/PKCE for Claude and ChatGPT connector UIs.
-- **AI chat agent + Slack bot:** a streaming in-app agent (threads, @-mention context, entity badges, Approve/Deny gates, MCP connectors) plus signed Slack mentions and DMs — one organization-scoped tool layer behind five surfaces: in-app, Slack, MCP (Claude/ChatGPT), and the CLI.
+- **One AI agent in-app and in Slack:** in-app Ask and the signed Slack bot share the same provider-neutral runtime, organization-scoped tools, MCP connectors, persisted threads, and permission gate. Approve or deny actions from Slack; Slack conversations remain visible in Ask history.
 - **Airtable sync:** per-organization credentials and upsert syncs for Speakers and Submissions.
 - **Outbox-backed email:** queued invitations and reminders, retry/idempotency handling, Resend delivery, native calendar invitations, and local `.eml` output when no provider key is configured.
 
@@ -40,26 +40,27 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 The browser never connects directly to the database. The web tier — nginx in the reference deployment, or the included Cloudflare Worker — serves the React/Vite build and proxies application API, public feed, MCP, and OAuth requests to FastAPI. FastAPI uses `supabase-py` as a PostgREST client with a Supabase service-role key; all tenant queries are scoped in the application by `org_id`, with database RLS enabled as a backstop. When enabled, the API lifespan also runs the email outbox worker.
 
 ```text
-Browser / embedded widget / MCP client / Slack
+Browser / embedded widget / MCP client
                        |
                        v
-              +-----------------+
-              | nginx + React   |  static Vite SPA
-              | /api /public    |  reverse proxy
-              | /mcp /oauth     |
-              +--------+--------+
+              +------------------+
+              | nginx + React    |  static Vite SPA
+              | /api /public     |  reverse proxy
+              | /mcp /oauth      |
+              +--------+---------+
                        |
                        v
-              +-----------------+
-              | FastAPI         |
-              | REST + MCP      |
-              | OAuth + worker  |
-              +---+---------+---+
-                  |         |
-          PostgREST|         | HTTPS
-                  v         v
-       +----------------+  Resend / Anthropic /
-       | Supabase       |  Slack / Airtable
+              +------------------+       signed Events + Interactivity
+              | FastAPI          | <-------------------------------- Slack
+              | REST + MCP       | --------------------------------> Slack API
+              | agent.run_turn   |
+              | OAuth + worker   |
+              +---+----------+---+
+                  |          |
+          PostgREST|          | HTTPS
+                  v          v
+       +----------------+  Resend / OpenAI /
+       | Supabase       |  Anthropic / Airtable
        | Postgres       |
        | Storage        |
        +----------------+
@@ -121,7 +122,7 @@ for migration in api/migrations/*.sql; do
 done
 ```
 
-The zero-padded filenames make the shell loop apply exactly `001` through `018`. All migrations are intended to be safe to re-run. Before seeding, create a public Storage bucket named `portal-files` in Supabase Dashboard → Storage.
+The zero-padded filenames make the shell loop apply every migration in order, including the Slack-to-agent thread mapping. All migrations are intended to be safe to re-run. Before seeding, create a public Storage bucket named `portal-files` in Supabase Dashboard → Storage.
 
 ### 4. Seed the demo workspace
 
@@ -180,8 +181,8 @@ The reference deployment runs live at `https://speakerweave-web.brandon-c2f.work
 | Auth | Clerk in the SPA; HS256 JWT verification in FastAPI | Use whatever you'd like — just point web token acquisition at a JWT issuer that supplies an `org_id` claim and signs with `SUPABASE_JWT_SECRET`. In this implementation, we use Clerk's `supabase` JWT template; the dev-token flow needs no external auth. |
 | Email | One `send_email` boundary in `api/services/mailer.py` | Use whatever you'd like — just point the outbox worker at your provider implementation of that function. In this implementation, we use Resend and write local `.eml` files when its key is absent. |
 | Hosting | Two Railway services: uvicorn API and nginx/static SPA — plus a ready-made Cloudflare Workers web tier (`web/wrangler.jsonc`) | Use whatever you'd like — just point a Python container or uvicorn service and a static SPA host at one another. In this implementation, we use Railway, with an edge deployment on Cloudflare Workers. |
-| AI | Optional chat agent (OpenAI Agents SDK or Anthropic), triage, and shared tool-use adapters for Slack/MCP/CLI | Use whatever you'd like — the in-app agent runs on your `OPENAI_API_KEY` (default, `gpt-5.6-luna` at `xhigh` effort) or `ANTHROPIC_API_KEY` behind one provider switch, and disappears entirely when neither is set. See [docs/chat-agent.md](docs/chat-agent.md). Triage falls back to reviewer-score heuristics without a key. |
-| Integrations | Optional, per-organization Airtable settings; Slack Events API bot | Use whatever you'd like — just point the integration service boundaries at your systems. In this implementation, we use Airtable and Slack, and the core conference workflows run without either. |
+| AI | Optional provider-neutral agent runtime (OpenAI Agents SDK or Anthropic) shared by in-app Ask and Slack; separate AI triage and `/api/assistant/chat` boundaries | Swap the agent model loop in `api/agent/runtime_openai.py` or `runtime_anthropic.py` while preserving `agent/service.run_turn`, its event protocol, tool registry, thread persistence, and permission gate. `api/services/assistant.py` remains only for `/api/assistant/chat`. Without either provider key, the agent surfaces stay dormant and triage falls back to reviewer-score heuristics. See [docs/chat-agent.md](docs/chat-agent.md). |
+| Integrations | Optional, per-organization Airtable settings; signed Slack Events API + Interactivity transport | Replace integrations at their service boundaries. Slack must remain a transport over `api/agent/service.run_turn`, with signature verification, the same endpoint for events and approval buttons, and organization-scoped thread mappings. Core conference workflows remain available without Slack or Airtable. |
 
 ## Integrations
 
@@ -233,18 +234,22 @@ For claude.ai, Claude for Work, or ChatGPT connector UIs, add a custom connector
 
 An Every-style agent panel lives on the right side of every organizer page: threads, streaming answers, `@`-mention any submission/speaker/session as context, clickable entity badges that route through the app, agent-driven navigation ("show me the unstaffed sessions"), and inline Approve/Deny confirmation before anything sensitive (emails, decisions, publishing, deletes) happens.
 
-It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning effort) or `ANTHROPIC_API_KEY`, and the same harness runs on either provider. No key, no UI, no routes, no imports. All of it is quarantined in `api/agent/` + `web/src/agent/` with one mount line each, so removing the feature from your fork is a two-deletion job. Connect Every — or any MCP server your org runs — to give the agent external tools. Full details, including what to adjust when running it on Claude instead: [docs/chat-agent.md](docs/chat-agent.md).
+It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning effort) or `ANTHROPIC_API_KEY`, and the same harness runs on either provider. No key, no UI, no agent-backed Slack answers. The shared runtime lives in `api/agent/`; in-app Ask lives in `web/src/agent/`, while Slack enters through the service boundary. Connect Every — or any MCP server your org runs — to give the agent external tools. Full details, including what to adjust when running it on Claude instead: [docs/chat-agent.md](docs/chat-agent.md).
 
 ### Slack agent
 
-Create a Slack app from [`api/slack_manifest.json`](api/slack_manifest.json), install it, and configure:
+The Slack bot is the same agent as in-app Ask: the same provider, built-in tools, connected MCP servers, persisted threads, and permission gate. Mentions and DMs can run full agent turns; sensitive actions arrive as native **Approve** and **Deny** buttons with a 300-second window. Slack conversations are mapped to `agent_threads`, so they appear in Ask history.
+
+Create a Slack app from [`api/slack_manifest.json`](api/slack_manifest.json). Under **Event Subscriptions**, use `https://speakerweave.com/api/slack/events` (or your deployment's public origin) for `app_mention` and `message.im`. Under **Interactivity & Shortcuts**, enable Interactivity with that **same request URL**. The manifest includes `users:read` so channel messages can be attributed to their speaker, and keeps Socket Mode disabled.
+
+Install or reinstall the app, then configure:
 
 - `SLACK_SIGNING_SECRET`
 - `SLACK_BOT_TOKEN`
 - `SLACK_DEFAULT_ORG`
-- `ANTHROPIC_API_KEY` for real agent answers
+- `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the selected agent provider
 
-The manifest subscribes to `app_mention` and `message.im` and points Slack at `/api/slack/events`. The current implementation binds all incoming Slack workspaces to `SLACK_DEFAULT_ORG`; add a workspace-to-organization installation table before using one deployment for multiple Slack workspaces.
+Channel replies remain in their Slack thread. A top-level DM resumes the most recent mapped agent thread for that DM channel. The current implementation binds one deployment to one Slack workspace and `SLACK_DEFAULT_ORG`; add a workspace-to-organization installation table before serving multiple Slack workspaces from one deployment. See the complete [Slack agent guide](https://speaker-weave.mintlify.site/ai/slack).
 
 ### Airtable
 
@@ -285,7 +290,7 @@ No preferences? Tell your agent: **use the reference stack exactly as documented
 │   ├── app/core/               # settings, logging, and response security
 │   ├── routes/                 # organizer, public, REST v1, OAuth, Slack, portal, review routes
 │   ├── services/               # domain services and external-provider boundaries
-│   ├── migrations/             # ordered PostgreSQL schema/data migrations 001..015
+│   ├── migrations/             # ordered PostgreSQL schema/data migrations, NNN_description.sql
 │   ├── scripts/seed_demo.py    # deterministic, resettable demo workspace
 │   ├── mcp_server.py           # hosted MCP tools/resources and auth boundary
 │   ├── slack_manifest.json     # importable Slack app manifest

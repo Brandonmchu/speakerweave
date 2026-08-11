@@ -34,6 +34,9 @@ export interface SlackStatus {
   signing_secret_configured: boolean
   bot_token_configured: boolean
   anthropic_configured: boolean
+  provider?: 'openai' | 'anthropic' | null
+  agent_backed?: boolean
+  model_key_configured?: boolean
   default_org: string
   source: 'environment'
 }
@@ -103,13 +106,24 @@ export const SLACK_MANIFEST = JSON.stringify(
     },
     oauth_config: {
       scopes: {
-        bot: ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write'],
+        bot: [
+          'app_mentions:read',
+          'chat:write',
+          'im:history',
+          'im:read',
+          'im:write',
+          'users:read',
+        ],
       },
     },
     settings: {
       event_subscriptions: {
         request_url: 'https://speakerweave.com/api/slack/events',
         bot_events: ['app_mention', 'message.im'],
+      },
+      interactivity: {
+        is_enabled: true,
+        request_url: 'https://speakerweave.com/api/slack/events',
       },
       org_deploy_enabled: false,
       socket_mode_enabled: false,
