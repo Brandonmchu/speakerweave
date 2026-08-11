@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
@@ -48,7 +48,7 @@ import {
   type TaskKind,
 } from '@/lib/speakersApi'
 import { cn } from '@/lib/utils'
-import { CopyButton } from '@/pages/Forms'
+import { CopyButton } from '@/ui/copy-button'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
@@ -119,6 +119,7 @@ export function Speakers() {
   const [expandedContactId, setExpandedContactId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const deferredSearch = useDeferredValue(search)
 
   const eventsQuery = useQuery({
     queryKey: ['events'],
@@ -152,7 +153,7 @@ export function Speakers() {
   }, [speakersQuery.data, statusesQuery.data])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = deferredSearch.trim().toLowerCase()
     return speakers.filter((s) => {
       if (q) {
         const hay = `${s.name} ${s.email ?? ''} ${s.company_name ?? ''}`.toLowerCase()
@@ -173,7 +174,7 @@ export function Speakers() {
       }
       return true
     })
-  }, [speakers, search, onboardingFilter, inviteFilter, workflowFilter])
+  }, [speakers, deferredSearch, onboardingFilter, inviteFilter, workflowFilter])
 
   const invite = useMutation({
     mutationFn: (contactId: string) => sendPortalInvite(contactId),

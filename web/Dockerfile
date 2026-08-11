@@ -26,6 +26,10 @@ FROM nginx:alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# Fail the image build if a future base tag drops the standard module required
+# by nginx/default.conf's `gzip_static on` directive.
+RUN nginx -V 2>&1 | grep -q -- '--with-http_gzip_static_module'
+
 # nginx:alpine runs envsubst over /etc/nginx/templates/*.template at startup.
 # NGINX_ENVSUBST_FILTER restricts it to BACKEND_URL — without the filter,
 # envsubst also eats nginx's own $uri/$host variables.

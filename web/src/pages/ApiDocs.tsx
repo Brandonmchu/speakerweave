@@ -11,7 +11,7 @@ import {
   type HttpMethod,
 } from '@/lib/apiDocsContent'
 import { cn } from '@/lib/utils'
-import { CopyButton } from '@/pages/Forms'
+import { CopyButton } from '@/ui/copy-button'
 
 /** Public REST and hosted MCP reference (route: /developers). */
 export function ApiDocs() {

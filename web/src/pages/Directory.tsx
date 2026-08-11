@@ -18,8 +18,8 @@
  * ui/native-select.tsx for why that matters here.
  */
 
-import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useDeferredValue, useMemo, useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Building2,
@@ -116,15 +116,17 @@ export function Directory() {
   const [showLog, setShowLog] = useState(false)
   const [mergeSeed, setMergeSeed] = useState<DirectoryPerson | null>(null)
   const [bulkEvent, setBulkEvent] = useState('')
+  const deferredSearch = useDeferredValue(search)
 
   const query = useMemo(
-    () => ({ ...filters, ...(search.trim() ? { q: search.trim() } : {}), ...(segmentId ? { segment_id: segmentId } : {}) }),
-    [filters, search, segmentId]
+    () => ({ ...filters, ...(deferredSearch.trim() ? { q: deferredSearch.trim() } : {}), ...(segmentId ? { segment_id: segmentId } : {}) }),
+    [deferredSearch, filters, segmentId]
   )
 
   const directoryQuery = useQuery({
     queryKey: ['crm', 'directory', query],
     queryFn: () => listDirectory(query),
+    placeholderData: keepPreviousData,
   })
 
   const data = directoryQuery.data
@@ -507,7 +509,10 @@ export function Directory() {
       )}
 
       {/* The roster */}
-      <section className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <section
+        aria-busy={directoryQuery.isFetching}
+        className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft"
+      >
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <p className="text-sm text-muted-foreground">
             Showing <strong className="text-foreground">{data?.total ?? 0}</strong> of{' '}

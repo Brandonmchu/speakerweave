@@ -58,7 +58,7 @@ import {
   type TriageItem,
   type TriageSuggestion,
 } from '@/lib/evaluationApi'
-import { CopyButton } from '@/pages/Forms'
+import { CopyButton } from '@/ui/copy-button'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'

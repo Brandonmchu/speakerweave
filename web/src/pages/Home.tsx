@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { preload } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -130,6 +131,10 @@ function CopyConfigButton({ value, label }: { value: string; label: string }) {
  * and browser agents, while real organizers can still use Clerk at /sign-in.
  */
 export function Home() {
+  // Conditional resource hint: unlike a static index.html preload, this only
+  // competes for bandwidth on routes that actually render the landing page.
+  preload(agendaScreenshot, { as: 'image', fetchPriority: 'high' })
+
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

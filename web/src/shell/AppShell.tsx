@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -19,16 +19,17 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Star,
   Users,
 } from 'lucide-react'
 
-import { AgentFeature } from '@/agent/ChatSheet'
 import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
 import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
 import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
 import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
+import { preloadOrganizerRoute } from '@/lib/routeLoaders'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -52,6 +53,10 @@ import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { NativeSelect } from '@/ui/native-select'
 import { toast } from '@/ui/use-toast'
+
+const loadAgentFeature = () =>
+  import('@/agent').then(({ AgentFeature }) => ({ default: AgentFeature }))
+const LazyAgentFeature = lazy(loadAgentFeature)
 
 interface NavItem {
   label: string
@@ -147,6 +152,115 @@ function isDemoSession(): boolean {
   }
 }
 
+function CreateEventDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreated: (event: EventSummary) => void
+}) {
+  const [name, setName] = useState('')
+  const [startsAt, setStartsAt] = useState('')
+  const [endsAt, setEndsAt] = useState('')
+  const [timezone, setTimezone] = useState(() => localTimezone())
+  const [location, setLocation] = useState('')
+
+  const reset = () => {
+    setName('')
+    setStartsAt('')
+    setEndsAt('')
+    setTimezone(localTimezone())
+    setLocation('')
+  }
+
+  const create = useMutation({
+    mutationFn: () =>
+      createEvent({
+        name: name.trim(),
+        timezone: timezone || null,
+        starts_at: fromDateInput(startsAt, timezone),
+        ends_at: fromDateInput(endsAt, timezone, true),
+        location: location.trim() || null,
+      }),
+    onSuccess: (created) => {
+      onCreated(created)
+      onOpenChange(false)
+      reset()
+      toast({ title: 'Event created', description: `${created.name} is now selected.` })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't create event", description: error.message }),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !create.isPending && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Create a new event</DialogTitle>
+          <DialogDescription>Add the event basics now. You can configure the program after.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(submitEvent) => {
+            submitEvent.preventDefault()
+            if (name.trim()) create.mutate()
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="new-event-name" required>Name</Label>
+            <Input
+              id="new-event-name"
+              value={name}
+              maxLength={200}
+              autoFocus
+              onChange={(inputEvent) => setName(inputEvent.target.value)}
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="new-event-start">Start date</Label>
+              <Input id="new-event-start" type="date" value={startsAt} onChange={(inputEvent) => setStartsAt(inputEvent.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="new-event-end">End date</Label>
+              <Input id="new-event-end" type="date" value={endsAt} min={startsAt || undefined} onChange={(inputEvent) => setEndsAt(inputEvent.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-event-timezone">Timezone</Label>
+            <NativeSelect
+              id="new-event-timezone"
+              value={timezone}
+              onValueChange={setTimezone}
+              options={timezoneOptions(timezone).map((option) => ({ value: option, label: option }))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-event-location">Location</Label>
+            <Input
+              id="new-event-location"
+              value={location}
+              maxLength={300}
+              placeholder="Venue or online"
+              onChange={(inputEvent) => setLocation(inputEvent.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={create.isPending} onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!name.trim() || create.isPending}>
+              {create.isPending ? 'Creating…' : 'Create event'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function AppShell() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -158,11 +272,6 @@ export function AppShell() {
     }
   })
   const [newEventOpen, setNewEventOpen] = useState(false)
-  const [newEventName, setNewEventName] = useState('')
-  const [newEventStart, setNewEventStart] = useState('')
-  const [newEventEnd, setNewEventEnd] = useState('')
-  const [newEventTimezone, setNewEventTimezone] = useState(() => localTimezone())
-  const [newEventLocation, setNewEventLocation] = useState('')
   const [assistantOpen, setAssistantOpen] = useState(() => {
     try {
       return window.localStorage.getItem('sw.chat.open') === 'true'
@@ -179,14 +288,42 @@ export function AppShell() {
   })
   const agentEnabled = capabilitiesQuery.data?.assistant === true
 
-  const setAgentOpen = (open: boolean) => {
+  const setAgentOpen = useCallback((open: boolean) => {
     setAssistantOpen(open)
     try {
       window.localStorage.setItem('sw.chat.open', String(open))
     } catch {
       // The panel still opens for this session when storage is unavailable.
     }
-  }
+  }, [])
+
+  // The chat code (including Markdown parsing) is not in the shell bundle. Once
+  // capabilities opt in, warm it during idle time so the first deliberate open
+  // is instant without competing with the shell's own first paint.
+  useEffect(() => {
+    if (!agentEnabled) return
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(() => void loadAgentFeature(), { timeout: 3000 })
+      return () => idleWindow.cancelIdleCallback?.(handle)
+    }
+    const handle = window.setTimeout(() => void loadAgentFeature(), 1500)
+    return () => window.clearTimeout(handle)
+  }, [agentEnabled])
+
+  useEffect(() => {
+    if (!agentEnabled) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return
+      event.preventDefault()
+      setAgentOpen(!assistantOpen)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [agentEnabled, assistantOpen, setAgentOpen])
 
   // Shared with Inbox via the same query key — one fetch, both consumers.
   const { data } = useQuery({
@@ -218,37 +355,6 @@ export function AppShell() {
   useEffect(() => {
     if (event && events[0]?.id !== event.id) switchEvent(event.id)
   }, [event?.id, events[0]?.id])
-
-  const resetNewEvent = () => {
-    setNewEventName('')
-    setNewEventStart('')
-    setNewEventEnd('')
-    setNewEventTimezone(localTimezone())
-    setNewEventLocation('')
-  }
-
-  const create = useMutation({
-    mutationFn: () =>
-      createEvent({
-        name: newEventName.trim(),
-        timezone: newEventTimezone || null,
-        starts_at: fromDateInput(newEventStart, newEventTimezone),
-        ends_at: fromDateInput(newEventEnd, newEventTimezone, true),
-        location: newEventLocation.trim() || null,
-      }),
-    onSuccess: (created) => {
-      queryClient.setQueryData<EventSummary[]>(['events'], (current = []) => [
-        created,
-        ...current.filter((candidate) => candidate.id !== created.id),
-      ])
-      switchEvent(created.id)
-      setNewEventOpen(false)
-      resetNewEvent()
-      toast({ title: 'Event created', description: `${created.name} is now selected.` })
-    },
-    onError: (error: Error) =>
-      toast({ variant: 'destructive', title: "Couldn't create event", description: error.message }),
-  })
 
   // The shell owns the viewport; public pages keep natural document flow.
   useEffect(() => {
@@ -334,6 +440,8 @@ export function AppShell() {
                   <NavLink
                     key={to}
                     to={to}
+                    onPointerEnter={() => preloadOrganizerRoute(to)}
+                    onFocus={() => preloadOrganizerRoute(to)}
                     className={({ isActive }) =>
                       cn(
                         'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
@@ -377,7 +485,28 @@ export function AppShell() {
             </kbd>
           </div>
 
-          <span id="speakerweave-agent-toggle" className="contents" />
+          <span id="speakerweave-agent-toggle" className="contents">
+            {agentEnabled && (
+              <button
+                type="button"
+                data-testid="ask-agent"
+                data-chat-toggle="true"
+                title="Ask SpeakerWeave (⌘J)"
+                aria-label="Ask SpeakerWeave"
+                aria-pressed={assistantOpen}
+                onClick={() => setAgentOpen(!assistantOpen)}
+                className={cn(
+                  'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition-[background-color,border-color,transform] active:scale-[0.98] sm:px-3',
+                  assistantOpen
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-primary/25 bg-primary-subtle text-primary hover:border-primary/40 hover:bg-primary/10',
+                )}
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="hidden sm:inline">Ask</span>
+              </button>
+            )}
+          </span>
 
           <div className="ml-auto flex items-center gap-1.5 md:gap-2">
             {isDemo && (
@@ -453,77 +582,34 @@ export function AppShell() {
         </main>
       </div>
 
-      <Dialog open={newEventOpen} onOpenChange={(open) => !create.isPending && setNewEventOpen(open)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Create a new event</DialogTitle>
-            <DialogDescription>Add the event basics now. You can configure the program after.</DialogDescription>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(submitEvent) => {
-              submitEvent.preventDefault()
-              if (newEventName.trim()) create.mutate()
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="new-event-name" required>Name</Label>
-              <Input
-                id="new-event-name"
-                value={newEventName}
-                maxLength={200}
-                autoFocus
-                onChange={(inputEvent) => setNewEventName(inputEvent.target.value)}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="new-event-start">Start date</Label>
-                <Input id="new-event-start" type="date" value={newEventStart} onChange={(inputEvent) => setNewEventStart(inputEvent.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="new-event-end">End date</Label>
-                <Input id="new-event-end" type="date" value={newEventEnd} min={newEventStart || undefined} onChange={(inputEvent) => setNewEventEnd(inputEvent.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="new-event-timezone">Timezone</Label>
-              <NativeSelect
-                id="new-event-timezone"
-                value={newEventTimezone}
-                onValueChange={setNewEventTimezone}
-                options={timezoneOptions(newEventTimezone).map((timezone) => ({ value: timezone, label: timezone }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="new-event-location">Location</Label>
-              <Input
-                id="new-event-location"
-                value={newEventLocation}
-                maxLength={300}
-                placeholder="Venue or online"
-                onChange={(inputEvent) => setNewEventLocation(inputEvent.target.value)}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="secondary" disabled={create.isPending} onClick={() => setNewEventOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!newEventName.trim() || create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create event'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreateEventDialog
+        open={newEventOpen}
+        onOpenChange={setNewEventOpen}
+        onCreated={(created) => {
+          queryClient.setQueryData<EventSummary[]>(['events'], (current = []) => [
+            created,
+            ...current.filter((candidate) => candidate.id !== created.id),
+          ])
+          switchEvent(created.id)
+        }}
+      />
 
-      {agentEnabled && capabilitiesQuery.data && (
-        <AgentFeature
-          capabilities={capabilitiesQuery.data}
-          open={assistantOpen}
-          onOpenChange={setAgentOpen}
-          toggleContainerId="speakerweave-agent-toggle"
-        />
+      {agentEnabled && capabilitiesQuery.data && assistantOpen && (
+        <Suspense
+          fallback={
+            <aside
+              role="status"
+              aria-label="Loading Ask SpeakerWeave"
+              className="fixed bottom-0 right-0 top-0 z-40 w-full animate-pulse border-l border-border bg-card shadow-lifted sm:w-[var(--chat-sheet-width)]"
+            />
+          }
+        >
+          <LazyAgentFeature
+            capabilities={capabilitiesQuery.data}
+            open={assistantOpen}
+            onOpenChange={setAgentOpen}
+          />
+        </Suspense>
       )}
     </div>
   )

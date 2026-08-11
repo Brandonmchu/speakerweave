@@ -66,7 +66,7 @@ import { Skeleton } from '@/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs'
 import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
-import { CopyButton } from '@/pages/Forms'
+import { CopyButton } from '@/ui/copy-button'
 
 /* -------------------------------------------------------------------------- */
 /* Draft model                                                                */

@@ -65,7 +65,7 @@ import {
   type MCPConnector,
 } from '@/lib/integrationsApi'
 import { cn } from '@/lib/utils'
-import { CopyButton } from '@/pages/Forms'
+import { CopyButton } from '@/ui/copy-button'
 import { Button } from '@/ui/button'
 import { Badge } from '@/ui/badge'
 import { Checkbox } from '@/ui/checkbox'

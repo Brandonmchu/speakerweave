@@ -4,6 +4,30 @@ import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-do
 import { peekToken, subscribeToken } from '@/lib/api'
 import { featuredScheduleUrl, featuredSpeakersUrl } from '@/lib/featuredEvent'
 import {
+  loadAgenda,
+  loadApiDocs,
+  loadComms,
+  loadContentLibrary,
+  loadDashboard,
+  loadDevLogin,
+  loadDirectory,
+  loadEvaluation,
+  loadFormEditor,
+  loadForms,
+  loadInbox,
+  loadOnboarding,
+  loadPipeline,
+  loadPortal,
+  loadPublicForm,
+  loadPublicSchedule,
+  loadPublicSpeakers,
+  loadReview,
+  loadSettings,
+  loadSpeakerSignin,
+  loadSpeakers,
+  loadSubmitterDashboard,
+} from '@/lib/routeLoaders'
+import {
   CLERK_ENABLED,
   ClerkRequireAuth,
   ClerkSignedInSwitch,
@@ -11,66 +35,94 @@ import {
   SignUpPage,
 } from '@/auth/clerk'
 import { AppShell } from '@/shell/AppShell'
-import { Comms } from '@/pages/Comms'
-import { Dashboard } from '@/pages/Dashboard'
-import { DevLogin } from '@/pages/DevLogin'
-import { FormEditor } from '@/pages/FormEditor'
-import { Forms } from '@/pages/Forms'
-import { Onboarding } from '@/pages/Onboarding'
-import { Portal } from '@/pages/Portal'
-import { PublicForm } from '@/pages/PublicForm'
-import { SubmitterDashboard } from '@/pages/SubmitterDashboard'
-import { SpeakerSignin } from '@/pages/SpeakerSignin'
-import { PublicSchedule } from '@/pages/PublicSchedule'
-import { PublicSpeakers } from '@/pages/PublicSpeakers'
-import { Review } from '@/pages/Review'
+import { Home } from '@/pages/Home'
 import { Toaster } from '@/ui/toaster'
 
-const LazyAgenda = lazy(() => import('@/pages/Agenda').then(({ Agenda }) => ({ default: Agenda })))
-const LazyHome = lazy(() => import('@/pages/Home').then(({ Home }) => ({ default: Home })))
-const LazyApiDocs = lazy(() =>
-  import('@/pages/ApiDocs').then(({ ApiDocs }) => ({ default: ApiDocs })),
-)
+const LazyAgenda = lazy(() => loadAgenda().then(({ Agenda }) => ({ default: Agenda })))
+const LazyApiDocs = lazy(() => loadApiDocs().then(({ ApiDocs }) => ({ default: ApiDocs })))
+const LazyComms = lazy(() => loadComms().then(({ Comms }) => ({ default: Comms })))
 const LazyContentLibrary = lazy(() =>
-  import('@/pages/ContentLibrary').then(({ ContentLibrary }) => ({ default: ContentLibrary })),
+  loadContentLibrary().then(({ ContentLibrary }) => ({ default: ContentLibrary })),
+)
+const LazyDashboard = lazy(() =>
+  loadDashboard().then(({ Dashboard }) => ({ default: Dashboard })),
+)
+const LazyDevLogin = lazy(() =>
+  loadDevLogin().then(({ DevLogin }) => ({ default: DevLogin })),
 )
 const LazyDirectory = lazy(() =>
-  import('@/pages/Directory').then(({ Directory }) => ({ default: Directory })),
+  loadDirectory().then(({ Directory }) => ({ default: Directory })),
 )
 const LazyEvaluation = lazy(() =>
-  import('@/pages/Evaluation').then(({ Evaluation }) => ({ default: Evaluation })),
+  loadEvaluation().then(({ Evaluation }) => ({ default: Evaluation })),
 )
-const LazyInbox = lazy(() => import('@/pages/Inbox').then(({ Inbox }) => ({ default: Inbox })))
+const LazyInbox = lazy(() => loadInbox().then(({ Inbox }) => ({ default: Inbox })))
+const LazyFormEditor = lazy(() =>
+  loadFormEditor().then(({ FormEditor }) => ({ default: FormEditor })),
+)
+const LazyForms = lazy(() => loadForms().then(({ Forms }) => ({ default: Forms })))
+const LazyOnboarding = lazy(() =>
+  loadOnboarding().then(({ Onboarding }) => ({ default: Onboarding })),
+)
 const LazyPipeline = lazy(() =>
-  import('@/pages/Pipeline').then(({ Pipeline }) => ({ default: Pipeline })),
+  loadPipeline().then(({ Pipeline }) => ({ default: Pipeline })),
 )
+const LazyPortal = lazy(() => loadPortal().then(({ Portal }) => ({ default: Portal })))
+const LazyPublicForm = lazy(() =>
+  loadPublicForm().then(({ PublicForm }) => ({ default: PublicForm })),
+)
+const LazyPublicSchedule = lazy(() =>
+  loadPublicSchedule().then(({ PublicSchedule }) => ({ default: PublicSchedule })),
+)
+const LazyPublicSpeakers = lazy(() =>
+  loadPublicSpeakers().then(({ PublicSpeakers }) => ({ default: PublicSpeakers })),
+)
+const LazyReview = lazy(() => loadReview().then(({ Review }) => ({ default: Review })))
 const LazySettingsPage = lazy(() =>
-  import('@/pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })),
+  loadSettings().then(({ SettingsPage }) => ({ default: SettingsPage })),
+)
+const LazySpeakerSignin = lazy(() =>
+  loadSpeakerSignin().then(({ SpeakerSignin }) => ({ default: SpeakerSignin })),
 )
 const LazySpeakers = lazy(() =>
-  import('@/pages/Speakers').then(({ Speakers }) => ({ default: Speakers })),
+  loadSpeakers().then(({ Speakers }) => ({ default: Speakers })),
+)
+const LazySubmitterDashboard = lazy(() =>
+  loadSubmitterDashboard().then(({ SubmitterDashboard }) => ({ default: SubmitterDashboard })),
 )
 
-function DeferredPage({ children }: { children: ReactNode }) {
+function PageSkeleton({ fullPage = false }: { fullPage?: boolean }) {
   return (
-    <Suspense
-      fallback={
-        <div role="status" className="px-4 py-6 text-sm text-muted-foreground md:px-8">
-          Loading…
-        </div>
-      }
+    <div
+      role="status"
+      aria-label="Loading page"
+      className={fullPage ? 'min-h-screen bg-background px-5 py-16 sm:px-8' : 'px-4 py-6 md:px-8'}
     >
+      <div className="mx-auto w-full max-w-7xl animate-pulse" aria-hidden="true">
+        <div className="h-7 w-44 rounded-md bg-muted" />
+        <div className="mt-3 h-4 w-72 max-w-full rounded bg-muted" />
+        <div className="mt-7 grid gap-4 sm:grid-cols-3">
+          <div className="h-24 rounded-lg bg-muted" />
+          <div className="h-24 rounded-lg bg-muted" />
+          <div className="h-24 rounded-lg bg-muted" />
+        </div>
+        <div className="mt-6 h-64 rounded-lg bg-muted" />
+      </div>
+      <span className="sr-only">Loading…</span>
+    </div>
+  )
+}
+
+function DeferredPage({ children, fullPage = false }: { children: ReactNode; fullPage?: boolean }) {
+  return (
+    <Suspense fallback={<PageSkeleton fullPage={fullPage} />}>
       {children}
     </Suspense>
   )
 }
 
 function PublicHome() {
-  return (
-    <DeferredPage>
-      <LazyHome />
-    </DeferredPage>
-  )
+  return <Home />
 }
 
 /**
@@ -149,24 +201,24 @@ export default function App() {
         <Route path="/" element={<HomeEntry />} />
 
         {/* Public, unauthenticated surfaces. */}
-        <Route path="/dev-login" element={<DevLogin />} />
-        <Route path="/submit/:slug" element={<PublicForm />} />
-        <Route path="/speaker-signin" element={<SpeakerSignin />} />
+        <Route path="/dev-login" element={<DeferredPage fullPage><LazyDevLogin /></DeferredPage>} />
+        <Route path="/submit/:slug" element={<DeferredPage fullPage><LazyPublicForm /></DeferredPage>} />
+        <Route path="/speaker-signin" element={<DeferredPage fullPage><LazySpeakerSignin /></DeferredPage>} />
         {/* Submitter self-service: magic-link, token in the query, no Clerk. */}
-        <Route path="/submit/:slug/manage" element={<SubmitterDashboard />} />
+        <Route path="/submit/:slug/manage" element={<DeferredPage fullPage><LazySubmitterDashboard /></DeferredPage>} />
         {/* /demo is the one-click demo entrance — always the landing, even when
             already signed in, so re-entering the demo stays possible. */}
         <Route path="/demo" element={<PublicHome />} />
         <Route
           path="/developers"
           element={
-            <DeferredPage>
+            <DeferredPage fullPage>
               <LazyApiDocs />
             </DeferredPage>
           }
         />
-        <Route path="/e/:slug/schedule" element={<PublicSchedule />} />
-        <Route path="/e/:slug/speakers" element={<PublicSpeakers />} />
+        <Route path="/e/:slug/schedule" element={<DeferredPage fullPage><LazyPublicSchedule /></DeferredPage>} />
+        <Route path="/e/:slug/speakers" element={<DeferredPage fullPage><LazyPublicSpeakers /></DeferredPage>} />
 
         {/* Guessable public aliases → the featured event's program. These give a
             blind agent (or an attendee) crawlable, no-auth entry to the public
@@ -188,10 +240,10 @@ export default function App() {
         <Route path="/prospects" element={<Navigate to="/pipeline" replace />} />
 
         {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
-        <Route path="/portal/:token" element={<Portal />} />
-        <Route path="/portal" element={<Portal />} />
-        <Route path="/review/:token" element={<Review />} />
-        <Route path="/review" element={<Review />} />
+        <Route path="/portal/:token" element={<DeferredPage fullPage><LazyPortal /></DeferredPage>} />
+        <Route path="/portal" element={<DeferredPage fullPage><LazyPortal /></DeferredPage>} />
+        <Route path="/review/:token" element={<DeferredPage fullPage><LazyReview /></DeferredPage>} />
+        <Route path="/review" element={<DeferredPage fullPage><LazyReview /></DeferredPage>} />
         {CLERK_ENABLED && (
           <>
             <Route path="/sign-in/*" element={<SignInPage />} />
@@ -215,7 +267,7 @@ export default function App() {
               </DeferredPage>
             }
           />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<DeferredPage><LazyDashboard /></DeferredPage>} />
           <Route
             path="/content"
             element={
@@ -224,8 +276,8 @@ export default function App() {
               </DeferredPage>
             }
           />
-          <Route path="/forms" element={<Forms />} />
-          <Route path="/forms/:formId" element={<FormEditor />} />
+          <Route path="/forms" element={<DeferredPage><LazyForms /></DeferredPage>} />
+          <Route path="/forms/:formId" element={<DeferredPage><LazyFormEditor /></DeferredPage>} />
           <Route
             path="/evaluation"
             element={
@@ -234,7 +286,7 @@ export default function App() {
               </DeferredPage>
             }
           />
-          <Route path="/comms" element={<Comms />} />
+          <Route path="/comms" element={<DeferredPage><LazyComms /></DeferredPage>} />
           {/* Org-level CRM: above events, not inside one. */}
           <Route
             path="/directory"
@@ -261,7 +313,7 @@ export default function App() {
             }
           />
           {/* First run: no event yet. Forms/Settings redirect here. */}
-          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/onboarding" element={<DeferredPage><LazyOnboarding /></DeferredPage>} />
         </Route>
 
         {/* /agenda and /speakers double as public aliases: an authed organizer

@@ -61,19 +61,20 @@ export default defineConfig({
             return 'auth'
           }
           if (id.includes('/node_modules/@tanstack/')) return 'query'
-          if (id.includes('/node_modules/date-fns/')) return 'dates'
           if (
-            id.includes('/node_modules/@radix-ui/') ||
-            id.includes('/node_modules/@floating-ui/') ||
-            id.includes('/node_modules/react-remove-scroll') ||
-            id.includes('/node_modules/aria-hidden/') ||
-            id.includes('/node_modules/use-callback-ref/') ||
-            id.includes('/node_modules/use-sidecar/') ||
-            id.includes('/node_modules/react-style-singleton/')
+            id.includes('/node_modules/react-markdown/') ||
+            id.includes('/node_modules/remark-gfm/') ||
+            id.includes('/node_modules/rehype-raw/') ||
+            id.includes('/node_modules/rehype-sanitize/')
           ) {
-            return 'ui'
+            return 'markdown'
           }
-          return 'vendor'
+          if (id.includes('/node_modules/@dnd-kit/')) return 'dnd'
+
+          // Do not collapse every remaining dependency into a global vendor/UI
+          // chunk. Rollup can then keep dnd-kit, Markdown and route-specific
+          // Radix primitives behind the dynamic import that actually needs them.
+          return undefined
         },
       },
     },
