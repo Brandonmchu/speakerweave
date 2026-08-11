@@ -190,11 +190,11 @@ async def _load_event(slug: str) -> dict:
 async def _accepted_sessions(org_id: str, event_id: str) -> list[dict]:
     """Every accepted session for the event. `starts_at` may be null — the
     schedule endpoint drops the unscheduled ones; the gallery keeps them."""
-    return rows(
+    accepted = rows(
         await db(
             lambda: supabase.table("sessions")
             .select(
-                "id, friendly_id, title, description, starts_at, ends_at, "
+                "id, friendly_id, title, description, content_approval, starts_at, ends_at, "
                 "room_id, track_id, format_id"
             )
             .eq("org_id", org_id)
@@ -204,6 +204,14 @@ async def _accepted_sessions(org_id: str, event_id: str) -> list[dict]:
             "program_accepted_sessions",
         )
     )
+    # Missing means a pre-migration/fake row and has the migration's approved
+    # default semantics. The field is deliberately not returned publicly, so an
+    # untouched programme's payload stays byte-for-byte identical.
+    return [
+        session
+        for session in accepted
+        if session.get("content_approval") not in ("draft", "in_review")
+    ]
 
 
 async def _name_maps(
@@ -570,7 +578,7 @@ async def get_session_detail(
         await db(
             lambda: supabase.table("sessions")
             .select(
-                "id, friendly_id, title, description, starts_at, ends_at, "
+                "id, friendly_id, title, description, content_approval, starts_at, ends_at, "
                 "room_id, track_id, format_id"
             )
             .eq("org_id", org_id)
@@ -582,7 +590,7 @@ async def get_session_detail(
             "program_session_detail",
         )
     )
-    if not session:
+    if not session or session.get("content_approval") in ("draft", "in_review"):
         raise HTTPException(status_code=404, detail="Session not found")
 
     _zone, zone_key = _resolve_timezone(None, event.get("timezone"))

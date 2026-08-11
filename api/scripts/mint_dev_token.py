@@ -28,6 +28,7 @@ def mint_dev_token(
     *,
     org: str = "org_dev",
     sub: str = "dev_user",
+    name: str | None = None,
     hours: int = 24,
     secret: str | None = None,
     now: datetime | None = None,
@@ -40,15 +41,18 @@ def mint_dev_token(
         raise RuntimeError("SUPABASE_JWT_SECRET is not set (api/.env)")
 
     issued_at = now or datetime.now(timezone.utc)
+    claims = {
+        "sub": sub,
+        "org_id": org,
+        "aud": "authenticated",
+        "role": "authenticated",
+        "iat": issued_at,
+        "exp": issued_at + timedelta(hours=hours),
+    }
+    if name is not None:
+        claims["name"] = name
     return jwt.encode(
-        {
-            "sub": sub,
-            "org_id": org,
-            "aud": "authenticated",
-            "role": "authenticated",
-            "iat": issued_at,
-            "exp": issued_at + timedelta(hours=hours),
-        },
+        claims,
         signing_secret,
         algorithm="HS256",
     )
@@ -60,11 +64,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Mint a dev JWT for the dais API")
     parser.add_argument("--sub", default="dev_user", help="user id (sub claim)")
     parser.add_argument("--org", default="org_dev", help="org id (org_id claim)")
+    parser.add_argument("--name", default=None, help="acting organizer display name")
     parser.add_argument("--hours", type=int, default=24, help="lifetime in hours")
     args = parser.parse_args()
 
     try:
-        token = mint_dev_token(org=args.org, sub=args.sub, hours=args.hours)
+        token = mint_dev_token(org=args.org, sub=args.sub, name=args.name, hours=args.hours)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

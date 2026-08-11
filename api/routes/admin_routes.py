@@ -11,13 +11,14 @@ import re
 from datetime import datetime, time, timezone
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from postgrest.exceptions import APIError
 from pydantic import BaseModel, Field, field_validator
 
 from auth import (
     get_current_user_and_org,
     get_current_user_or_api_org,
+    get_display_name,
     verify_org_access,
 )
 from services import crm, mailer, portal, session_revisions, speaker_crm
@@ -48,7 +49,6 @@ SESSION_STATUSES = (
     "declined",
     "withdrawn",
 )
-
 # events.slot_minutes CHECK (migration 001)
 SLOT_MINUTES = (5, 10, 15, 20, 30, 45, 60)
 
@@ -85,6 +85,7 @@ class SessionPatchRequest(BaseModel):
     """
 
     status: str | None = None
+    content_approval: Literal["draft", "in_review", "approved"] | None = None
     title: str | None = None
     description: str | None = None
     abstract: str | None = None
@@ -695,6 +696,7 @@ async def get_session(session_id: str, auth: tuple = Depends(get_current_user_an
 async def update_session(
     session_id: str,
     payload: SessionPatchRequest,
+    request: Request,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     """Move a session between status tabs, and edit its title/abstract.
@@ -712,6 +714,9 @@ async def update_session(
         if payload.status not in SESSION_STATUSES:
             raise HTTPException(status_code=400, detail=f"Unknown status '{payload.status}'")
         values["status"] = payload.status
+
+    if payload.content_approval is not None:
+        values["content_approval"] = payload.content_approval
 
     if payload.title is not None:
         title = payload.title.strip()
@@ -741,7 +746,7 @@ async def update_session(
     existing = first(
         await db(
             lambda: supabase.table("sessions")
-            .select("id, org_id, event_id, status, title, description")
+            .select("id, org_id, event_id, status, content_approval, title, description")
             .eq("id", session_id)
             .eq("org_id", org_id)
             .limit(1)
@@ -770,7 +775,7 @@ async def update_session(
         session_id,
         existing or {},
         values,
-        actor="Organizer",
+        actor=get_display_name(request) or "Organizer",
     )
 
     # Acceptance means the same thing on every path: a status flipped to
@@ -806,6 +811,7 @@ async def get_session_revisions(
 async def restore_session_revision(
     session_id: str,
     revision_id: str,
+    request: Request,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     """Restore one old value; the restore itself becomes the newest revision."""
@@ -814,7 +820,7 @@ async def restore_session_revision(
         org_id,
         session_id,
         revision_id,
-        actor="Organizer",
+        actor=get_display_name(request) or "Organizer",
     )
     return {"session": session}
 

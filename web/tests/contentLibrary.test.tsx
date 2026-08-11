@@ -18,6 +18,8 @@ const LIBRARY = {
       due_at: '2027-05-01T00:00:00+00:00',
       approved: false,
       uploaded_at: '2026-08-05T10:00:00Z',
+      session_id: 'session-1',
+      session_title: 'Analytical Engines in Practice',
       session: { id: 'session-1', title: 'Analytical Engines in Practice' },
       assignment_status: 'submitted',
       status: 'received',
@@ -36,6 +38,8 @@ const LIBRARY = {
       due_at: '2027-04-14T00:00:00+00:00',
       approved: false,
       uploaded_at: null,
+      session_id: null,
+      session_title: 'Derived Session',
       session: null,
       assignment_status: 'todo',
       status: 'missing',
@@ -56,6 +60,8 @@ const LIBRARY = {
       due_at: '2020-03-01T00:00:00+00:00',
       approved: false,
       uploaded_at: null,
+      session_id: null,
+      session_title: null,
       session: null,
       assignment_status: 'todo',
       status: 'missing',
@@ -80,6 +86,8 @@ const DETAIL = {
     due_at: '2027-05-01T00:00:00+00:00',
     approved: false,
     uploaded_at: '2026-08-05T10:00:00Z',
+    session_id: 'session-1',
+    session_title: 'Analytical Engines in Practice',
     session: { id: 'session-1', title: 'Analytical Engines in Practice' },
     assignment_status: 'submitted',
     status: 'received',
@@ -226,6 +234,13 @@ describe('ContentLibrary', () => {
 
     const table = screen.getByRole('table')
     expect(within(table).getByText('Analytical Engines in Practice')).toBeInTheDocument()
+    expect(within(table).getByRole('link', { name: 'Analytical Engines in Practice' })).toHaveAttribute(
+      'href',
+      '/agenda?session=session-1'
+    )
+    expect(screen.getByTestId('session-cell-a2')).toHaveTextContent('Derived Session')
+    expect(within(screen.getByTestId('session-cell-a2')).queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByTestId('session-cell-a3')).toHaveTextContent('—')
     expect(screen.getByTestId('uploaded-cell-a1')).toHaveTextContent('5 Aug 2026')
     expect(screen.getByTestId('uploaded-cell-a2')).toHaveTextContent('—')
   })

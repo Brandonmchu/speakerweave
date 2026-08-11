@@ -217,6 +217,8 @@ export type SubmissionStatus =
   | 'declined'
   | 'withdrawn'
 
+export type SessionContentApproval = 'draft' | 'in_review' | 'approved'
+
 export interface SubmitterSummary {
   id?: string
   first_name?: string | null
@@ -231,6 +233,8 @@ export interface Submission {
   title: string
   description?: string | null
   status: SubmissionStatus
+  /** Public-program content readiness; old payloads are treated as approved. */
+  content_approval?: SessionContentApproval
   submitted_at?: string | null
   created_at?: string | null
   source_form_id?: string | null
@@ -632,6 +636,7 @@ export interface SessionEditInput {
   title?: string
   /** The abstract. Sent as `description`, the column's real name. */
   description?: string
+  content_approval?: SessionContentApproval
 }
 
 /**
@@ -645,6 +650,7 @@ export async function updateSession(id: string, input: SessionEditInput): Promis
   const body: Record<string, string> = {}
   if (input.title !== undefined) body.title = input.title
   if (input.description !== undefined) body.description = input.description
+  if (input.content_approval !== undefined) body.content_approval = input.content_approval
   const wire = await apiPatch<{ session?: Submission } | Submission>(
     `/api/sessions/${encodeURIComponent(id)}`,
     body

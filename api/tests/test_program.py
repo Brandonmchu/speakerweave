@@ -184,6 +184,36 @@ def test_schedule_excludes_pending_and_unscheduled(program_client, program_db):
     assert "Unplaced Talk" not in titles  # accepted but starts_at null
 
 
+def test_explicit_approved_default_keeps_public_payload_byte_identical(
+    program_client, program_db
+):
+    """CNT-12 invariant: migration 018 cannot alter untouched widgets/programs."""
+    before = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").content
+    for session in program_db.rows("sessions"):
+        session["content_approval"] = "approved"
+    after = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").content
+    assert after == before
+
+
+def test_unapproved_session_is_publicly_gated_but_not_deleted(
+    program_client, program_db
+):
+    keynote = next(session for session in program_db.rows("sessions") if session["id"] == S1)
+    keynote["content_approval"] = "in_review"
+
+    schedule = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
+    titles = [session["title"] for day in schedule["days"] for session in day["sessions"]]
+    assert "Opening Keynote" not in titles  # same JSON used by the schedule embed
+
+    calendar = program_client.get(f"/public/program/{SLUG}/calendar.ics").text
+    assert "Opening Keynote" not in calendar
+    assert program_client.get(f"/public/program/{SLUG}/session/{S1}").status_code == 404
+
+    speakers = program_client.get(f"/public/program/{SLUG}/speakers").json()["speakers"]
+    assert "Zed Zeta" not in {speaker["name"] for speaker in speakers}
+    assert keynote in program_db.rows("sessions")
+
+
 def test_schedule_carries_track_and_resolved_speakers_with_submitter_fallback(program_client, program_db):
     body = program_client.get(f"/public/program/{SLUG}/schedule?tz=UTC").json()
     by_title = {s["title"]: s for day in body["days"] for s in day["sessions"]}

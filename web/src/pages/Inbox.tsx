@@ -41,6 +41,7 @@ import {
   type ParticipantRole,
   type SessionAnswer,
   type SessionDetail,
+  type SessionContentApproval,
   type SessionParticipant,
   type SessionRevision,
   type SessionReviewAggregate,
@@ -89,6 +90,12 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'accepted', label: 'Accepted' },
   { key: 'decline_queue', label: 'Decline Queue' },
   { key: 'declined', label: 'Declined' },
+]
+
+const CONTENT_APPROVAL_OPTIONS = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'in_review', label: 'In review' },
+  { value: 'approved', label: 'Approved' },
 ]
 
 /** Rows per page in the footer's "Show:" control. */
@@ -562,6 +569,53 @@ export function Inbox() {
         queryClient.setQueryData(['session', variables.id], context.previousDetail)
       }
       toast({ variant: 'destructive', title: 'Update failed', description: error.message })
+    },
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: submissionsKey })
+      queryClient.invalidateQueries({ queryKey: ['session', variables.id] })
+    },
+  })
+
+  const updateContentApproval = useMutation({
+    mutationFn: ({ id, contentApproval }: { id: string; contentApproval: SessionContentApproval }) =>
+      updateSession(id, { content_approval: contentApproval }),
+    onMutate: async ({ id, contentApproval }) => {
+      const detailKey = ['session', id]
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: submissionsKey }),
+        queryClient.cancelQueries({ queryKey: detailKey }),
+      ])
+      const previousList = queryClient.getQueryData<Submission[]>(submissionsKey)
+      const previousDetail = queryClient.getQueryData<SessionDetail>(detailKey)
+      queryClient.setQueryData<Submission[]>(submissionsKey, (current) =>
+        current?.map((row) =>
+          row.id === id ? { ...row, content_approval: contentApproval } : row
+        )
+      )
+      if (previousDetail) {
+        queryClient.setQueryData<SessionDetail>(detailKey, {
+          ...previousDetail,
+          session: { ...previousDetail.session, content_approval: contentApproval },
+        })
+      }
+      return { previousList, previousDetail }
+    },
+    onSuccess: (_session, variables) => {
+      const label = CONTENT_APPROVAL_OPTIONS.find(
+        (option) => option.value === variables.contentApproval
+      )?.label
+      toast({ title: `Content approval set to ${label ?? variables.contentApproval}` })
+    },
+    onError: (error: Error, variables, context) => {
+      if (context?.previousList) queryClient.setQueryData(submissionsKey, context.previousList)
+      if (context?.previousDetail) {
+        queryClient.setQueryData(['session', variables.id], context.previousDetail)
+      }
+      toast({
+        variant: 'destructive',
+        title: "Couldn't update content approval",
+        description: error.message,
+      })
     },
     onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: submissionsKey })
@@ -1277,6 +1331,36 @@ export function Inbox() {
                     ) : null
                   }
                 />
+                <section
+                  data-testid="content-approval-control"
+                  className="mt-6 rounded-lg border border-border bg-muted/30 p-4"
+                >
+                  <label
+                    htmlFor="session-content-approval"
+                    className="text-sm font-semibold text-foreground"
+                  >
+                    Content approval
+                  </label>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Draft and in-review sessions stay in organizer views but are hidden from the
+                    public program.
+                  </p>
+                  <div className="mt-3 w-48">
+                    <NativeSelect
+                      id="session-content-approval"
+                      aria-label="Content approval"
+                      value={detailSession.content_approval ?? 'approved'}
+                      options={CONTENT_APPROVAL_OPTIONS}
+                      disabled={updateContentApproval.isPending}
+                      onValueChange={(value) =>
+                        updateContentApproval.mutate({
+                          id: detailSession.id,
+                          contentApproval: value as SessionContentApproval,
+                        })
+                      }
+                    />
+                  </div>
+                </section>
                 <SessionHistory
                   revisions={revisionsQuery.data ?? []}
                   pending={revisionsQuery.isPending}

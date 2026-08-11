@@ -22,6 +22,7 @@ const SUBMISSION = {
   title: 'Analytical Engines',
   description: 'A talk about the first computers.',
   status: 'pending',
+  content_approval: 'approved',
   submitted_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
   submitter: { first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' },
 }
@@ -274,6 +275,29 @@ describe('Inbox session editor', () => {
     await waitFor(() => expect(listGets).toBeGreaterThan(listBefore))
     await waitFor(() => expect(revisionGets).toBeGreaterThan(revisionsBefore))
     expect(await screen.findAllByText('Analytical Engines, Revisited')).not.toHaveLength(0)
+  })
+
+  it('optimistically persists session content approval and keeps it after refetch', async () => {
+    renderInbox()
+    fireEvent.click(await screen.findByText('Analytical Engines'))
+
+    const control = await screen.findByLabelText('Content approval')
+    expect(control.tagName).toBe('SELECT')
+    expect(control).toHaveValue('approved')
+
+    fireEvent.change(control, { target: { value: 'in_review' } })
+    await waitFor(() => expect(control).toHaveValue('in_review'))
+    await waitFor(() =>
+      expect(patches).toContainEqual({
+        url: '/api/sessions/session-1',
+        body: { content_approval: 'in_review' },
+      })
+    )
+
+    // The stub persists the server write; invalidation/refetch must not snap the
+    // optimistic control back to the default.
+    await waitFor(() => expect(detailGets).toBeGreaterThan(1))
+    expect(control).toHaveValue('in_review')
   })
 
   it('the row pencil opens the drawer already in edit mode', async () => {

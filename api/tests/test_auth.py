@@ -4,7 +4,7 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from auth import get_current_user_and_org, verify_org_access
+from auth import _display_name_from_claims, get_current_user_and_org, verify_org_access
 from tests.conftest import TEST_ORG_ID, TEST_USER_ID, make_token
 
 _app = FastAPI()
@@ -27,6 +27,28 @@ def test_valid_token_accepted(auth_client):
     )
     assert response.status_code == 200
     assert response.json() == {"user_id": TEST_USER_ID, "org_id": TEST_ORG_ID}
+
+
+@pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        (
+            {
+                "name": " Jordan Alvarez ",
+                "full_name": "Ignored Name",
+                "first_name": "Ignored",
+                "last_name": "Person",
+            },
+            "Jordan Alvarez",
+        ),
+        ({"full_name": "Jordan Alvarez", "first_name": "Ignored"}, "Jordan Alvarez"),
+        ({"first_name": "Jordan", "last_name": "Alvarez"}, "Jordan Alvarez"),
+        ({"first_name": "Jordan"}, "Jordan"),
+        ({}, None),
+    ],
+)
+def test_display_name_claim_precedence(claims, expected):
+    assert _display_name_from_claims(claims) == expected
 
 
 def test_missing_header_rejected(auth_client):

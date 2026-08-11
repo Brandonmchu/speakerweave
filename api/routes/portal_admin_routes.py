@@ -17,13 +17,14 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.core.settings import settings
 from auth import (
     get_current_user_and_org,
     get_current_user_or_api_org,
+    get_display_name,
     verify_org_access,
 )
 from services import content_pipeline
@@ -473,6 +474,7 @@ async def create_task(
 async def review_assignment(
     assignment_id: str,
     payload: ReviewRequest,
+    request: Request,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     """Approve or deny a submitted file. Both outcomes notify the speaker; a
@@ -507,6 +509,12 @@ async def review_assignment(
     if not updated:
         raise HTTPException(status_code=404, detail="Task assignment not found")
 
+    await content_pipeline.record_review_status_event(
+        org_id,
+        assignment,
+        payload.decision,
+        author_label=get_display_name(request),
+    )
     await _notify_review(org_id, assignment, payload.decision)
     return {"assignment": updated}
 
@@ -586,6 +594,7 @@ async def get_content_item(assignment_id: str, auth: tuple = Depends(get_current
 async def restore_content_version(
     assignment_id: str,
     payload: RestoreRequest,
+    request: Request,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     """Roll a content item back to one of its earlier versions.
@@ -596,19 +605,30 @@ async def restore_content_version(
     (versions + thread) so the caller re-renders from one response.
     """
     _user_id, org_id = auth
-    return await content_pipeline.restore_version(org_id, assignment_id, payload.version)
+    return await content_pipeline.restore_version(
+        org_id,
+        assignment_id,
+        payload.version,
+        author_label=get_display_name(request),
+    )
 
 
 @router.post("/task-assignments/{assignment_id}/comments", status_code=201)
 async def add_content_comment(
     assignment_id: str,
     payload: CommentRequest,
+    request: Request,
     auth: tuple = Depends(get_current_user_and_org),
 ):
     """Organizer leaves feedback on a speaker's content item. The speaker sees it
     in their portal, and (by default) gets an email nudge that feedback is waiting."""
     _user_id, org_id = auth
-    result = await content_pipeline.add_organizer_comment(org_id, assignment_id, payload.body)
+    result = await content_pipeline.add_organizer_comment(
+        org_id,
+        assignment_id,
+        payload.body,
+        author_label=get_display_name(request),
+    )
     if payload.notify:
         await _notify_comment(org_id, result)
     return {"comment": result["comment"]}

@@ -66,6 +66,11 @@ export interface ContentItem {
   comment_count: number
   updated_at: string | null
   uploaded_at: string | null
+  /** Present only when the task itself is linked to a concrete session. */
+  session_id: string | null
+  /** Explicit title, or a derived accepted-session display association. */
+  session_title: string | null
+  /** Backward-compatible explicit association object. */
   session: { id: string; title: string } | null
   speaker: ContentSpeaker
 }
@@ -97,6 +102,8 @@ export interface ContentItemDetail {
     status: ContentStatus
     current_version: number
     uploaded_at: string | null
+    session_id: string | null
+    session_title: string | null
     session: { id: string; title: string } | null
     speaker: ContentSpeaker
   }

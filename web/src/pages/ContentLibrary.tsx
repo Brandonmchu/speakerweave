@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, formatDistanceToNow, parseISO } from 'date-fns'
+import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowDown,
@@ -387,9 +388,20 @@ export function ContentLibrary() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      {item.session ? (
-                        <span className="line-clamp-2 text-sm text-foreground">{item.session.title}</span>
+                    <TableCell data-testid={`session-cell-${item.item_id}`}>
+                      {item.session_title ?? item.session?.title ? (
+                        item.session_id ?? item.session?.id ? (
+                          <Link
+                            to={`/agenda?session=${encodeURIComponent(item.session_id ?? item.session!.id)}`}
+                            className="line-clamp-2 text-sm font-medium text-primary hover:underline"
+                          >
+                            {item.session_title ?? item.session?.title}
+                          </Link>
+                        ) : (
+                          <span className="line-clamp-2 text-sm text-foreground">
+                            {item.session_title ?? item.session?.title}
+                          </span>
+                        )
                       ) : (
                         <span className="text-sm text-muted-foreground">—</span>
                       )}

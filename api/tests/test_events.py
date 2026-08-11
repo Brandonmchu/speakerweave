@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import OTHER_EVENT_ID, OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
+from tests.conftest import (
+    OTHER_EVENT_ID,
+    OTHER_ORG_ID,
+    TEST_EVENT_ID,
+    TEST_ORG_ID,
+    make_token,
+)
 
 SESSION_ID = "99999999-9999-9999-9999-999999999901"
 FORM_ID = "66666666-6666-6666-6666-666666666601"
@@ -491,6 +497,37 @@ def test_session_edits_are_listed_and_restorable(client, auth_headers, submissio
     assert restore_revision["actor"] == "Organizer"
 
 
+def test_session_edits_and_restore_use_the_acting_users_display_name(client, submission_db):
+    headers = {
+        "Authorization": f"Bearer {make_token(extra_claims={'name': 'Jordan Alvarez'})}"
+    }
+    edited = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=headers,
+        json={"title": "Jordan's title", "description": "Jordan's abstract"},
+    )
+    assert edited.status_code == 200
+
+    revisions = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=headers
+    ).json()["revisions"]
+    assert len(revisions) == 2
+    assert {revision["actor"] for revision in revisions} == {"Jordan Alvarez"}
+    assert all(revision["created_at"] for revision in revisions)
+
+    title_revision = next(revision for revision in revisions if revision["field"] == "title")
+    restored = client.post(
+        f"/api/sessions/{SESSION_ID}/revisions/{title_revision['id']}/restore",
+        headers=headers,
+    )
+    assert restored.status_code == 200
+    latest = client.get(
+        f"/api/sessions/{SESSION_ID}/revisions", headers=headers
+    ).json()["revisions"]
+    assert latest[0]["actor"] == "Jordan Alvarez"
+    assert latest[0]["created_at"]
+
+
 def test_session_history_is_org_scoped(client, auth_headers, submission_db):
     submission_db.seed(
         "session_revisions",
@@ -613,6 +650,37 @@ def test_patch_session_can_edit_and_move_in_one_call(client, auth_headers, submi
     session = response.json()["session"]
     assert session["title"] == "Retitled"
     assert session["status"] == "accept_queue"
+
+
+def test_content_approval_persists_and_remains_in_organizer_surfaces(
+    client, auth_headers, submission_db
+):
+    updated = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"content_approval": "in_review"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["session"]["content_approval"] == "in_review"
+    assert submission_db.rows("sessions")[0]["content_approval"] == "in_review"
+
+    detail = client.get(f"/api/sessions/{SESSION_ID}", headers=auth_headers).json()
+    assert detail["session"]["content_approval"] == "in_review"
+    submissions = client.get(
+        f"/api/events/{TEST_EVENT_ID}/submissions", headers=auth_headers
+    ).json()["submissions"]
+    assert next(row for row in submissions if row["id"] == SESSION_ID)["content_approval"] == "in_review"
+
+
+def test_content_approval_update_is_org_scoped(client, auth_headers, submission_db):
+    submission_db.rows("sessions")[0]["org_id"] = OTHER_ORG_ID
+    response = client.patch(
+        f"/api/sessions/{SESSION_ID}",
+        headers=auth_headers,
+        json={"content_approval": "draft"},
+    )
+    assert response.status_code == 404
+    assert submission_db.rows("sessions")[0].get("content_approval") is None
 
 
 def test_patch_session_rejects_an_empty_title(client, auth_headers, submission_db):

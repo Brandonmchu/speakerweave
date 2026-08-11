@@ -119,6 +119,7 @@ def test_importable_token_minter_uses_requested_org() -> None:
     token = mint_dev_token.mint_dev_token(
         org="org_replica_a",
         sub="replica_tester",
+        name="Jordan Alvarez",
         hours=2,
         secret="test-secret",
         now=issued_at,
@@ -133,4 +134,5 @@ def test_importable_token_minter_uses_requested_org() -> None:
     )
     assert claims["org_id"] == "org_replica_a"
     assert claims["sub"] == "replica_tester"
+    assert claims["name"] == "Jordan Alvarez"
     assert claims["exp"] - claims["iat"] == 2 * 60 * 60

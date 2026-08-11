@@ -25,6 +25,33 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _display_name_from_claims(claims: dict | None) -> str | None:
+    """Return the acting user's optional human-readable JWT identity.
+
+    Clerk templates are organization-configurable, so accept the common claim
+    shapes without making any of them required for authentication. Empty or
+    non-string claims are ignored; attribution then keeps the historical
+    ``Organizer`` fallback at the write site.
+    """
+    if not claims:
+        return None
+    for key in ("name", "full_name"):
+        value = claims.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parts = [
+        value.strip()
+        for key in ("first_name", "last_name")
+        if isinstance((value := claims.get(key)), str) and value.strip()
+    ]
+    return " ".join(parts) or None
+
+
+def _request_token(request: Request) -> str:
+    header = request.headers.get("Authorization") or ""
+    return header[7:].strip() if header.startswith("Bearer ") else header.strip()
+
+
 def verify_token(token: str) -> dict | None:
     """Verify a JWT. Returns claims, or None when the token is unusable."""
     secret = os.environ.get("SUPABASE_JWT_SECRET")
@@ -65,8 +92,7 @@ async def get_current_user_and_org(request: Request) -> tuple[str, str]:
     HS256 verification is pure CPU (microseconds) and touches no I/O, so it
     runs inline — no threadpool hop needed.
     """
-    header = request.headers.get("Authorization") or ""
-    token = header[7:].strip() if header.startswith("Bearer ") else header.strip()
+    token = _request_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Authorization header missing")
 
@@ -84,8 +110,24 @@ async def get_current_user_and_org(request: Request) -> tuple[str, str]:
         logger.info("auth: authed user has no org_id claim user_id=%s", user_id)
         raise HTTPException(status_code=401, detail="Organization ID not found in token")
 
+    request.state.auth_claims = claims
     await _ensure_org_exists(org_id)
     return user_id, org_id
+
+
+def get_display_name(request: Request) -> str | None:
+    """Optional display name for an already authenticated organizer request.
+
+    The auth dependency caches verified claims on ``request.state``. The small
+    fallback keeps this accessor useful in tests or composed dependencies that
+    authenticate the same bearer token without calling
+    :func:`get_current_user_and_org` directly.
+    """
+    claims = getattr(request.state, "auth_claims", None)
+    if claims is None:
+        token = _request_token(request)
+        claims = verify_token(token) if token else None
+    return _display_name_from_claims(claims)
 
 
 async def get_current_user_or_api_org(request: Request) -> tuple[str, str]:

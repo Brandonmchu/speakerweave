@@ -298,24 +298,19 @@ async def _collect(org_id: str, event_id: str) -> dict:
     tasks_by_id = {t["id"]: t for t in tasks}
     task_ids = sorted(tasks_by_id)
 
-    session_ids = sorted({str(t["session_id"]) for t in tasks if t.get("session_id")})
-    sessions_by_id: dict[str, dict] = {}
-    if session_ids:
-        sessions_by_id = {
-            str(session["id"]): session
-            for session in rows(
-                await db(
-                    lambda: supabase.table("sessions")
-                    .select("id, title")
-                    .eq("org_id", org_id)
-                    .eq("event_id", event_id)
-                    .in_("id", session_ids)
-                    .execute(),
-                    "content_sessions",
-                )
-            )
-            if session.get("id")
-        }
+    # Load the event's sessions once. Explicit task links can point at a session
+    # in any workflow state; fallback associations use accepted sessions only.
+    sessions = rows(
+        await db(
+            lambda: supabase.table("sessions")
+            .select("id, title, status, starts_at, submitter_contact_id")
+            .eq("org_id", org_id)
+            .eq("event_id", event_id)
+            .execute(),
+            "content_sessions",
+        )
+    )
+    sessions_by_id = {str(session["id"]): session for session in sessions if session.get("id")}
 
     assignments: list[dict] = []
     if task_ids:
@@ -333,6 +328,7 @@ async def _collect(org_id: str, event_id: str) -> dict:
     contact_ids = sorted({a["contact_id"] for a in assignments if a.get("contact_id")})
     contacts_by_id: dict[str, dict] = {}
     profile_files_by_contact: dict[str, list[dict]] = {}
+    derived_sessions_by_contact: dict[str, list[dict]] = {}
     if contact_ids:
         for contact in rows(
             await db(
@@ -359,6 +355,49 @@ async def _collect(org_id: str, event_id: str) -> dict:
             )
         ):
             profile_files_by_contact.setdefault(file_row.get("contact_id"), []).append(file_row)
+
+        accepted_sessions = [session for session in sessions if session.get("status") == "accepted"]
+        accepted_ids = [str(session["id"]) for session in accepted_sessions if session.get("id")]
+        participants: list[dict] = []
+        if accepted_ids:
+            participants = rows(
+                await db(
+                    lambda: supabase.table("session_participants")
+                    .select("session_id, contact_id, role")
+                    .eq("org_id", org_id)
+                    .in_("session_id", accepted_ids)
+                    .in_("contact_id", contact_ids)
+                    .in_("role", ["speaker", "submitter"])
+                    .execute(),
+                    "content_session_participants",
+                )
+            )
+
+        contact_set = set(contact_ids)
+        contacts_by_session: dict[str, set[str]] = {}
+        for participant in participants:
+            session_id = str(participant.get("session_id") or "")
+            contact_id = str(participant.get("contact_id") or "")
+            if session_id and contact_id in contact_set:
+                contacts_by_session.setdefault(session_id, set()).add(contact_id)
+        # Legacy accepted sessions may predate participant rows; the submitter
+        # contact is still a real speaker/session association for display.
+        for session in accepted_sessions:
+            contact_id = str(session.get("submitter_contact_id") or "")
+            if contact_id in contact_set:
+                contacts_by_session.setdefault(str(session["id"]), set()).add(contact_id)
+
+        accepted_sessions.sort(
+            key=lambda session: (
+                session.get("starts_at") is None,
+                str(session.get("starts_at") or ""),
+                str(session.get("title") or "").casefold(),
+                str(session.get("id") or ""),
+            )
+        )
+        for session in accepted_sessions:
+            for contact_id in contacts_by_session.get(str(session.get("id")), set()):
+                derived_sessions_by_contact.setdefault(contact_id, []).append(session)
 
     assignment_ids = sorted({a["id"] for a in assignments if a.get("id")})
     files_by_assignment: dict[str, list[dict]] = {}
@@ -391,6 +430,7 @@ async def _collect(org_id: str, event_id: str) -> dict:
     ctx = {
         "tasks_by_id": tasks_by_id,
         "sessions_by_id": sessions_by_id,
+        "derived_sessions_by_contact": derived_sessions_by_contact,
         "assignments": assignments,
         "contacts_by_id": contacts_by_id,
         "files_by_assignment": files_by_assignment,
@@ -431,6 +471,14 @@ def _item_from(assignment: dict, ctx: dict) -> dict:
     versions = ctx["versions_by_assignment"].get(assignment.get("id"), [])
     current = next((v for v in versions if v["is_current"]), None)
     session = ctx["sessions_by_id"].get(str(task.get("session_id") or ""))
+    derived_sessions = ctx["derived_sessions_by_contact"].get(assignment.get("contact_id"), [])
+    session_title = None
+    if session:
+        session_title = session.get("title") or "Untitled session"
+    elif derived_sessions:
+        first_title = derived_sessions[0].get("title") or "Untitled session"
+        extra = len(derived_sessions) - 1
+        session_title = f"{first_title} +{extra}" if extra else first_title
     return {
         "item_id": assignment.get("id"),
         "type": classify_item_type(task.get("name")),
@@ -446,6 +494,8 @@ def _item_from(assignment: dict, ctx: dict) -> dict:
         "comment_count": ctx["comments_by_assignment"].get(assignment.get("id"), 0),
         "updated_at": current["created_at"] if current else None,
         "uploaded_at": current["created_at"] if current else None,
+        "session_id": str(session["id"]) if session else None,
+        "session_title": session_title,
         "session": (
             {"id": session.get("id"), "title": session.get("title") or "Untitled session"}
             if session
@@ -646,6 +696,8 @@ async def content_item(org_id: str, assignment_id: str) -> dict:
             "status": content_status(assignment.get("status"), has_file=bool(versions)),
             "current_version": current["version"] if current else 0,
             "uploaded_at": current["created_at"] if current else None,
+            "session_id": str(session["id"]) if session else None,
+            "session_title": session.get("title") or "Untitled session" if session else None,
             "session": (
                 {"id": session.get("id"), "title": session.get("title") or "Untitled session"}
                 if session
@@ -681,7 +733,14 @@ async def _task_for(org_id: str, assignment: dict) -> dict:
     )
 
 
-async def _audit_comment(org_id: str, assignment: dict, task: dict, body: str) -> None:
+async def _audit_comment(
+    org_id: str,
+    assignment: dict,
+    task: dict,
+    body: str,
+    *,
+    author_label: str | None = None,
+) -> None:
     """Write an audit line into the item's thread. Best-effort: a failed audit
     must not undo the action it describes."""
     try:
@@ -694,7 +753,7 @@ async def _audit_comment(org_id: str, assignment: dict, task: dict, body: str) -
                     "task_assignment_id": assignment.get("id"),
                     "contact_id": assignment.get("contact_id"),
                     "author_role": "organizer",
-                    "author_label": "Organizer",
+                    "author_label": (author_label or "").strip() or "Organizer",
                     "body": body,
                     "created_at": _now_iso(),
                 }
@@ -706,7 +765,13 @@ async def _audit_comment(org_id: str, assignment: dict, task: dict, body: str) -
         logger.warning("content: could not record audit line for %s", assignment.get("id"), exc_info=True)
 
 
-async def restore_version(org_id: str, assignment_id: str, version: int) -> dict:
+async def restore_version(
+    org_id: str,
+    assignment_id: str,
+    version: int,
+    *,
+    author_label: str | None = None,
+) -> dict:
     """Make a prior version current again — a pointer move, not a rewrite.
 
     Every upload is kept as its own ``files`` row; the only thing that says
@@ -751,6 +816,7 @@ async def restore_version(org_id: str, assignment_id: str, version: int) -> dict
             assignment,
             task,
             f"Restored v{wanted} ({filename}) as the current version.",
+            author_label=author_label,
         )
 
     detail = await content_item(org_id, assignment_id)
@@ -758,7 +824,13 @@ async def restore_version(org_id: str, assignment_id: str, version: int) -> dict
     return detail
 
 
-async def add_organizer_comment(org_id: str, assignment_id: str, body: str) -> dict:
+async def add_organizer_comment(
+    org_id: str,
+    assignment_id: str,
+    body: str,
+    *,
+    author_label: str | None = None,
+) -> dict:
     """Organizer leaves feedback on a speaker's item. Returns the comment plus the
     speaker + task context so the route can queue a notification."""
     text = (body or "").strip()
@@ -787,6 +859,7 @@ async def add_organizer_comment(org_id: str, assignment_id: str, body: str) -> d
             "content_comment_contact",
         )
     ) or {}
+    label = (author_label or "").strip() or "Organizer"
     comment = first(
         await db(
             lambda: supabase.table("content_comments")
@@ -797,7 +870,7 @@ async def add_organizer_comment(org_id: str, assignment_id: str, body: str) -> d
                     "task_assignment_id": assignment_id,
                     "contact_id": assignment.get("contact_id"),
                     "author_role": "organizer",
-                    "author_label": "Organizer",
+                    "author_label": label,
                     "body": text,
                     "created_at": _now_iso(),
                 }
@@ -812,13 +885,39 @@ async def add_organizer_comment(org_id: str, assignment_id: str, body: str) -> d
         "comment": {
             "id": comment.get("id"),
             "author_role": "organizer",
-            "author_label": "Organizer",
+            "author_label": label,
             "body": text,
             "created_at": comment.get("created_at"),
         },
         "contact": contact,
         "task": task,
     }
+
+
+async def record_review_status_event(
+    org_id: str,
+    assignment: dict,
+    decision: str,
+    *,
+    author_label: str | None = None,
+) -> None:
+    """Best-effort audit entry for an organizer's file review decision."""
+    try:
+        task = await _task_for(org_id, assignment)
+        outcome = "approved" if decision == "approved" else "needs changes"
+        await _audit_comment(
+            org_id,
+            assignment,
+            task,
+            f"Marked this content as {outcome}.",
+            author_label=author_label,
+        )
+    except Exception:
+        logger.warning(
+            "content: could not record review event for %s",
+            assignment.get("id"),
+            exc_info=True,
+        )
 
 
 # ── reminders ────────────────────────────────────────────────────────────────

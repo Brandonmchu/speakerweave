@@ -49,6 +49,7 @@ def make_token(
     secret: str = TEST_JWT_SECRET,
     audience: str = "authenticated",
     expires_in_minutes: int = 60,
+    extra_claims: dict | None = None,
 ) -> str:
     """Mint a JWT in the shape auth.py expects (mirrors scripts/mint_dev_token.py)."""
     now = datetime.now(timezone.utc)
@@ -60,6 +61,7 @@ def make_token(
     }
     if org_id is not None:
         claims["org_id"] = org_id
+    claims.update(extra_claims or {})
     return jwt.encode(claims, secret, algorithm="HS256")
 
 

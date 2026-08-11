@@ -22,7 +22,13 @@ import pytest
 
 from routes.portal_session_routes import COOKIE_NAME
 from services.magic_links import issue_session
-from tests.conftest import OTHER_EVENT_ID, OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
+from tests.conftest import (
+    OTHER_EVENT_ID,
+    OTHER_ORG_ID,
+    TEST_EVENT_ID,
+    TEST_ORG_ID,
+    make_token,
+)
 
 ADA = "22222222-2222-2222-2222-2222222200a1"
 BEN = "22222222-2222-2222-2222-2222222200a2"
@@ -40,6 +46,7 @@ A_FOREIGN = "44444444-4444-4444-4444-4444444400ff"
 
 FILE_ADA_SLIDES = "66666666-6666-6666-6666-6666666600s1"
 SESSION_SLIDES = "99999999-9999-9999-9999-9999999900s1"
+SESSION_ADA_FIRST = "99999999-9999-9999-9999-9999999900s2"
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +77,33 @@ def content_db(seeded_db):
             "org_id": TEST_ORG_ID,
             "event_id": TEST_EVENT_ID,
             "title": "Analytical Engines in Practice",
+            "status": "accepted",
+            "starts_at": "2027-06-02T10:00:00+00:00",
+        },
+        {
+            "id": SESSION_ADA_FIRST,
+            "org_id": TEST_ORG_ID,
+            "event_id": TEST_EVENT_ID,
+            "title": "Opening the Engine",
+            "status": "accepted",
+            "starts_at": "2027-06-01T09:00:00+00:00",
+        },
+    )
+    db.seed(
+        "session_participants",
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": SESSION_SLIDES,
+            "contact_id": ADA,
+            "role": "speaker",
+            "is_primary": True,
+        },
+        {
+            "org_id": TEST_ORG_ID,
+            "session_id": SESSION_ADA_FIRST,
+            "contact_id": ADA,
+            "role": "speaker",
+            "is_primary": True,
         },
     )
     db.seed(
@@ -229,6 +263,7 @@ def test_organizer_comment_visible_to_speaker_and_notifies(client, auth_headers,
     )
     assert resp.status_code == 201
     assert resp.json()["comment"]["author_role"] == "organizer"
+    assert resp.json()["comment"]["author_label"] == "Organizer"
 
     # stored
     stored = [c for c in content_db.rows("content_comments") if c["task_assignment_id"] == A_ADA_SLIDES]
@@ -243,6 +278,35 @@ def test_organizer_comment_visible_to_speaker_and_notifies(client, auth_headers,
     queued = [e for e in content_db.rows("email_outbox") if e.get("template_key") == "content_feedback"]
     assert len(queued) == 1
     assert queued[0]["contact_id"] == ADA
+
+
+def test_organizer_content_history_uses_the_acting_users_display_name(client, content_db):
+    headers = {
+        "Authorization": f"Bearer {make_token(extra_claims={'name': 'Jordan Alvarez'})}"
+    }
+    commented = client.post(
+        f"/api/task-assignments/{A_ADA_SLIDES}/comments",
+        headers=headers,
+        json={"body": "Please tighten the closing slide.", "notify": False},
+    )
+    assert commented.status_code == 201
+    reviewed = client.patch(
+        f"/api/task-assignments/{A_ADA_SLIDES}/review",
+        headers=headers,
+        json={"decision": "approved"},
+    )
+    assert reviewed.status_code == 200
+
+    history = client.get(
+        f"/api/task-assignments/{A_ADA_SLIDES}/content", headers=headers
+    ).json()["comments"]
+    jordan_entries = [entry for entry in history if entry["author_label"] == "Jordan Alvarez"]
+    assert len(jordan_entries) == 2
+    assert all(entry["created_at"] for entry in jordan_entries)
+    assert {entry["body"] for entry in jordan_entries} == {
+        "Please tighten the closing slide.",
+        "Marked this content as approved.",
+    }
 
 
 def test_speaker_can_reply_on_own_item(client, content_db):
@@ -319,6 +383,8 @@ def test_library_uses_linked_session_and_real_upload_timestamp(
         "id": SESSION_SLIDES,
         "title": "Analytical Engines in Practice",
     }
+    assert slides["session_id"] == SESSION_SLIDES
+    assert slides["session_title"] == "Analytical Engines in Practice"
     assert slides["uploaded_at"] == "2026-08-09T15:30:00+00:00"
     assert slides["uploaded_at"] != slides["due_at"]
 
@@ -327,6 +393,23 @@ def test_library_uses_linked_session_and_real_upload_timestamp(
     ).json()["item"]
     assert detail["session"]["id"] == SESSION_SLIDES
     assert detail["uploaded_at"] == "2026-08-09T15:30:00+00:00"
+
+
+def test_library_derives_speaker_sessions_when_the_task_has_no_session(
+    client, auth_headers, content_db
+):
+    body = client.get(f"/api/events/{TEST_EVENT_ID}/content", headers=auth_headers).json()
+    by_id = {item["item_id"]: item for item in body["items"]}
+
+    # Ada has two accepted sessions. The scheduled-first association is shown
+    # with a count, but no linkable id is invented for this event-level task.
+    assert by_id[A_ADA_HEADSHOT]["session_id"] is None
+    assert by_id[A_ADA_HEADSHOT]["session"] is None
+    assert by_id[A_ADA_HEADSHOT]["session_title"] == "Opening the Engine +1"
+
+    # Ben has no accepted-session participant/submission association.
+    assert by_id[A_BEN_BIO]["session_id"] is None
+    assert by_id[A_BEN_BIO]["session_title"] is None
 
 
 def test_approval_is_explicit_in_library_detail_and_speaker_portal(
