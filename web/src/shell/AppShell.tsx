@@ -377,9 +377,9 @@ export function AppShell() {
       <aside className="hidden w-60 shrink-0 flex-col border-r border-navigation-border bg-navigation md:flex">
         <div className="flex h-14 items-center gap-2 px-5">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            d
+            S
           </div>
-          <span className="text-[15px] font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-[15px] font-semibold tracking-tight text-foreground">SpeakerWeave</span>
         </div>
 
         {/* Event switcher — a static single-event dropdown today, but the chevron

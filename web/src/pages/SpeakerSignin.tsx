@@ -37,9 +37,7 @@ export function SpeakerSignin() {
           to="/"
           className="mb-6 inline-flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm text-primary-foreground">
-            d
-          </span>
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm text-primary-foreground">S</span>
           dais
         </Link>
 

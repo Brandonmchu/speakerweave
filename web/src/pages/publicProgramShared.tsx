@@ -130,9 +130,9 @@ export function ProgramShell({
       >
         <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-5 py-3.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            d
+            S
           </div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
           {eventName && (
             <>
               <span className="text-border">/</span>

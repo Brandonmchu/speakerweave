@@ -51,9 +51,9 @@ export function DevLogin() {
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            d
+            S
           </div>
-          <span className="text-lg font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-lg font-semibold tracking-tight text-foreground">SpeakerWeave</span>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 shadow-soft">

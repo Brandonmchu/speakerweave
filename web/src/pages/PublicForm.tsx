@@ -791,9 +791,9 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
       <div className="mx-auto w-full max-w-[920px] px-5 py-10 sm:py-16">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            d
+            S
           </div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
           {eyebrow && (
             <>
               <span className="text-border">/</span>

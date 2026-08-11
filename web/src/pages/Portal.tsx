@@ -857,9 +857,9 @@ function PortalShell({
                 className="flex h-7 w-7 items-center justify-center rounded-md text-sm font-semibold text-white"
                 style={{ backgroundColor: accent }}
               >
-                d
+                S
               </div>
-              <span className="text-sm font-semibold tracking-tight text-foreground">dais</span>
+              <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
             </>
           )}
         </div>

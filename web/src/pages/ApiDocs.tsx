@@ -56,9 +56,9 @@ function TopBar() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-8">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-            d
+            S
           </div>
-          <span className="text-lg font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-lg font-semibold tracking-tight text-foreground">SpeakerWeave</span>
           <span className="ml-1 rounded-full bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary">
             API reference
           </span>

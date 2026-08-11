@@ -639,12 +639,12 @@ function PublicReviewShell({ children }: { children: React.ReactNode }) {
       <div className="mx-auto w-full max-w-[1180px] px-4 py-7 sm:px-6 sm:py-10">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">d</div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">dais</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
           <span className="text-border">/</span>
           <span className="text-sm text-muted-foreground">Reviewer portal</span>
         </div>
         {children}
-        <p className="mt-7 text-center text-xs text-muted-foreground">Private review workspace powered by dais</p>
+        <p className="mt-7 text-center text-xs text-muted-foreground">Private review workspace powered by SpeakerWeave</p>
       </div>
     </div>
   )
