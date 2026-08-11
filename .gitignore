@@ -20,3 +20,6 @@ web/.ds-css/
 
 # Mintlify local preview artifacts
 docs-site/.mintlify/
+
+# Playwright CLI debug artifacts
+.playwright-cli/
