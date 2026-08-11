@@ -94,7 +94,7 @@ describe('Home landing', () => {
   it('renders the hero and its primary demo entry point', () => {
     renderHome()
     expect(
-      screen.getByRole('heading', { name: 'Run your conference program, end to end.' })
+      screen.getByRole('heading', { name: 'Every speaker, from submission to stage.' })
     ).toBeInTheDocument()
     expect(
       screen.getByText(/From call for papers to a published, staffed, scheduled agenda/)
@@ -123,11 +123,16 @@ describe('Home landing', () => {
 
     await waitFor(() => expect(container.querySelectorAll('.tile .cap').length).toBeGreaterThan(0))
 
-    // Every captioned tile names the speaker and carries a status dot, so the
-    // wall reads as a roster rather than stock photography.
+    // Every captioned tile names the speaker and carries a status, so the wall
+    // reads as a roster rather than stock photography. The status dot is an
+    // inline `::before` on the label — never a sibling element, which is what
+    // used to collapse onto the first glyph in WebKit.
     for (const cap of container.querySelectorAll('.tile .cap')) {
       expect(cap.querySelector('b')?.textContent).toMatch(/Priya Raman|Wei Zhang/)
-      expect(cap.querySelector('em .dot')).toBeTruthy()
+      const status = cap.querySelector('em')
+      expect(status?.className).toMatch(/\bdotted\b/)
+      expect(status?.className).toMatch(/\bd-[a-z]+\b/)
+      expect(status?.querySelector('.dot')).toBeNull()
     }
   })
 

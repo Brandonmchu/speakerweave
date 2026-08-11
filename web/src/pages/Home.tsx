@@ -271,10 +271,7 @@ function SpeakerWall() {
                   <span className="cap">
                     <b>{tile.name}</b>
                     {tile.state && (
-                      <em>
-                        <span className={`dot ${tile.state.dot}`} />
-                        {tile.state.label}
-                      </em>
+                      <em className={`dotted ${tile.state.dot}`}>{tile.state.label}</em>
                     )}
                   </span>
                 )}
@@ -324,7 +321,7 @@ export function Home() {
             <i />
             Open-source conference operations
           </span>
-          <h1 className="h1 serif">Run your conference program, end to end.</h1>
+          <h1 className="h1 serif">Every speaker, from submission to stage.</h1>
           <p className="lede">
             From call for papers to a published, staffed, scheduled agenda — submissions, reviews,
             speaker onboarding, content, and scheduling in one open-source workspace.
@@ -472,14 +469,8 @@ export function Home() {
                 <br />4 of 4 reviews in
               </div>
               <div className="flip">
-                <span className="a">
-                  <i className="dot d-pend" />
-                  Pending review
-                </span>
-                <span className="b">
-                  <i className="dot d-q" />
-                  Moved to accept queue
-                </span>
+                <span className="a dotted d-pend">Pending review</span>
+                <span className="b dotted d-q">Moved to accept queue</span>
               </div>
             </div>
           </div>
@@ -510,8 +501,7 @@ export function Home() {
                 />
               ))}
             </div>
-            <div className="conflict">
-              <span className="dot d-warn" />
+            <div className="conflict dotted d-warn">
               Wei Zhang was double-booked at 11:30 — moved to Track A
             </div>
           </div>

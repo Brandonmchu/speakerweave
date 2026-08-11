@@ -581,8 +581,7 @@ body.sw-site-active {
   text-overflow: ellipsis;
 }
 .sw-site .tile .cap em {
-  display: flex;
-  align-items: center;
+  display: block;
   margin-top: 3px;
   font-style: normal;
   font-family: var(--sw-mono);
@@ -621,8 +620,7 @@ body.sw-site-active {
   margin-top: 7px;
 }
 .sw-site .tile.artifact .foot {
-  display: flex;
-  align-items: center;
+  display: block;
   font-family: var(--sw-mono);
   font-size: 9.5px;
   letter-spacing: 0.06em;
@@ -872,8 +870,7 @@ body.sw-site-active {
 .sw-site .flip span {
   position: absolute;
   left: 0;
-  display: flex;
-  align-items: center;
+  display: block;
   white-space: nowrap;
   transition:
     transform 0.7s var(--sw-ease),
@@ -898,32 +895,44 @@ body.sw-site-active {
   transform: none;
   opacity: 1;
 }
-/* Own margin rather than the parent's flex `gap`: the label beside a dot is
-   often a bare text node, and an anonymous flex item does not get gap treatment
-   consistently across engines (Safari collapses it, so the dot lands on the
-   first glyph). Margin is honoured everywhere. */
-.sw-site .dot {
+/**
+ * Status dots are drawn as an inline `::before` on the label itself, never as a
+ * sibling element in a flex row.
+ *
+ * The sibling approach failed in the field: a dot element followed by a bare
+ * text node makes the label an *anonymous* flex item, and neither `gap` nor the
+ * dot's own margin reliably separated them in WebKit — the dot rendered on top
+ * of the first glyph ("ONBOARDED" reading as a dot plus "NBOARDED"). An inline
+ * pseudo-element sits in normal text flow, which every engine lays out the same
+ * way, and it removes an element from the masked, animated hero subtree.
+ *
+ * Usage: put `dotted` plus a `d-*` colour class on the element holding the
+ * label text. `--dot` carries the colour so the pseudo-element can read it.
+ */
+.sw-site .dotted::before {
+  content: '';
+  display: inline-block;
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  display: block;
-  flex: 0 0 auto;
-  margin-right: 6px;
+  margin-right: 7px;
+  vertical-align: 0.14em;
+  background: var(--dot, var(--sw-neutral));
 }
 .sw-site .d-pend {
-  background: var(--sw-pending);
+  --dot: var(--sw-pending);
 }
 .sw-site .d-acc {
-  background: var(--sw-accepted);
+  --dot: var(--sw-accepted);
 }
 .sw-site .d-q {
-  background: var(--sw-queue);
+  --dot: var(--sw-queue);
 }
 .sw-site .d-nul {
-  background: var(--sw-neutral);
+  --dot: var(--sw-neutral);
 }
 .sw-site .d-warn {
-  background: var(--sw-overdue);
+  --dot: var(--sw-overdue);
 }
 
 /* agenda demo */
@@ -979,8 +988,7 @@ body.sw-site-active {
   padding-top: 16px;
 }
 .sw-site .conflict {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
   font-size: 11.5px;
   color: #c98d89;
   margin-top: 12px;
