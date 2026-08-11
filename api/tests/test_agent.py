@@ -934,3 +934,21 @@ def test_mocked_stream_smoke_persists_turn_and_emits_frozen_sequence(
         "tool_calls": [],
         "provider": "openai",
     }
+
+
+def test_mcp_tool_definition_tolerates_both_sdk_field_names():
+    """mcp 1.x Tool.inputSchema vs 2.x Tool.input_schema — both must map."""
+    from types import SimpleNamespace
+
+    from agent.mcp_connectors import _definition
+
+    v1 = SimpleNamespace(
+        name="list_events", description="List events", inputSchema={"type": "object"}
+    )
+    v2 = SimpleNamespace(
+        name="list_events", description="List events", input_schema={"type": "object"}
+    )
+    assert _definition("every", "Every", v1)["input_schema"] == {"type": "object"}
+    assert _definition("every", "Every", v2)["input_schema"] == {"type": "object"}
+    bare = SimpleNamespace(name="ping", description=None)
+    assert _definition("every", "Every", bare)["input_schema"]["type"] == "object"

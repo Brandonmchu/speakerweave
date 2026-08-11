@@ -587,10 +587,15 @@ def _safe_tool_name(name: str) -> str:
 
 
 def _definition(key: str, connector_name: str, tool: Any) -> dict[str, Any]:
+    # mcp 1.x exposes Tool.inputSchema; 2.x renamed it to input_schema. Our
+    # requirement spans both (see requirements.txt), so probe for either.
+    schema = getattr(tool, "inputSchema", None)
+    if schema is None:
+        schema = getattr(tool, "input_schema", None)
     return {
         "name": f"mcp__{key}__{_safe_tool_name(str(tool.name))}",
         "description": tool.description or f"Use the connected {connector_name} MCP server.",
-        "input_schema": dict(tool.inputSchema or {"type": "object", "properties": {}}),
+        "input_schema": dict(schema or {"type": "object", "properties": {}}),
         "connector_name": connector_name,
     }
 
