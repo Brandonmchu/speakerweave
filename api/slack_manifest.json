@@ -8,6 +8,11 @@
       "display_name": "SpeakerWeave",
       "always_online": true
     },
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
     "assistant_view": {
       "assistant_description": "The SpeakerWeave program-operations agent: submissions, speakers, agenda, content, and decisions — with approvals right here in Slack.",
       "suggested_prompts": [

@@ -1,6 +1,6 @@
 # The in-app chat agent
 
-SpeakerWeave ships an optional, Every-style agent with two transports. In-app Ask is a right-side panel available on every organizer page, with threads, streaming responses, `@`-mention context tagging, clickable entity badges, agent-driven navigation, and inline Approve/Deny confirmation for sensitive actions. The Slack bot enters the exact same agent turn service, tool registry, MCP connectors, thread store, and permission gate through signed Slack events and interactive buttons.
+SpeakerWeave ships an optional, Every-style agent with two transports. In-app Ask is a right-side panel available on every organizer page, with threads, streaming responses, `@`-mention context tagging, clickable entity badges, agent-driven navigation, and inline Approve/Deny confirmation for sensitive actions. The Slack bot enters the exact same agent turn service, tool registry, MCP connectors, thread store, and permission gate through signed Slack events and interactive buttons, and registers as a native Slack Agent (assistant pane with suggested prompts, "is thinking…" status, and new-chat thread resets).
 
 This document covers how to turn it on, how to turn it off, how to run it on OpenAI or Anthropic, and how to remove it from the codebase entirely.
 

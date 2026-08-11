@@ -563,11 +563,19 @@ body.sw-site-active {
 
 /* ── facts ────────────────────────────────────────────────────────────────── */
 
+/* The facts row closes the hero. In the reference a dark section followed it,
+   so the next section's own padding carried the gap; here a paper band starts
+   immediately below, making the seam visible — so the row owns its bottom
+   space rather than borrowing it from a neighbour. */
+.sw-site .factsect {
+  padding-top: 70px;
+  padding-bottom: 72px;
+}
 .sw-site .facts {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
-  padding-top: 20px;
+  padding-top: 22px;
   font-size: 13px;
   color: var(--sw-dmute);
   list-style: none;

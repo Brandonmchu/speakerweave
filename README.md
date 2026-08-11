@@ -240,9 +240,11 @@ It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: Ope
 
 The Slack bot is the same agent as in-app Ask: the same provider, built-in tools, connected MCP servers, persisted threads, and permission gate. Mentions and DMs can run full agent turns; sensitive actions arrive as native **Approve** and **Deny** buttons with a 300-second window. Slack conversations are mapped to `agent_threads`, so they appear in Ask history.
 
-Create a Slack app from [`api/slack_manifest.json`](api/slack_manifest.json). Under **Event Subscriptions**, use `https://speakerweave.com/api/slack/events` (or your deployment's public origin) for `app_mention` and `message.im`. Under **Interactivity & Shortcuts**, enable Interactivity with that **same request URL**. The manifest includes `users:read` so channel messages can be attributed to their speaker, and keeps Socket Mode disabled.
+The app registers as a **Slack Agent**: the `AGENT` badge, the split-pane chat surface with suggested prompts, a native *"is thinking…"* status while a turn runs, and **New chat** starting a fresh agent conversation.
 
-Install or reinstall the app, then configure:
+Create a Slack app from [`api/slack_manifest.json`](api/slack_manifest.json) (for self-hosting, swap both `https://speakerweave.com` request URLs for your public origin first). The manifest configures the scopes (including `assistant:write` for the agent surface and `users:read` for speaker attribution), the bot events (`app_mention`, `assistant_thread_started`, `message.im`), Interactivity on the same signed URL, the agent view, and an unlocked messages tab; Socket Mode stays off. An app icon ships at [`assets/slack-app-icon-1024.png`](assets/slack-app-icon-1024.png).
+
+Install the app, invite it to channels where it should answer mentions, then configure:
 
 - `SLACK_SIGNING_SECRET`
 - `SLACK_BOT_TOKEN`

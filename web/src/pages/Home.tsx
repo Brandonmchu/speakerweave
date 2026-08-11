@@ -259,7 +259,7 @@ export function Home() {
       </section>
 
       {/* ── facts ────────────────────────────────────────────────────────── */}
-      <section className="wrap" style={{ paddingTop: 70 }} aria-label="Project credibility">
+      <section className="wrap factsect" aria-label="Project credibility">
         <div className="rule" />
         <ul className="facts rv" style={vars({ '--d': '.1s' })}>
           <li>

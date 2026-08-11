@@ -854,11 +854,14 @@ function SlackBotCard() {
         <div className="space-y-3">
           <p className="text-sm font-medium text-foreground">Setup</p>
           <ol className="space-y-2 pl-5 text-sm leading-relaxed text-foreground marker:font-mono marker:text-muted-foreground">
-            <li className="list-decimal">Create a Slack app from the manifest below.</li>
             <li className="list-decimal">
-              In Event Subscriptions, confirm the request URL is{' '}
-              <code className="font-mono text-xs">https://speakerweave.com/api/slack/events</code>.
-              Then enable Interactivity &amp; Shortcuts with that same request URL.
+              Create a Slack app from the manifest below — it preconfigures scopes, events,
+              Interactivity, the agent surface, and the messages tab.
+            </li>
+            <li className="list-decimal">
+              In Event Subscriptions, confirm the request URL{' '}
+              <code className="font-mono text-xs">https://speakerweave.com/api/slack/events</code>{' '}
+              shows as Verified.
             </li>
             <li className="list-decimal">
               Install the app to your workspace, invite it to any shared channels, and copy its bot

@@ -775,6 +775,13 @@ def test_slack_manifest_matches_agent_bridge_contract():
         "request_url": "https://speakerweave.com/api/slack/events",
     }
     assert manifest["settings"]["socket_mode_enabled"] is False
+    # Without an unlocked messages tab, Slack shows "Sending messages to this
+    # app has been turned off" and the agent pane composer is unusable.
+    assert manifest["features"]["app_home"] == {
+        "home_tab_enabled": False,
+        "messages_tab_enabled": True,
+        "messages_tab_read_only_enabled": False,
+    }
 
 
 def test_slack_source_gets_surface_prompt_overlay():

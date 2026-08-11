@@ -7,6 +7,8 @@ The Slack bot **is the SpeakerWeave agent**, not a separate assistant. A mention
 
 That means you can start a conversation in Slack, approve a sensitive action without leaving Slack, and find the persisted thread later in the in-app Ask history.
 
+The app registers as a **Slack Agent** (the `AGENT` badge): it gets Slack's split-pane chat surface with suggested prompts, a native *"is thinking…"* status line while a turn runs — in the pane and in channel threads — and a **New chat** control that starts a fresh agent conversation (`assistant_thread_started` resets the thread mapping).
+
 ## How the bridge works
 
 ```text
@@ -44,26 +46,29 @@ SpeakerWeave stores the Slack-to-agent relationship in `slack_agent_threads`:
 | Channel mention | Creates or resumes the mapping for that channel thread and replies in the Slack thread |
 | Reply in a channel thread | Resumes the same agent thread |
 | Top-level DM | Resumes the most recent agent thread for that DM channel, or creates one; replies stay unthreaded |
+| Agent pane conversation | Each pane chat is a threaded DM mapped to its own agent thread; replies stay inside the pane |
+| **New chat** in the pane | `assistant_thread_started` inserts a fresh mapping, so the next message starts a new agent conversation |
 
 Channel messages are attributed with the sender's Slack display name when `users.info` is available. Agent threads use `slack:<user_id>` as their user identity, remain organization-scoped, and appear in the in-app Ask thread history.
 
 ## Set up the Slack app
 
-1. In Slack, choose **Create New App → From an app manifest** and paste `api/slack_manifest.json` (or copy the manifest from **Settings → Integrations**).
-2. Under **Event Subscriptions**, enable events and set the request URL to:
+The manifest does almost all of the configuration. For a self-hosted deployment, first replace both `https://speakerweave.com` request URLs in the manifest with your public web origin.
 
-   ```text
-   https://speakerweave.com/api/slack/events
-   ```
-
-   For a self-hosted deployment, replace `https://speakerweave.com` with your public web origin.
-3. Subscribe to the bot events `app_mention` and `message.im`.
-4. Under **Interactivity & Shortcuts**, turn on Interactivity and use the **same request URL** as Event Subscriptions.
-5. Confirm these bot token scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, and `users:read`. Socket Mode stays off.
-6. Install or reinstall the app to the workspace, copy the bot token, and invite the bot to any shared channels where it should respond.
+1. In Slack, choose **Create New App → From an app manifest** and paste [`api/slack_manifest.json`](https://github.com/Brandonmchu/speakerweave/blob/main/api/slack_manifest.json) (or copy the manifest from **Settings → Integrations** in the app). The manifest configures:
+   - Bot token scopes: `app_mentions:read`, `assistant:write`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`
+   - Bot events on `/api/slack/events`: `app_mention`, `assistant_thread_started`, `message.im`
+   - **Interactivity** on that same URL (this is what delivers Approve/Deny clicks)
+   - The **agent view** (AGENT badge + split-pane surface) with a description and suggested prompts
+   - An unlocked **messages tab**, so the pane composer accepts messages
+   - Socket Mode off — SpeakerWeave receives signed HTTPS events only
+2. **Install the app to the workspace** and copy the **Bot User OAuth Token** (`xoxb-…`) from OAuth & Permissions and the **Signing Secret** from Basic Information.
+3. Optional but recommended: upload the app icon from [`assets/slack-app-icon-1024.png`](https://github.com/Brandonmchu/speakerweave/blob/main/assets/slack-app-icon-1024.png) under **Basic Information → Display Information**.
+4. Invite the bot to any channels where it should answer mentions (`/invite @SpeakerWeave`). DMs and the agent pane need no invite.
+5. Configure the API environment (next section) and send the bot a DM.
 
 <Note>
-Reinstall the app after changing scopes, event subscriptions, or Interactivity so the workspace receives the updated configuration.
+If you change scopes or events later, Slack requires a **reinstall** before the new configuration takes effect; the token value survives reinstalls.
 </Note>
 
 ## Configure the API environment
@@ -76,6 +81,17 @@ Reinstall the app after changing scopes, event subscriptions, or Interactivity s
 | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | Enables the selected agent provider; `ASSISTANT_PROVIDER` can choose explicitly |
 
 You can verify the detected provider and key state under **Settings → Integrations → Slack bot**.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| "Sending messages to this app has been turned off" | The messages tab is locked. **App Home → Show Tabs → Chat/Messages Tab** must be on with *Allow users to send … messages* checked. Apps created from the current manifest have this preconfigured. |
+| No `AGENT` badge / no split pane | The agent designation isn't active: check the **Agents** page in the Slack app config, then reinstall. Slack clients cache app metadata — fully reload Slack (`Cmd+R`) after changing it. |
+| Approve/Deny buttons do nothing | Interactivity is off or points at a different URL than Event Subscriptions. Both must be the same signed `/api/slack/events` endpoint. |
+| No "is thinking…" status | The status renders only inside threads (the agent pane or a channel thread), requires the `assistant:write` scope, and the app must be reinstalled after adding it. |
+| Bot never replies in a channel | The bot must be a member of that channel. Also confirm the events request URL shows **Verified** in Event Subscriptions. |
+| Replies lack sender names in shared channels | `users:read` is missing or the app wasn't reinstalled after adding it. |
 
 ## Deployment boundary
 
