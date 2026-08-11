@@ -13,12 +13,18 @@
  */
 import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Hash, Plug, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
 import { FEATURED_EVENT_SLUG, featuredScheduleUrl } from '@/lib/featuredEvent'
-import { dedupeProgramSpeakers, getProgramSpeakers, initialsOf } from '@/lib/programApi'
+import {
+  dedupeProgramSpeakers,
+  getProgramSchedule,
+  getProgramSpeakers,
+  initialsOf,
+} from '@/lib/programApi'
 import { avatarGradient, stableHash } from '@/ui/avatar'
 import { EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
@@ -71,17 +77,20 @@ const LIFECYCLE = [
 const SURFACES: Array<{
   title: string
   kicker: string
+  icon: LucideIcon
   body: (endpoint: string) => ReactNode
 }> = [
   {
     title: 'In-app agent',
     kicker: 'Built in',
+    icon: Sparkles,
     body: () =>
       'Runs the program, not just the search box: streaming threads, @-mention any submission or speaker as context, clickable entity badges that navigate the app, and approve/deny gates before anything sensitive happens.',
   },
   {
     title: 'MCP server + connectors',
     kicker: 'Any client',
+    icon: Plug,
     body: (endpoint) => (
       <>
         Add <code>{endpoint}</code> to Claude or ChatGPT as a connector — OAuth, no custom headers.
@@ -92,12 +101,14 @@ const SURFACES: Array<{
   {
     title: 'Slack',
     kicker: 'Team surface',
+    icon: Hash,
     body: () =>
       'Mention or DM the same agent that powers in-app Ask — the same built-in and connected MCP tools, with Approve/Deny buttons in Slack and shared Ask thread history.',
   },
   {
     title: 'sw CLI',
     kicker: 'Terminal',
+    icon: SquareTerminal,
     body: () => (
       <>
         <code>pipx install</code>, authenticate with an API token, then <code>sw ask</code> — the
@@ -168,60 +179,8 @@ const WALL_STATES: Array<{ label: string; dot: string }> = [
   { label: 'Slides due', dot: 'd-warn' },
 ]
 
-/**
- * Program artifacts seeded into the wall, so it shows the work and not only the
- * people — a scored submission, an onboarding checklist, a scheduled session.
- * The numbers are the seeded demo workspace's own.
- */
-const WALL_ARTIFACTS: Record<number, ReactNode> = {
-  1: (
-    <>
-      <div>
-        <div className="k">SESS-114 · Round 2</div>
-        <div className="t">Designing Trustworthy AI</div>
-      </div>
-      <div>
-        <div className="big">3.38</div>
-        <div className="foot" style={{ marginTop: 6 }}>
-          <span className="dot d-q" />4 of 4 reviews
-        </div>
-      </div>
-    </>
-  ),
-  6: (
-    <>
-      <div>
-        <div className="k">Speaker portal</div>
-        <div className="t">Onboarding</div>
-      </div>
-      <div>
-        <div className="big">4/6</div>
-        <div className="bar">
-          <i style={{ width: '64%' }} />
-        </div>
-        <div className="foot" style={{ marginTop: 8 }}>
-          <span className="dot d-pend" />
-          Slides due
-        </div>
-      </div>
-    </>
-  ),
-  9: (
-    <>
-      <div>
-        <div className="k">Saturday · Track A</div>
-        <div className="t">RAG in Production</div>
-      </div>
-      <div>
-        <div className="big">10:15</div>
-        <div className="foot" style={{ marginTop: 6 }}>
-          <span className="dot d-acc" />
-          Scheduled
-        </div>
-      </div>
-    </>
-  ),
-}
+/** The one non-face tile: which slot the live program summary occupies. */
+const SUMMARY_SLOT = 5
 
 /**
  * The hero wall is the featured event's real speaker roster: headshots where
@@ -239,15 +198,19 @@ function SpeakerWall() {
     staleTime: 5 * 60_000,
     retry: false,
   })
+  const scheduleQuery = useQuery({
+    queryKey: ['program-schedule', FEATURED_EVENT_SLUG],
+    queryFn: () => getProgramSchedule(FEATURED_EVENT_SLUG),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
 
   const roster = dedupeProgramSpeakers(query.data?.speakers ?? [])
 
-  // Artifact slots are fixed, so the mix of faces and program cards doesn't
-  // reshuffle when the roster lands.
+  // The summary slot is fixed, so the wall doesn't reshuffle when data lands.
   let speakerIndex = -1
   const tiles = Array.from({ length: WALL_SIZE }, (_, index) => {
-    const artifact = WALL_ARTIFACTS[index]
-    if (artifact) return { key: `${index}`, artifact }
+    if (index === SUMMARY_SLOT) return { key: `${index}`, summary: true as const }
 
     speakerIndex += 1
     const speaker = roster.length ? roster[speakerIndex % roster.length] : null
@@ -255,23 +218,47 @@ function SpeakerWall() {
     const [start, end] = avatarGradient(`${seed}${roster.length ? '' : index}`)
     return {
       key: `${index}`,
-      artifact: null,
+      summary: false as const,
       name: speaker?.name ?? null,
-      role: speaker?.company ?? speaker?.title ?? null,
       photo: speaker?.photo_url ?? null,
       state: speaker ? WALL_STATES[stableHash(seed) % WALL_STATES.length] : null,
       gradient: `linear-gradient(145deg, ${start}, ${end})`,
     }
   })
 
+  // Everything on the summary tile is the featured event's own public program.
+  const days = scheduleQuery.data?.days ?? []
+  const sessionCount = days.reduce((total, day) => total + day.sessions.length, 0)
+  const trackCount = new Set(
+    days.flatMap((day) => day.sessions.map((s) => s.track?.name).filter(Boolean))
+  ).size
+  const eventName = scheduleQuery.data?.event?.name ?? query.data?.event?.name ?? null
+
   return (
     <div className="cols" aria-hidden="true">
       {[0, 1, 2].map((column) => (
         <div key={column} className={`col s${column + 1}`}>
           {tiles.slice(column * 4, column * 4 + 4).map((tile) =>
-            tile.artifact ? (
-              <div key={tile.key} className="tile artifact">
-                {tile.artifact}
+            tile.summary ? (
+              <div key={tile.key} className="tile artifact" data-testid="wall-summary">
+                <div>
+                  <div className="k">Live program</div>
+                  <div className="t">{eventName ?? 'AI Builders Summit'}</div>
+                  <div className="sub">
+                    {days.length ? `${days.length} days · ` : ''}Published live
+                  </div>
+                </div>
+                <div className="stats">
+                  <div>
+                    <b>{roster.length || '—'}</b> speakers confirmed
+                  </div>
+                  <div>
+                    <b>{sessionCount || '—'}</b> sessions scheduled
+                  </div>
+                  <div>
+                    <b>{trackCount || '—'}</b> tracks live
+                  </div>
+                </div>
               </div>
             ) : (
               <div key={tile.key} className="tile" style={{ backgroundImage: tile.gradient }}>
@@ -402,11 +389,14 @@ export function Home() {
             </div>
 
             <div className="rv" style={vars({ '--d': '.15s' })}>
-              {SURFACES.map(({ title, kicker, body }) => (
+              {SURFACES.map(({ title, kicker, icon: Icon, body }) => (
                 <div key={title} className="srow">
+                  <span className="ico" aria-hidden="true">
+                    <Icon strokeWidth={1.75} />
+                  </span>
                   <h3>{title}</h3>
-                  <p>{body(mcpEndpoint)}</p>
                   <em>{kicker}</em>
+                  <p>{body(mcpEndpoint)}</p>
                 </div>
               ))}
               <div style={{ marginTop: 26 }}>

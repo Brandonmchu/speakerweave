@@ -583,7 +583,6 @@ body.sw-site-active {
 .sw-site .tile .cap em {
   display: flex;
   align-items: center;
-  gap: 5px;
   margin-top: 3px;
   font-style: normal;
   font-family: var(--sw-mono);
@@ -624,33 +623,44 @@ body.sw-site-active {
 .sw-site .tile.artifact .foot {
   display: flex;
   align-items: center;
-  gap: 6px;
   font-family: var(--sw-mono);
   font-size: 9.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--sw-dmute);
 }
-.sw-site .tile.artifact .big {
+.sw-site .tile.artifact .sub {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--sw-dfaint);
+  margin-top: 4px;
+}
+
+/* The program at a glance — one live tile among the faces, so the wall says
+   what the workspace is doing and not only who is in it. Numbers come from the
+   featured event's public program, so they stay true as the demo changes. */
+.sw-site .tile.artifact .stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+.sw-site .tile.artifact .stats div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: var(--sw-dmute);
+}
+.sw-site .tile.artifact .stats b {
   font-family: var(--sw-mono);
-  font-size: 26px;
+  font-size: 15px;
   font-weight: 500;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   color: var(--sw-dbright);
-  line-height: 1;
-}
-.sw-site .tile.artifact .bar {
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.11);
-  overflow: hidden;
-  margin-top: 9px;
-}
-.sw-site .tile.artifact .bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #d9a38a, #a97fa8);
+  min-width: 22px;
+  text-align: right;
 }
 
 /* ── facts ────────────────────────────────────────────────────────────────── */
@@ -864,7 +874,6 @@ body.sw-site-active {
   left: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
   white-space: nowrap;
   transition:
     transform 0.7s var(--sw-ease),
@@ -889,12 +898,17 @@ body.sw-site-active {
   transform: none;
   opacity: 1;
 }
+/* Own margin rather than the parent's flex `gap`: the label beside a dot is
+   often a bare text node, and an anonymous flex item does not get gap treatment
+   consistently across engines (Safari collapses it, so the dot lands on the
+   first glyph). Margin is honoured everywhere. */
 .sw-site .dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   display: block;
   flex: 0 0 auto;
+  margin-right: 6px;
 }
 .sw-site .d-pend {
   background: var(--sw-pending);
@@ -967,7 +981,6 @@ body.sw-site-active {
 .sw-site .conflict {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
   font-size: 11.5px;
   color: #c98d89;
   margin-top: 12px;
@@ -1027,31 +1040,56 @@ body.sw-site-active {
    ~130px and the copy shreds. Same rhythm and hairlines, legible measure. */
 .sw-site .srow {
   display: grid;
-  grid-template-columns: 1fr auto;
-  column-gap: 20px;
-  align-items: baseline;
+  grid-template-columns: 34px 1fr auto;
+  column-gap: 14px;
+  align-items: center;
   padding: 20px 0;
   border-top: 1px solid var(--sw-dline);
 }
+/* Each surface gets a mark, so the list scans as "where the agent runs" before
+   any of it is read. */
+.sw-site .srow .ico {
+  grid-row: 1;
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sw-dtext);
+}
+.sw-site .srow .ico svg {
+  width: 17px;
+  height: 17px;
+}
+.sw-site .light .srow .ico {
+  background: rgba(28, 26, 23, 0.055);
+  color: var(--sw-ink);
+}
 .sw-site .srow h3 {
+  grid-row: 1;
+  grid-column: 2;
   font-size: 17px;
   font-weight: 500;
   color: var(--sw-dbright);
   margin: 0;
 }
 .sw-site .srow p {
-  grid-column: 1 / -1;
+  grid-row: 2;
+  grid-column: 2 / -1;
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--sw-dmute);
-  margin: 6px 0 0;
+  margin: 7px 0 0;
   max-width: 62ch;
 }
 .sw-site .srow em {
-  /* Explicit placement: the body spans both columns, so auto-flow would drop
-     the kicker onto a third row instead of the title's line. */
+  /* Explicit placement: the body spans the text columns, so auto-flow would
+     drop the kicker onto its own row instead of the title's line. */
   grid-row: 1;
-  grid-column: 2;
+  grid-column: 3;
   font-style: normal;
   font-family: var(--sw-mono);
   font-size: 10px;
@@ -1787,15 +1825,17 @@ body.sw-site-active {
     display: none;
   }
   .sw-site .srow {
-    grid-template-columns: 1fr;
+    grid-template-columns: 34px 1fr;
   }
   .sw-site .srow em {
-    text-align: left;
-    grid-row: 1;
-    margin-bottom: 2px;
-  }
-  .sw-site .srow h3 {
     grid-row: 2;
+    grid-column: 2;
+    text-align: left;
+    margin-top: 2px;
+  }
+  .sw-site .srow p {
+    grid-row: 3;
+    grid-column: 1 / -1;
   }
   .sw-site .sess {
     grid-template-columns: 76px 1fr;

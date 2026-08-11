@@ -43,6 +43,18 @@ const SPEAKERS = {
   ],
 }
 
+/** The summary tile counts sessions and tracks off the public schedule. */
+const SCHEDULE = {
+  event: { name: 'AI Builders Summit 2026', timezone: 'America/Los_Angeles' },
+  days: [
+    {
+      date: '2026-10-12',
+      sessions: [{ id: 's1', title: 'Opening keynote', track: { id: 't1', name: 'Engineering' } }],
+    },
+    { date: '2026-10-13', sessions: [] },
+  ],
+}
+
 function renderHome() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -67,6 +79,7 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       calls.push(String(url))
       if (String(url).includes('/speakers')) return json(SPEAKERS)
+      if (String(url).includes('/schedule')) return json(SCHEDULE)
       return json({ token: 'demo.jwt.token' })
     })
   )
@@ -118,19 +131,24 @@ describe('Home landing', () => {
     }
   })
 
-  it('seeds the wall with real program artifacts, not only faces', () => {
+  it('summarises the live program on one tile, from real public data', async () => {
+    renderHome()
+
+    const summary = await screen.findByTestId('wall-summary')
+    // Event name, speaker count and session count all come off the public
+    // program endpoints rather than being written into the page.
+    await waitFor(() => expect(summary).toHaveTextContent('AI Builders Summit 2026'))
+    expect(summary).toHaveTextContent('2 speakers confirmed')
+    expect(summary).toHaveTextContent('1 sessions scheduled')
+    expect(summary).toHaveTextContent('1 tracks live')
+  })
+
+  it('gives every agentic surface a mark', () => {
     const { container } = renderHome()
 
-    const artifacts = container.querySelectorAll('.tile.artifact')
-    expect(artifacts).toHaveLength(3)
-
-    const text = [...artifacts].map((el) => el.textContent).join(' ')
-    expect(text).toContain('SESS-114') // a scored submission
-    expect(text).toContain('3.38')
-    expect(text).toContain('Onboarding') // a speaker's checklist
-    expect(text).toContain('4/6')
-    expect(text).toContain('RAG in Production') // a scheduled session
-    expect(text).toContain('10:15')
+    const agentic = screen.getByTestId('ai-apps-section')
+    expect(agentic.querySelectorAll('.srow .ico svg')).toHaveLength(4)
+    expect(container.querySelectorAll('.tile.artifact')).toHaveLength(1)
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
