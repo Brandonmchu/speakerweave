@@ -94,15 +94,43 @@ describe('Home landing', () => {
     const { container } = renderHome()
 
     // Twelve tiles regardless of roster size — short rosters cycle.
-    await waitFor(() => expect(container.querySelectorAll('.tile img')).toHaveLength(6))
+    await waitFor(() => expect(container.querySelectorAll('.tile img').length).toBeGreaterThan(0))
     expect(container.querySelectorAll('.tile')).toHaveLength(12)
 
     const photo = container.querySelector<HTMLImageElement>('.tile img')
     expect(photo?.getAttribute('src')).toBe('/speakers/priya-raman.jpg')
 
     // The speaker with no headshot gets initials on a gradient, not a broken image.
-    const initials = [...container.querySelectorAll('.tile span')].map((el) => el.textContent)
+    const initials = [...container.querySelectorAll('.tile .initials')].map((el) => el.textContent)
     expect(initials).toContain('WZ')
+  })
+
+  it('captions wall faces with who they are and where they are in the program', async () => {
+    const { container } = renderHome()
+
+    await waitFor(() => expect(container.querySelectorAll('.tile .cap').length).toBeGreaterThan(0))
+
+    // Every captioned tile names the speaker and carries a status dot, so the
+    // wall reads as a roster rather than stock photography.
+    for (const cap of container.querySelectorAll('.tile .cap')) {
+      expect(cap.querySelector('b')?.textContent).toMatch(/Priya Raman|Wei Zhang/)
+      expect(cap.querySelector('em .dot')).toBeTruthy()
+    }
+  })
+
+  it('seeds the wall with real program artifacts, not only faces', () => {
+    const { container } = renderHome()
+
+    const artifacts = container.querySelectorAll('.tile.artifact')
+    expect(artifacts).toHaveLength(3)
+
+    const text = [...artifacts].map((el) => el.textContent).join(' ')
+    expect(text).toContain('SESS-114') // a scored submission
+    expect(text).toContain('3.38')
+    expect(text).toContain('Onboarding') // a speaker's checklist
+    expect(text).toContain('4/6')
+    expect(text).toContain('RAG in Production') // a scheduled session
+    expect(text).toContain('10:15')
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {

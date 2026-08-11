@@ -243,7 +243,7 @@ _CONTACT_SPEC = [
      "co-teaches its hands-on workshops."), True, 6),
     ("Tomas", "Novak", "ToolChain", "Solutions Architect", "he/him",
      ("Tomas helps enterprise teams put tool-using agents into production without "
-     "setting anything on fire."), False, None),
+     "setting anything on fire."), True, None),
     ("Sarah", "Whitman", "TinyML Co", "Senior Engineer", "she/her",
      ("Sarah is obsessed with getting the most out of the smallest possible model "
      "and deploying it at the edge."), True, None),

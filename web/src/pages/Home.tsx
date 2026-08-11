@@ -19,7 +19,7 @@ import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
 import { FEATURED_EVENT_SLUG, featuredScheduleUrl } from '@/lib/featuredEvent'
 import { dedupeProgramSpeakers, getProgramSpeakers, initialsOf } from '@/lib/programApi'
-import { avatarGradient } from '@/ui/avatar'
+import { avatarGradient, stableHash } from '@/ui/avatar'
 import { EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
@@ -154,6 +154,76 @@ const PORTAL_TASKS: Array<[string, string, boolean]> = [
 const WALL_SIZE = 12
 
 /**
+ * Where a speaker sits in the program. Faces alone read as stock photography;
+ * the status is what makes the wall legible as a roster inside a product.
+ * Assigned by stable hash so a given speaker keeps the same one, and drawn from
+ * states the demo workspace actually models.
+ */
+const WALL_STATES: Array<{ label: string; dot: string }> = [
+  { label: 'Onboarded', dot: 'd-acc' },
+  { label: 'Confirmed', dot: 'd-acc' },
+  { label: 'Content due', dot: 'd-pend' },
+  { label: 'Bio approved', dot: 'd-acc' },
+  { label: 'In review', dot: 'd-q' },
+  { label: 'Slides due', dot: 'd-warn' },
+]
+
+/**
+ * Program artifacts seeded into the wall, so it shows the work and not only the
+ * people — a scored submission, an onboarding checklist, a scheduled session.
+ * The numbers are the seeded demo workspace's own.
+ */
+const WALL_ARTIFACTS: Record<number, ReactNode> = {
+  1: (
+    <>
+      <div>
+        <div className="k">SESS-114 · Round 2</div>
+        <div className="t">Designing Trustworthy AI</div>
+      </div>
+      <div>
+        <div className="big">3.38</div>
+        <div className="foot" style={{ marginTop: 6 }}>
+          <span className="dot d-q" />4 of 4 reviews
+        </div>
+      </div>
+    </>
+  ),
+  6: (
+    <>
+      <div>
+        <div className="k">Speaker portal</div>
+        <div className="t">Onboarding</div>
+      </div>
+      <div>
+        <div className="big">4/6</div>
+        <div className="bar">
+          <i style={{ width: '64%' }} />
+        </div>
+        <div className="foot" style={{ marginTop: 8 }}>
+          <span className="dot d-pend" />
+          Slides due
+        </div>
+      </div>
+    </>
+  ),
+  9: (
+    <>
+      <div>
+        <div className="k">Saturday · Track A</div>
+        <div className="t">RAG in Production</div>
+      </div>
+      <div>
+        <div className="big">10:15</div>
+        <div className="foot" style={{ marginTop: 6 }}>
+          <span className="dot d-acc" />
+          Scheduled
+        </div>
+      </div>
+    </>
+  ),
+}
+
+/**
  * The hero wall is the featured event's real speaker roster: headshots where
  * the speaker has uploaded one, and the app's gradient-plus-initials tile
  * everywhere else — the same fallback the public speaker gallery uses, so a
@@ -171,14 +241,25 @@ function SpeakerWall() {
   })
 
   const roster = dedupeProgramSpeakers(query.data?.speakers ?? [])
+
+  // Artifact slots are fixed, so the mix of faces and program cards doesn't
+  // reshuffle when the roster lands.
+  let speakerIndex = -1
   const tiles = Array.from({ length: WALL_SIZE }, (_, index) => {
-    const speaker = roster.length ? roster[index % roster.length] : null
+    const artifact = WALL_ARTIFACTS[index]
+    if (artifact) return { key: `${index}`, artifact }
+
+    speakerIndex += 1
+    const speaker = roster.length ? roster[speakerIndex % roster.length] : null
     const seed = speaker ? speaker.id || speaker.name : `slot-${index}`
     const [start, end] = avatarGradient(`${seed}${roster.length ? '' : index}`)
     return {
       key: `${index}`,
+      artifact: null,
       name: speaker?.name ?? null,
+      role: speaker?.company ?? speaker?.title ?? null,
       photo: speaker?.photo_url ?? null,
+      state: speaker ? WALL_STATES[stableHash(seed) % WALL_STATES.length] : null,
       gradient: `linear-gradient(145deg, ${start}, ${end})`,
     }
   })
@@ -187,15 +268,32 @@ function SpeakerWall() {
     <div className="cols" aria-hidden="true">
       {[0, 1, 2].map((column) => (
         <div key={column} className={`col s${column + 1}`}>
-          {tiles.slice(column * 4, column * 4 + 4).map((tile) => (
-            <div key={tile.key} className="tile" style={{ backgroundImage: tile.gradient }}>
-              {tile.photo ? (
-                <img src={tile.photo} alt="" loading="lazy" decoding="async" />
-              ) : tile.name ? (
-                <span>{initialsOf(tile.name)}</span>
-              ) : null}
-            </div>
-          ))}
+          {tiles.slice(column * 4, column * 4 + 4).map((tile) =>
+            tile.artifact ? (
+              <div key={tile.key} className="tile artifact">
+                {tile.artifact}
+              </div>
+            ) : (
+              <div key={tile.key} className="tile" style={{ backgroundImage: tile.gradient }}>
+                {tile.photo ? (
+                  <img src={tile.photo} alt="" loading="lazy" decoding="async" />
+                ) : tile.name ? (
+                  <span className="initials">{initialsOf(tile.name)}</span>
+                ) : null}
+                {tile.name && (
+                  <span className="cap">
+                    <b>{tile.name}</b>
+                    {tile.state && (
+                      <em>
+                        <span className={`dot ${tile.state.dot}`} />
+                        {tile.state.label}
+                      </em>
+                    )}
+                  </span>
+                )}
+              </div>
+            )
+          )}
         </div>
       ))}
     </div>

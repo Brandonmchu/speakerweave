@@ -554,11 +554,103 @@ body.sw-site-active {
   height: 100%;
   object-fit: cover;
 }
-.sw-site .tile span {
+.sw-site .tile > .initials {
   font-size: 22px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 0.02em;
+}
+
+/* A headshot alone reads as stock photography. The caption is what makes the
+   wall legible as a speaker roster inside a product: who, and where they are in
+   the program. Scrim keeps it readable over any photo. */
+.sw-site .tile .cap {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 26px 11px 10px;
+  background: linear-gradient(180deg, transparent, rgba(12, 11, 9, 0.82) 62%);
+}
+.sw-site .tile .cap b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-site .tile .cap em {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-style: normal;
+  font-family: var(--sw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* Program artifacts sit in the same grid as the faces, so the wall shows the
+   work and not just the people. Same surface and hairline as the demo cards. */
+.sw-site .tile.artifact {
+  background: var(--sw-dsurf);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 13px;
+  text-align: left;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+.sw-site .tile.artifact .k {
+  font-family: var(--sw-mono);
+  font-size: 9px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--sw-dfaint);
+}
+.sw-site .tile.artifact .t {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--sw-dbright);
+  margin-top: 7px;
+}
+.sw-site .tile.artifact .foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sw-dmute);
+}
+.sw-site .tile.artifact .big {
+  font-family: var(--sw-mono);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--sw-dbright);
+  line-height: 1;
+}
+.sw-site .tile.artifact .bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.11);
+  overflow: hidden;
+  margin-top: 9px;
+}
+.sw-site .tile.artifact .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #d9a38a, #a97fa8);
 }
 
 /* ── facts ────────────────────────────────────────────────────────────────── */
