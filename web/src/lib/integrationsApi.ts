@@ -101,13 +101,30 @@ export const SLACK_MANIFEST = JSON.stringify(
     features: {
       bot_user: {
         display_name: 'SpeakerWeave',
-        always_online: false,
+        always_online: true,
+      },
+      assistant_view: {
+        assistant_description:
+          'The SpeakerWeave program-operations agent: submissions, speakers, agenda, content, and decisions — with approvals right here in Slack.',
+        suggested_prompts: [
+          { title: 'Pending review', message: "What's still pending review?" },
+          {
+            title: 'Speaker status',
+            message: 'Which speakers still owe content deliverables?',
+          },
+          {
+            title: "Today's agenda",
+            message:
+              "Summarize the current agenda: what's scheduled and what still needs a slot?",
+          },
+        ],
       },
     },
     oauth_config: {
       scopes: {
         bot: [
           'app_mentions:read',
+          'assistant:write',
           'chat:write',
           'im:history',
           'im:read',
@@ -119,7 +136,7 @@ export const SLACK_MANIFEST = JSON.stringify(
     settings: {
       event_subscriptions: {
         request_url: 'https://speakerweave.com/api/slack/events',
-        bot_events: ['app_mention', 'message.im'],
+        bot_events: ['app_mention', 'assistant_thread_started', 'message.im'],
       },
       interactivity: {
         is_enabled: true,

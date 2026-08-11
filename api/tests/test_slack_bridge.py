@@ -758,6 +758,7 @@ def test_slack_manifest_matches_agent_bridge_contract():
     manifest = json.loads((Path(__file__).parents[1] / "slack_manifest.json").read_text())
     assert manifest["oauth_config"]["scopes"]["bot"] == [
         "app_mentions:read",
+        "assistant:write",
         "chat:write",
         "im:history",
         "im:read",
@@ -766,8 +767,9 @@ def test_slack_manifest_matches_agent_bridge_contract():
     ]
     assert manifest["settings"]["event_subscriptions"] == {
         "request_url": "https://speakerweave.com/api/slack/events",
-        "bot_events": ["app_mention", "message.im"],
+        "bot_events": ["app_mention", "assistant_thread_started", "message.im"],
     }
+    assert "assistant_view" in manifest["features"]
     assert manifest["settings"]["interactivity"] == {
         "is_enabled": True,
         "request_url": "https://speakerweave.com/api/slack/events",
@@ -795,3 +797,74 @@ def test_slack_source_gets_surface_prompt_overlay():
     assert "SURFACE" in slack_prompt
     assert "renders in Slack" in slack_prompt
     assert "SURFACE" not in web_prompt
+
+
+async def test_threaded_dm_replies_into_its_thread(fake_db):
+    """Assistant-pane messages are threaded DMs; the reply must stay threaded."""
+    resolved = await slack_bridge.resolve_thread(
+        {
+            "type": "message",
+            "channel_type": "im",
+            "channel": "D9",
+            "ts": "31.0",
+            "thread_ts": "30.0",
+            "user": "U1",
+        },
+        TEST_ORG_ID,
+    )
+    assert resolved.mapping_thread_ts == "30.0"
+    assert resolved.reply_thread_ts == "30.0"
+
+
+async def test_assistant_thread_started_resets_dm_conversation(fake_db):
+    first = await slack_bridge.resolve_thread(
+        {
+            "type": "message",
+            "channel_type": "im",
+            "channel": "D2",
+            "ts": "40.0",
+            "user": "U1",
+        },
+        TEST_ORG_ID,
+    )
+    await slack_bridge.handle_assistant_thread_started(
+        {
+            "type": "assistant_thread_started",
+            "assistant_thread": {
+                "channel_id": "D2",
+                "thread_ts": "41.0",
+                "user_id": "U1",
+            },
+        },
+        TEST_ORG_ID,
+    )
+    fresh = await slack_bridge.resolve_thread(
+        {
+            "type": "message",
+            "channel_type": "im",
+            "channel": "D2",
+            "ts": "42.0",
+            "thread_ts": "41.0",
+            "user": "U1",
+        },
+        TEST_ORG_ID,
+    )
+    assert fresh.agent_thread_id != first.agent_thread_id
+    assert len(fake_db.rows("slack_agent_threads")) == 2
+
+
+async def test_manifest_copies_are_identical_in_spirit():
+    import json
+    from pathlib import Path
+
+    api_manifest = json.loads(Path("slack_manifest.json").read_text())
+    web_source = Path("../web/src/lib/integrationsApi.ts").read_text()
+    assert "assistant:write" in web_source
+    assert "assistant_thread_started" in web_source
+    assert "assistant_view" in web_source
+    assert "assistant:write" in api_manifest["oauth_config"]["scopes"]["bot"]
+    assert (
+        "assistant_thread_started"
+        in api_manifest["settings"]["event_subscriptions"]["bot_events"]
+    )
+    assert "assistant_view" in api_manifest["features"]

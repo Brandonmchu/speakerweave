@@ -227,10 +227,14 @@ async def resolve_thread(event: dict[str, Any], org_id: str) -> SlackThread:
             )
         )
 
+    # Only a TOP-LEVEL DM replies unthreaded; a threaded DM (including the
+    # AI-app assistant pane, whose messages always carry thread_ts) must reply
+    # into its thread or the answer lands outside the conversation.
+    is_top_level_dm = channel_type == "im" and not inbound_thread_ts
     return SlackThread(
         agent_thread_id=agent_thread_id,
         mapping_thread_ts=mapping_thread_ts,
-        reply_thread_ts=None if channel_type == "im" else mapping_thread_ts,
+        reply_thread_ts=None if is_top_level_dm else mapping_thread_ts,
     )
 
 
@@ -254,6 +258,42 @@ async def _slack_api_post(
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or f"Slack rejected {path}")
     return result
+
+
+async def set_thinking_status(channel_id: str, thread_ts: str | None) -> None:
+    """Show Slack's native assistant 'thinking' status. UX polish only —
+    valid solely in AI-app DM threads, so failures are expected and ignored."""
+    if not thread_ts:
+        return
+    try:
+        await _slack_api_post(
+            "/assistant.threads.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": "is thinking..."},
+            timeout_seconds=5.0,
+        )
+    except Exception:
+        logger.debug("slack bridge: setStatus unavailable", exc_info=True)
+
+
+async def handle_assistant_thread_started(event: dict[str, Any], org_id: str) -> None:
+    """New-conversation boundary: insert a fresh mapping so the next DM in the
+    assistant pane starts a new agent thread instead of resuming the last one."""
+    thread = event.get("assistant_thread") or {}
+    channel_id = str(thread.get("channel_id") or "")
+    thread_ts = str(thread.get("thread_ts") or "")
+    slack_user_id = str(thread.get("user_id") or "")
+    if not channel_id or not thread_ts or not slack_user_id:
+        return
+    try:
+        await _create_mapping(
+            org_id=org_id,
+            user_id=f"slack:{slack_user_id}",
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            channel_type="im",
+        )
+    except Exception:
+        logger.warning("slack bridge: assistant thread reset failed", exc_info=True)
 
 
 async def slack_display_name(slack_user_id: str) -> str | None:
@@ -390,8 +430,11 @@ async def handle_event(
     if not channel_id or not message_ts or not slack_user_id:
         return
 
-    reply_thread_ts = None if channel_type == "im" else str(
-        event.get("thread_ts") or message_ts
+    inbound_thread_ts = str(event.get("thread_ts") or "")
+    reply_thread_ts = (
+        None
+        if channel_type == "im" and not inbound_thread_ts
+        else inbound_thread_ts or message_ts
     )
     provider = expected_provider()
     if not model_key_configured(provider):
@@ -403,6 +446,10 @@ async def handle_event(
         return
 
     try:
+        if channel_type == "im":
+            await set_thinking_status(
+                channel_id, str(event.get("thread_ts") or message_ts)
+            )
         resolved = await resolve_thread(event, org_id)
         text = str(event.get("text") or "")
         if event.get("type") == "app_mention":

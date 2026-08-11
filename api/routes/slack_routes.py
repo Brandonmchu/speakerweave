@@ -125,7 +125,15 @@ async def slack_events(
         return {"challenge": payload.get("challenge")}
 
     event = payload.get("event") or {}
-    if isinstance(event, dict) and _is_actionable_event(event):
+    if isinstance(event, dict) and event.get("type") == "assistant_thread_started":
+        # AI-app pane opened a new conversation: reset the thread mapping so
+        # the next message starts a fresh agent thread.
+        background_tasks.add_task(
+            slack_bridge.handle_assistant_thread_started,
+            event,
+            slack_bridge.default_org_id(),
+        )
+    elif isinstance(event, dict) and _is_actionable_event(event):
         # Temporary binding until each Slack workspace has its own integration
         # row. Never trust an org id from the Slack payload itself.
         org_id = slack_bridge.default_org_id()
