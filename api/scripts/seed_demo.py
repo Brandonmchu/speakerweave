@@ -273,6 +273,18 @@ _CONTACT_SPEC = [
 ]
 
 
+def headshot_path(first: str, last: str) -> str:
+    """Web path of a seeded speaker's headshot.
+
+    The images are static assets committed under `web/public/speakers/`, served
+    from the app origin, so the demo has no third-party avatar dependency. A
+    missing file is a legitimate state, not a break: every surface that renders
+    a speaker falls back to the gradient-plus-initials tile.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", f"{first} {last}".lower()).strip("-")
+    return f"/speakers/{slug}.jpg"
+
+
 def build_contacts() -> list[dict]:
     rows: list[dict] = []
     for idx, (first, last, company, title, pronouns, bio, photo, portal_h) in enumerate(
@@ -294,7 +306,7 @@ def build_contacts() -> list[dict]:
             "custom_fields": {"_demo": True},
         }
         if photo:
-            row["photo_url"] = f"https://i.pravatar.cc/150?u={email}"
+            row["photo_url"] = headshot_path(first, last)
         if portal_h is not None:
             row["last_portal_access_at"] = _ago(hours=portal_h)
         rows.append(row)

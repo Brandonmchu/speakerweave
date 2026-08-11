@@ -236,8 +236,30 @@ body.sw-site-active {
 .sw-site .sect {
   padding: 96px 0;
 }
+/* The three feature demos have no public page to link to — their "link" opens
+   the demo workspace, so it is a button that has to read as an anchor. */
 .sw-site .arrowlink {
   font-size: 13.5px;
+  font-family: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--sw-accent-lite);
+  transition: color 0.2s ease;
+}
+.sw-site .arrowlink:hover {
+  color: var(--sw-accent-hover);
+}
+.sw-site .arrowlink:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.sw-site .light .arrowlink {
+  color: var(--sw-accent);
+}
+.sw-site .light .arrowlink:hover {
+  color: #8c4a2e;
 }
 
 /* ── buttons ──────────────────────────────────────────────────────────────── */
@@ -872,11 +894,17 @@ body.sw-site-active {
 .sw-site .term .p {
   color: var(--sw-dfaint);
 }
+/* Types itself out by revealing width. Sized to its own text (`max-content`)
+   and clipped with `max-width`, so the prompt and the command stay on one line —
+   animating `width` to 100% would size the box to the whole terminal and wrap
+   it under the `$`. */
 .sw-site .term .cmd {
   display: inline-block;
   overflow: hidden;
   white-space: nowrap;
   vertical-align: bottom;
+  width: max-content;
+  max-width: 0;
   animation: sw-type 9s steps(38, end) infinite;
 }
 .sw-site .term .out {
@@ -893,12 +921,16 @@ body.sw-site-active {
   vertical-align: -2px;
   animation: sw-caret 1s step-end infinite;
 }
+/* Title and kicker share the first line, body runs full width beneath it. The
+   reference sets these as three baseline-aligned columns, which only reads at
+   full-bleed width — inside a `.split` half the middle column collapses to
+   ~130px and the copy shreds. Same rhythm and hairlines, legible measure. */
 .sw-site .srow {
   display: grid;
-  grid-template-columns: 180px 1fr 130px;
-  gap: 28px;
+  grid-template-columns: 1fr auto;
+  column-gap: 20px;
   align-items: baseline;
-  padding: 22px 0;
+  padding: 20px 0;
   border-top: 1px solid var(--sw-dline);
 }
 .sw-site .srow h3 {
@@ -908,12 +940,18 @@ body.sw-site-active {
   margin: 0;
 }
 .sw-site .srow p {
+  grid-column: 1 / -1;
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--sw-dmute);
-  margin: 0;
+  margin: 6px 0 0;
+  max-width: 62ch;
 }
 .sw-site .srow em {
+  /* Explicit placement: the body spans both columns, so auto-flow would drop
+     the kicker onto a third row instead of the title's line. */
+  grid-row: 1;
+  grid-column: 2;
   font-style: normal;
   font-family: var(--sw-mono);
   font-size: 10px;
@@ -921,6 +959,7 @@ body.sw-site-active {
   text-transform: uppercase;
   color: var(--sw-dfaint);
   text-align: right;
+  white-space: nowrap;
 }
 .sw-site .light .srow {
   border-color: var(--sw-line2);
@@ -1283,6 +1322,7 @@ body.sw-site-active {
   border-radius: 5px;
   padding: 2px 6px;
   color: var(--sw-ink);
+  white-space: nowrap;
 }
 .sw-site .pre {
   position: relative;
@@ -1303,6 +1343,23 @@ body.sw-site-active {
   position: absolute;
   right: 10px;
   top: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d8d2c8;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+.sw-site .pre .copy:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
 }
 .sw-site .tablewrap {
   overflow-x: auto;
@@ -1399,6 +1456,8 @@ body.sw-site-active {
   gap: 28px 48px;
   margin-top: 24px;
 }
+/* ── ground-agnostic blocks (dark by default, paper inside .light / .doc) ─── */
+
 .sw-site .checklist {
   list-style: none;
   padding: 0;
@@ -1410,22 +1469,39 @@ body.sw-site-active {
   padding: 7px 0;
   font-size: 13.5px;
   line-height: 1.6;
-  color: var(--sw-ink2);
+  color: var(--sw-dmute);
 }
 .sw-site .checklist li:before {
   content: '';
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--sw-accepted);
+  background: #7fa886;
   flex: 0 0 auto;
   margin-top: 9px;
 }
+.sw-site .checklist strong {
+  font-weight: 500;
+  color: var(--sw-dbright);
+}
+.sw-site .light .checklist li,
+.sw-site .doc .checklist li {
+  color: var(--sw-ink2);
+}
+.sw-site .light .checklist li:before,
+.sw-site .doc .checklist li:before {
+  background: var(--sw-accepted);
+}
+.sw-site .light .checklist strong,
+.sw-site .doc .checklist strong {
+  color: var(--sw-ink);
+}
+
 .sw-site .statline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 24px;
-  border-top: 1px solid var(--sw-line2);
+  border-top: 1px solid var(--sw-dline);
   margin-top: 28px;
 }
 .sw-site .statline div {
@@ -1437,15 +1513,28 @@ body.sw-site-active {
   font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.02em;
-  color: var(--sw-ink);
+  color: var(--sw-dbright);
 }
 .sw-site .statline span {
   display: block;
   margin-top: 5px;
   font-size: 12.5px;
   line-height: 1.5;
+  color: var(--sw-dmute);
+}
+.sw-site .light .statline,
+.sw-site .doc .statline {
+  border-color: var(--sw-line2);
+}
+.sw-site .light .statline b,
+.sw-site .doc .statline b {
+  color: var(--sw-ink);
+}
+.sw-site .light .statline span,
+.sw-site .doc .statline span {
   color: var(--sw-ink2);
 }
+
 .sw-site .linkgrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1458,8 +1547,26 @@ body.sw-site-active {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--sw-line);
+  border-bottom: 1px solid var(--sw-dline);
   font-size: 13.5px;
+}
+.sw-site .light .linkgrid a,
+.sw-site .doc .linkgrid a {
+  border-color: var(--sw-line);
+}
+
+/* Body copy on the dark ground, for prose sections outside a `.doc` band. */
+.sw-site .prose h3 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--sw-dbright);
+  margin: 0;
+}
+.sw-site .prose p {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--sw-dmute);
+  margin: 6px 0 0;
 }
 
 /* ── reduced motion ───────────────────────────────────────────────────────── */
@@ -1581,10 +1688,14 @@ body.sw-site-active {
   }
   .sw-site .srow {
     grid-template-columns: 1fr;
-    gap: 8px;
   }
   .sw-site .srow em {
     text-align: left;
+    grid-row: 1;
+    margin-bottom: 2px;
+  }
+  .sw-site .srow h3 {
+    grid-row: 2;
   }
   .sw-site .sess {
     grid-template-columns: 76px 1fr;

@@ -17,7 +17,7 @@ describe('ApiDocs page', () => {
     renderDocs()
     expect(screen.getByRole('heading', { name: 'SpeakerWeave API', level: 1 })).toBeInTheDocument()
     expect(screen.getByText(/speaks Sessionboard/i)).toBeInTheDocument()
-    expect(screen.getByText(/The in-app chat agent, the Slack bot/i)).toBeInTheDocument()
+    expect(screen.getByText(/The Slack bot is the same agent as in-app Ask/i)).toBeInTheDocument()
   })
 
   it('documents auth via the x-access-token header and the /v1 base path', () => {

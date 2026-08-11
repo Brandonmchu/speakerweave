@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -5,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Home, REPO_URL } from '@/pages/Home'
 
 const calls: string[] = []
-let writeText: ReturnType<typeof vi.fn>
 
 function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -14,29 +14,59 @@ function json(payload: unknown, status = 200) {
   })
 }
 
+/** The hero wall reads the featured event's public roster. */
+const SPEAKERS = {
+  event: { name: 'AI Builders Summit' },
+  speakers: [
+    {
+      id: 'c1',
+      name: 'Priya Raman',
+      title: 'Staff ML Engineer',
+      company: 'VectorWorks',
+      photo_url: '/speakers/priya-raman.jpg',
+      bio: null,
+      linkedin_url: null,
+      twitter_url: null,
+      sessions: [],
+    },
+    {
+      id: 'c2',
+      name: 'Wei Zhang',
+      title: 'Senior Engineer',
+      company: 'StructOut',
+      photo_url: null,
+      bio: null,
+      linkedin_url: null,
+      twitter_url: null,
+      sessions: [],
+    },
+  ],
+}
+
 function renderHome() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard" element={<div>Dashboard reached</div>} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={<div>Dashboard reached</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
 beforeEach(() => {
   calls.length = 0
   window.localStorage.clear()
-  writeText = vi.fn().mockResolvedValue(undefined)
-  Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText },
-    configurable: true,
-  })
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       calls.push(String(url))
+      if (String(url).includes('/speakers')) return json(SPEAKERS)
       return json({ token: 'demo.jwt.token' })
     })
   )
@@ -44,23 +74,35 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
   window.localStorage.clear()
 })
 
 describe('Home landing', () => {
-  it('renders the new hero and its primary demo entry point', () => {
+  it('renders the hero and its primary demo entry point', () => {
     renderHome()
     expect(
       screen.getByRole('heading', { name: 'Run your conference program, end to end.' })
     ).toBeInTheDocument()
-    expect(screen.getByText(/From call for papers to a published, staffed, scheduled agenda/)).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: /Enter the demo workspace/i })
+      screen.getByText(/From call for papers to a published, staffed, scheduled agenda/)
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('img', { name: /agenda builder showing a multi-track conference schedule/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Enter the demo workspace/i })).toBeInTheDocument()
+    expect(screen.getByText('No sign-up. Jump into a fully seeded workspace.')).toBeInTheDocument()
+  })
+
+  it('fills the hero wall from the featured event roster, with the gradient fallback', async () => {
+    const { container } = renderHome()
+
+    // Twelve tiles regardless of roster size — short rosters cycle.
+    await waitFor(() => expect(container.querySelectorAll('.tile img')).toHaveLength(6))
+    expect(container.querySelectorAll('.tile')).toHaveLength(12)
+
+    const photo = container.querySelector<HTMLImageElement>('.tile img')
+    expect(photo?.getAttribute('src')).toBe('/speakers/priya-raman.jpg')
+
+    // The speaker with no headshot gets initials on a gradient, not a broken image.
+    const initials = [...container.querySelectorAll('.tile span')].map((el) => el.textContent)
+    expect(initials).toContain('WZ')
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
@@ -73,7 +115,7 @@ describe('Home landing', () => {
     expect(href(/Developers/i)).toContain('/developers')
     expect(href(/Speaker sign in/i)).toContain('/speaker-signin')
     // Real-org sign-in stays reachable (Clerk).
-    expect(href(/Sign in/i)).toContain('/sign-in')
+    expect(href(/Sign in with your account/i)).toContain('/sign-in')
   })
 
   it('presents the open-source posture, stack, and swappable infrastructure', () => {
@@ -85,7 +127,7 @@ describe('Home landing', () => {
     expect(openSource).toHaveTextContent('MIT licensed from end to end')
     expect(within(openSource).getByRole('link', { name: /source repository/i })).toHaveAttribute(
       'href',
-      REPO_URL,
+      REPO_URL
     )
 
     const stack = screen.getByTestId('stack-section')
@@ -101,22 +143,23 @@ describe('Home landing', () => {
       expect(within(stack).getByText(technology)).toBeInTheDocument()
     }
     expect(stack).toHaveTextContent(
-      'Swap auth, email, hosting, or data providers without touching the domain core',
+      'Swap auth, email, hosting, or data providers without touching the domain core'
     )
-    expect(screen.getByText('Open source - MIT')).toHaveAttribute('href', REPO_URL)
-    expect(screen.getByText(/982 backend/).closest('li')).toHaveTextContent(
-      '982 backend + 603 frontend tests',
+    const facts = screen.getByRole('region', { name: 'Project credibility' })
+    expect(within(facts).getByText(/982/).closest('li')).toHaveTextContent(
+      '982 backend + 603 frontend tests'
     )
-    expect(screen.getByText('Built end-to-end by AI coding agents')).toBeInTheDocument()
-    expect(screen.getByText('REST API + MCP + webhooks-ready')).toBeInTheDocument()
+    expect(within(facts).getByRole('link')).toHaveAttribute('href', REPO_URL)
+    expect(within(facts).getByText('Built end-to-end by AI coding agents')).toBeInTheDocument()
+    expect(within(facts).getByText('REST API + MCP + webhooks-ready')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
       'href',
-      `${REPO_URL}/blob/main/LICENSE`,
+      `${REPO_URL}/blob/main/LICENSE`
     )
     expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', REPO_URL)
   })
 
-  it('presents all seven conference-program capabilities', () => {
+  it('walks the whole program lifecycle, in order', () => {
     renderHome()
 
     for (const capability of [
@@ -132,52 +175,23 @@ describe('Home landing', () => {
     }
   })
 
-  it('shows five AI surfaces and copyable MCP configurations for this origin', async () => {
+  it('leads with the agentic surfaces and the MCP endpoint for this origin', () => {
     renderHome()
 
-    const aiApps = screen.getByTestId('ai-apps-section')
-    expect(aiApps).toHaveTextContent('One brain, five surfaces')
+    const agentic = screen.getByTestId('ai-apps-section')
     expect(
-      within(aiApps).getByRole('heading', { name: 'Your program context travels with you.' }),
+      within(agentic).getByRole('heading', { name: 'Built for the future, and fully agentic.' })
     ).toBeInTheDocument()
-    for (const surface of [
-      'In-app chat agent',
-      'Slack bot',
-      'sw CLI',
-      'Claude (MCP)',
-      'ChatGPT (MCP)',
-    ]) {
-      expect(within(aiApps).getByRole('heading', { name: surface })).toBeInTheDocument()
+    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'sw CLI']) {
+      expect(within(agentic).getByRole('heading', { name: surface })).toBeInTheDocument()
     }
-    expect(aiApps).toHaveTextContent(`${window.location.origin}/mcp`)
-    expect(aiApps).toHaveTextContent('claude.ai or Claude for Work')
-    expect(aiApps).toHaveTextContent('Authorize when prompted with an API token from Settings')
-    expect(aiApps).toHaveTextContent('Power-user MCP config')
-    expect(aiApps).toHaveTextContent(
-      'The in-app chat agent, Slack bot, CLI, Claude, and ChatGPT all dispatch through the',
-    )
-    expect(within(aiApps).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
+    expect(agentic).toHaveTextContent(`${window.location.origin}/mcp`)
+    expect(agentic).toHaveTextContent('Claude or ChatGPT')
+    expect(agentic).toHaveTextContent('Codex and Claude Code')
+    expect(agentic).toHaveTextContent('organization-scoped tool layer')
+    expect(within(agentic).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
-      '/developers',
-    )
-
-    fireEvent.click(within(aiApps).getByText('Connect Claude'))
-    fireEvent.click(within(aiApps).getByRole('button', { name: 'Copy Claude MCP configuration' }))
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(expect.stringContaining(`${window.location.origin}/mcp`)),
-    )
-    expect(writeText).toHaveBeenCalledWith(
-      expect.stringContaining('Bearer YOUR_API_TOKEN'),
-    )
-
-    writeText.mockClear()
-    fireEvent.click(within(aiApps).getByText('Connect ChatGPT'))
-    fireEvent.click(within(aiApps).getByRole('button', { name: 'Copy ChatGPT MCP configuration' }))
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"name": "SpeakerWeave"')),
-    )
-    expect(writeText).toHaveBeenCalledWith(
-      expect.stringContaining(`${window.location.origin}/mcp`),
+      '/developers'
     )
   })
 
@@ -185,8 +199,7 @@ describe('Home landing', () => {
     renderHome()
     fireEvent.click(screen.getByRole('button', { name: /Enter the demo workspace/i }))
     expect(await screen.findByText('Dashboard reached')).toBeInTheDocument()
-    expect(calls[0]).toBe('/public/demo-token')
+    expect(calls).toContain('/public/demo-token')
     expect(window.localStorage.getItem('dais.token')).toBe('demo.jwt.token')
   })
-
 })

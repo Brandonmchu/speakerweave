@@ -17,8 +17,27 @@ SpeakerWeave runs the program side of a conference: call for papers, structured 
   <Card title="Agenda & publishing" icon="calendar-days">
     Drag-and-drop grids, live conflict detection, auto-place, public schedule/speakers pages, embeds, JSON + iCal feeds.
   </Card>
-  <Card title="AI everywhere" icon="sparkles">
-    One org-scoped tool layer behind five surfaces: in-app chat agent, Slack bot, hosted MCP server, ChatGPT/Claude connectors, and the `sw` CLI.
+  <Card title="Fully agentic" icon="sparkles">
+    One org-scoped tool layer behind every surface: in-app agent, MCP server and connectors, Slack, and the `sw` CLI.
+  </Card>
+</CardGroup>
+
+## Built for the future, and fully agentic
+
+Every surface dispatches through the same organization-scoped tool layer, so the agent can run the program wherever you already work — and anything sensitive stops at an approval gate first.
+
+<CardGroup cols={2}>
+  <Card title="In-app agent" icon="message-square" href="/ai/chat-agent">
+    Streaming threads, @-mention any submission or speaker as context, entity badges that navigate the app, and inline approve/deny gates.
+  </Card>
+  <Card title="MCP server + connectors" icon="plug" href="/ai/mcp">
+    Add `/mcp` to Claude or ChatGPT as a connector over OAuth. Connectors run inbound too, bringing your own MCP servers into the agent.
+  </Card>
+  <Card title="Slack" icon="hash" href="/ai/slack">
+    Mention the bot or DM it to collaborate with teammates on live program data, in the channel where the work already happens.
+  </Card>
+  <Card title="sw CLI" icon="terminal" href="/ai/cli">
+    `pipx install`, authenticate with an API token, then `sw ask` — the same brain from any shell, script, or coding agent.
   </Card>
 </CardGroup>
 

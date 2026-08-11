@@ -2,10 +2,32 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "SpeakerWeave",
+  "description": "Open-source conference speaker and session management — CFP to published program.",
   "colors": {
-    "primary": "#4F46E5",
-    "light": "#818CF8",
-    "dark": "#4338CA"
+    "primary": "#A85E3E",
+    "light": "#D8996F",
+    "dark": "#8C4A2E"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Instrument Serif",
+      "weight": 400
+    },
+    "body": {
+      "family": "Instrument Sans"
+    }
+  },
+  "background": {
+    "color": {
+      "light": "#F7F5F1",
+      "dark": "#171512"
+    }
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "icons": {
+    "library": "lucide"
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -42,9 +64,45 @@
       }
     ]
   },
+  "navbar": {
+    "links": [
+      {
+        "label": "Live demo",
+        "href": "https://speakerweave.com/demo"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Brandonmchu/speakerweave"
+    }
+  },
   "footer": {
     "socials": {
-      "github": "https://github.com/Brandonmchu/speakerweave"
-    }
+      "github": "https://github.com/Brandonmchu/speakerweave",
+      "website": "https://speakerweave.com"
+    },
+    "links": [
+      {
+        "header": "Product",
+        "items": [
+          { "label": "Live demo", "href": "https://speakerweave.com/demo" },
+          {
+            "label": "Public schedule",
+            "href": "https://speakerweave.com/e/ai-builders-summit/schedule"
+          },
+          { "label": "API reference", "href": "https://speakerweave.com/developers" }
+        ]
+      },
+      {
+        "header": "Project",
+        "items": [
+          { "label": "GitHub", "href": "https://github.com/Brandonmchu/speakerweave" },
+          {
+            "label": "License (MIT)",
+            "href": "https://github.com/Brandonmchu/speakerweave/blob/main/LICENSE"
+          }
+        ]
+      }
+    ]
   }
 }

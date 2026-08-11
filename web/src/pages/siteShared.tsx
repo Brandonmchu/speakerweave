@@ -6,7 +6,8 @@
  * bands. All of the visual language lives in `styles/site.css` under `.sw-site`;
  * these components own the structure, the routes, and the motion.
  */
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Check, Copy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -16,6 +17,11 @@ import {
   featuredSpeakersUrl,
 } from '@/lib/featuredEvent'
 import { BrandMark } from '@/ui/brand'
+
+/** `--d` (reveal delay) and `--w` (bar width) ride on style attributes. */
+export function vars(values: Record<string, string>): CSSProperties {
+  return values as CSSProperties
+}
 
 export const REPO_URL = 'https://github.com/Brandonmchu/speakerweave'
 export const DOCS_URL = 'https://speaker-weave.mintlify.site'
@@ -87,6 +93,41 @@ export function useReveal<T extends HTMLElement>() {
   }, [])
 
   return ref
+}
+
+/**
+ * A code block with its copy affordance. The app's `CopyButton` is a ghost
+ * Tailwind button — ink on ink, invisible against the site's dark `<pre>` — so
+ * the site carries its own, with the same quiet failure when the Clipboard API
+ * is unavailable (http origins, jsdom).
+ */
+export function CodeBlock({ code, label = 'Copy code' }: { code: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <div className="pre">
+      <pre>
+        <code>{code}</code>
+      </pre>
+      <button
+        type="button"
+        className="copy"
+        title={label}
+        aria-label={label}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(code)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1600)
+          } catch {
+            // The block stays selectable; nothing to recover from.
+          }
+        }}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  )
 }
 
 /** Sticky site nav. `badge` labels a sub-surface (e.g. the API reference). */

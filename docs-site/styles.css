@@ -1,0 +1,92 @@
+/**
+ * SpeakerWeave documentation theme.
+ *
+ * The substance of the palette (terracotta accent, paper/ink grounds, the
+ * Instrument Serif + Instrument Sans pairing) is configured in `docs.json`,
+ * which is the supported surface and survives Mintlify upgrades. This file adds
+ * only what the config cannot express, and every rule here is written to fail
+ * harmlessly if Mintlify's internals move: element selectors and custom
+ * properties, no guessed component class names.
+ *
+ * Palette matches web/src/styles/theme.css and web/src/styles/site.css.
+ */
+
+:root {
+  --sw-paper: #f7f5f1;
+  --sw-surface: #fffdfb;
+  --sw-ink: #1c1a17;
+  --sw-ink2: #57534c;
+  --sw-line: rgba(28, 26, 23, 0.07);
+  --sw-line2: rgba(28, 26, 23, 0.13);
+  --sw-accent: #a85e3e;
+
+  --sw-dark: #171512;
+  --sw-dsurf: #221f1b;
+  --sw-dtext: #efebe5;
+  --sw-dmute: #b4aea4;
+  --sw-dline: rgba(255, 255, 255, 0.09);
+  --sw-accent-lite: #d8996f;
+
+  /* Machine-generated values are mono — the same signal the product uses for
+     IDs, counts, and timestamps. */
+  --sw-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Serif headings get the product's optical tightening; the config can set the
+   family but not the tracking. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.015em;
+}
+
+/* Code is a different kind of text, not decorated body text: hairline-bounded
+   on the warm surface, mono, and never terracotta (the accent is reserved for
+   links and actions). */
+code,
+pre,
+kbd {
+  font-family: var(--sw-mono);
+  font-variant-ligatures: none;
+}
+
+:not(pre) > code {
+  background-color: rgba(28, 26, 23, 0.045);
+  border: 1px solid var(--sw-line);
+  border-radius: 5px;
+  color: var(--sw-ink);
+  font-size: 0.86em;
+  padding: 0.1em 0.34em;
+}
+
+.dark :not(pre) > code {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: var(--sw-dline);
+  color: var(--sw-dtext);
+}
+
+/* Tables read as hairline rules, not as boxes — the product's table rule. */
+table {
+  border-collapse: collapse;
+}
+
+th {
+  font-family: var(--sw-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* One accent, one weight of separation. */
+hr {
+  border-color: var(--sw-line2);
+}
+
+.dark hr {
+  border-color: var(--sw-dline);
+}
+
+::selection {
+  background-color: rgba(168, 94, 62, 0.18);
+}
