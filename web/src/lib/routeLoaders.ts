@@ -39,3 +39,4 @@ const organizerRouteLoaders: Record<string, () => Promise<unknown>> = {
 export function preloadOrganizerRoute(path: string): void {
   void organizerRouteLoaders[path]?.()
 }
+export const loadKillMySaas = () => import('@/pages/KillMySaas')

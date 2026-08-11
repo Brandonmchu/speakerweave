@@ -6,6 +6,7 @@ import { featuredScheduleUrl, featuredSpeakersUrl } from '@/lib/featuredEvent'
 import {
   loadAgenda,
   loadApiDocs,
+  loadKillMySaas,
   loadComms,
   loadContentLibrary,
   loadDashboard,
@@ -40,6 +41,9 @@ import { Toaster } from '@/ui/toaster'
 
 const LazyAgenda = lazy(() => loadAgenda().then(({ Agenda }) => ({ default: Agenda })))
 const LazyApiDocs = lazy(() => loadApiDocs().then(({ ApiDocs }) => ({ default: ApiDocs })))
+const LazyKillMySaas = lazy(() =>
+  loadKillMySaas().then(({ KillMySaas }) => ({ default: KillMySaas })),
+)
 const LazyComms = lazy(() => loadComms().then(({ Comms }) => ({ default: Comms })))
 const LazyContentLibrary = lazy(() =>
   loadContentLibrary().then(({ ContentLibrary }) => ({ default: ContentLibrary })),
@@ -214,6 +218,14 @@ export default function App() {
           element={
             <DeferredPage fullPage>
               <LazyApiDocs />
+            </DeferredPage>
+          }
+        />
+        <Route
+          path="/killmysaas"
+          element={
+            <DeferredPage fullPage>
+              <LazyKillMySaas />
             </DeferredPage>
           }
         />

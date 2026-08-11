@@ -647,6 +647,9 @@ export function Home() {
             <a href={DOCS_URL} className="transition-colors hover:text-foreground">
               Docs
             </a>
+            <Link to="/killmysaas" className="transition-colors hover:text-foreground">
+              Kill My SaaS
+            </Link>
             <a href={REPO_URL} className="transition-colors hover:text-foreground">
               GitHub
             </a>
