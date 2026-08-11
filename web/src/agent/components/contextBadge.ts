@@ -185,7 +185,7 @@ export function insertContextBadge(
       if (localStart > 0) fragment.append(document.createTextNode(text.slice(0, localStart)))
       fragment.append(badge, document.createTextNode(` ${text.slice(localEnd)}`))
       node.parentNode?.replaceChild(fragment, node)
-      setTimeout(() => {
+      const placeCaret = () => {
         const selection = window.getSelection()
         const trailing = badge.nextSibling
         if (!selection || !trailing) return
@@ -195,7 +195,11 @@ export function insertContextBadge(
         selection.removeAllRanges()
         selection.addRange(range)
         editor.focus()
-      }, 0)
+      }
+      // Synchronously, so keystrokes arriving in the same tick land after the
+      // badge; the deferred call re-asserts if focus handling moved it.
+      placeCaret()
+      setTimeout(placeCaret, 0)
       return true
     }
     currentOffset += length
