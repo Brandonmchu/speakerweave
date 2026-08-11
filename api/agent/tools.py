@@ -125,6 +125,33 @@ NEW_TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "invite_speaker_to_portal",
+        "description": (
+            "Queue a speaker-portal invitation email for one event-roster speaker. "
+            "Use list_speakers first to get the speaker id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"speaker_id": {"type": "string"}},
+            "required": ["speaker_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "remind_outstanding_content",
+        "description": (
+            "Queue reminder emails to every speaker on an event who still has "
+            "outstanding content deliverables (deduplicated per speaker per day). "
+            "There is no per-person variant; reminders always cover the event's "
+            "outstanding set."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"event": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
 ]
 
 # Keep the original registry as the source of truth. The dictionaries are reused,
@@ -277,6 +304,21 @@ async def _publish_schedule(
     }
 
 
+async def _invite_speaker_to_portal(
+    org_id: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    return await integration_api.invite_speaker_to_portal(
+        org_id, str(arguments["speaker_id"])
+    )
+
+
+async def _remind_outstanding_content(
+    org_id: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    event = await integration_api.resolve_event(org_id, arguments.get("event"))
+    return await integration_api.remind_outstanding_content(org_id, str(event["id"]))
+
+
 LOCAL_TOOL_HANDLERS: dict[
     str, Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 ] = {
@@ -285,6 +327,8 @@ LOCAL_TOOL_HANDLERS: dict[
     "list_content_items": _list_content_items,
     "get_content_item": _get_content_item,
     "publish_schedule": _publish_schedule,
+    "invite_speaker_to_portal": _invite_speaker_to_portal,
+    "remind_outstanding_content": _remind_outstanding_content,
 }
 
 
@@ -315,6 +359,14 @@ _TOOL_MESSAGES: dict[str, tuple[str, str]] = {
     "publish_schedule": (
         "Working with publish_schedule",
         "Preparing the schedule to publish…",
+    ),
+    "invite_speaker_to_portal": (
+        "Working with invite_speaker_to_portal",
+        "Preparing the portal invitation…",
+    ),
+    "remind_outstanding_content": (
+        "Working with remind_outstanding_content",
+        "Preparing content reminders…",
     ),
 }
 

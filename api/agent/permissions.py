@@ -162,7 +162,37 @@ async def resolve_display_fields(
         return await _resolve_submission_label(org_id, tool_input)
     if any(key in tool_input for key in ("person_id", "contact_id")):
         return await _resolve_person_label(org_id, tool_input)
+    if "speaker_id" in tool_input:
+        return await _resolve_speaker_label(org_id, tool_input)
     return dict(tool_input)
+
+
+async def _resolve_speaker_label(
+    org_id: str, tool_input: dict[str, Any]
+) -> dict[str, Any]:
+    speaker_id = str(tool_input.get("speaker_id") or "")
+    if not speaker_id:
+        return dict(tool_input)
+    row = first(
+        await db(
+            lambda: supabase.table("contacts")
+            .select("id, org_id, first_name, last_name, email")
+            .eq("id", speaker_id)
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute(),
+            "agent_permission_speaker_label",
+        )
+    )
+    if not row:
+        return dict(tool_input)
+    name = " ".join(
+        part for part in (row.get("first_name"), row.get("last_name")) if part
+    ).strip()
+    return {
+        **tool_input,
+        "_person_display": name or row.get("email") or speaker_id,
+    }
 
 
 def permission_description(
@@ -175,6 +205,11 @@ def permission_description(
     if action == "PUBLISH_SCHEDULE":
         return "Publish this event's schedule?"
     if action == "SEND_EMAIL":
+        if tool_name == "remind_outstanding_content":
+            return "Queue reminder emails to every speaker with outstanding content?"
+        if tool_name == "invite_speaker_to_portal":
+            display = tool_input.get("_person_display") or "this speaker"
+            return f"Queue a portal invitation email for {display}?"
         display = tool_input.get("_person_display")
         return f"Send or queue this email{f' for {display}' if display else ''}?"
     if action == "DELETE":
