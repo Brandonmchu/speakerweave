@@ -19,7 +19,7 @@ export function ApiDocs() {
   const mcpConfig = JSON.stringify(
     {
       mcpServers: {
-        dais: {
+        speakerweave: {
           type: 'http',
           url: mcpEndpoint,
           headers: { Authorization: 'Bearer dais_your_api_token' },
@@ -106,19 +106,27 @@ function SideNav() {
 function Hero() {
   return (
     <section className="space-y-4">
-      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">dais API</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">SpeakerWeave API</h1>
       <p className="max-w-2xl text-base text-muted-foreground">
         A complete integration surface for events, submissions, speakers, schedules, content, and
         evaluations—available as REST for software and MCP for AI agents.
       </p>
       <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Ask SpeakerWeave in the organizer app, the Slack bot, and the hosted MCP server all use the
-        same organization-scoped tool layer, so every surface sees the same conference operations.
+        The in-app chat agent, the Slack bot, and the hosted MCP server all use the same
+        organization-scoped tool layer, so every surface sees the same conference operations. Full
+        guides and an interactive API reference live at{' '}
+        <a
+          href="https://speaker-weave.mintlify.site"
+          className="font-medium text-primary underline underline-offset-2 hover:text-primary-strong"
+        >
+          the documentation site
+        </a>
+        .
       </p>
       <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-subtle/60 p-4">
         <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
         <div className="text-sm text-foreground">
-          <p className="font-semibold text-primary">dais speaks Sessionboard&rsquo;s protocol.</p>
+          <p className="font-semibold text-primary">SpeakerWeave speaks Sessionboard&rsquo;s protocol.</p>
           <p className="mt-1 text-muted-foreground">
             Existing integrations can keep the <Mono>{API_BASE_PATH}</Mono> base path and{' '}
             <Mono>{AUTH_HEADER}</Mono> authentication convention, while new agent workflows connect

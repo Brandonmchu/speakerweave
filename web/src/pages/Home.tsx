@@ -35,6 +35,7 @@ import {
 import { Button } from '@/ui/button'
 
 export const REPO_URL = 'https://github.com/Brandonmchu/speakerweave'
+export const DOCS_URL = 'https://speaker-weave.mintlify.site'
 const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
 
 const CAPABILITIES = [
@@ -245,6 +246,12 @@ export function Home() {
                 {label}
               </Link>
             ))}
+            <a
+              href={DOCS_URL}
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              Docs
+            </a>
           </nav>
 
           <Link
@@ -621,7 +628,7 @@ export function Home() {
         <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-8 sm:px-8 md:flex-row md:items-center">
           <div className="flex items-center gap-2.5">
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">S</span>
-            <span className="text-sm font-semibold text-foreground">dais by SpeakerWeave</span>
+            <span className="text-sm font-semibold text-foreground">SpeakerWeave</span>
           </div>
           <nav
             aria-label="Footer"
@@ -637,6 +644,9 @@ export function Home() {
             </Link>
             <a href={LICENSE_URL} className="transition-colors hover:text-foreground">
               License
+            </a>
+            <a href={DOCS_URL} className="transition-colors hover:text-foreground">
+              Docs
             </a>
             <a href={REPO_URL} className="transition-colors hover:text-foreground">
               GitHub

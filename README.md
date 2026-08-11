@@ -8,7 +8,7 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 
 > **Building with an AI agent? Start at [AGENTS.md](AGENTS.md).** It maps the codebase, invariants, provider swap points, reference stack, and exact quality gates.
 
-**Product & API docs:** the Mintlify site lives in [`docs-site/`](docs-site/) — `cd docs-site && mint dev` to preview locally, or connect the repo at mintlify.com to publish it.
+**Product & API docs:** [speaker-weave.mintlify.site](https://speaker-weave.mintlify.site) — source in [`docs-site/`](docs-site/) — `cd docs-site && mint dev` to preview locally, or connect the repo at mintlify.com to publish it.
 
 **Live demo:** [speakerweave.com](https://speakerweave.com) — enter the seeded workspace without signing up.
 

@@ -78,7 +78,7 @@ describe('Home + public-alias routing', () => {
 
   it('loads the deferred developer reference route', async () => {
     renderApp('/developers')
-    expect(await screen.findByRole('heading', { name: 'dais API' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'SpeakerWeave API' })).toBeInTheDocument()
     expect(pathname()).toBe('/developers')
   })
 
