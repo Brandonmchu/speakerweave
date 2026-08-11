@@ -396,7 +396,7 @@ async def test_channel_attribution_prefix_and_slack_metadata_reach_run_turn(monk
 async def test_display_name_uses_users_info_cache_and_failure_falls_back(monkeypatch):
     calls: list[str] = []
 
-    async def fake_api(path, payload, *, timeout_seconds):
+    async def fake_api(path, payload, *, timeout_seconds, form=False):
         calls.append(path)
         assert payload == {"user": "U1"}
         assert timeout_seconds == 5.0
