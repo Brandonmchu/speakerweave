@@ -13,9 +13,10 @@
  */
 import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Hash, Plug, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { Plug, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import slackLogo from '../assets/logos/slack.svg'
 import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
 import { FEATURED_EVENT_SLUG, featuredScheduleUrl } from '@/lib/featuredEvent'
@@ -77,13 +78,18 @@ const LIFECYCLE = [
 const SURFACES: Array<{
   title: string
   kicker: string
-  icon: LucideIcon
+  icon?: LucideIcon
+  /** Brand mark, when the surface has one people recognise faster than a glyph. */
+  logo?: string
+  /** Ink tile is the default; `tone` gives a surface its own colour. */
+  tone?: string
   body: (endpoint: string) => ReactNode
 }> = [
   {
     title: 'In-app agent',
     kicker: 'Built in',
     icon: Sparkles,
+    tone: 'brand',
     body: () =>
       'Runs the program, not just the search box: streaming threads, @-mention any submission or speaker as context, clickable entity badges that navigate the app, and approve/deny gates before anything sensitive happens.',
   },
@@ -91,6 +97,7 @@ const SURFACES: Array<{
     title: 'MCP server + connectors',
     kicker: 'Any client',
     icon: Plug,
+    tone: 'mcp',
     body: (endpoint) => (
       <>
         Add <code>{endpoint}</code> to Claude or ChatGPT as a connector — OAuth, no custom headers.
@@ -101,7 +108,7 @@ const SURFACES: Array<{
   {
     title: 'Slack',
     kicker: 'Team surface',
-    icon: Hash,
+    logo: slackLogo,
     body: () =>
       'Mention or DM the same agent that powers in-app Ask — the same built-in and connected MCP tools, with Approve/Deny buttons in Slack and shared Ask thread history.',
   },
@@ -109,6 +116,7 @@ const SURFACES: Array<{
     title: 'sw CLI',
     kicker: 'Terminal',
     icon: SquareTerminal,
+    tone: 'cli',
     body: () => (
       <>
         <code>pipx install</code>, authenticate with an API token, then <code>sw ask</code> — the
@@ -386,10 +394,10 @@ export function Home() {
             </div>
 
             <div className="rv" style={vars({ '--d': '.15s' })}>
-              {SURFACES.map(({ title, kicker, icon: Icon, body }) => (
+              {SURFACES.map(({ title, kicker, icon: Icon, logo, tone, body }) => (
                 <div key={title} className="srow">
-                  <span className="ico" aria-hidden="true">
-                    <Icon strokeWidth={1.75} />
+                  <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
+                    {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
                   </span>
                   <h3>{title}</h3>
                   <em>{kicker}</em>

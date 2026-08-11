@@ -152,7 +152,9 @@ describe('Home landing', () => {
     const { container } = renderHome()
 
     const agentic = screen.getByTestId('ai-apps-section')
-    expect(agentic.querySelectorAll('.srow .ico svg')).toHaveLength(4)
+    // Three glyphs plus Slack's real brand mark, which ships as an <img>.
+    expect(agentic.querySelectorAll('.srow .ico svg, .srow .ico img')).toHaveLength(4)
+    expect(agentic.querySelectorAll('.srow .ico img')).toHaveLength(1)
     expect(container.querySelectorAll('.tile.artifact')).toHaveLength(1)
   })
 

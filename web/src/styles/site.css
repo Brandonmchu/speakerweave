@@ -1068,13 +1068,42 @@ body.sw-site-active {
   background: rgba(255, 255, 255, 0.07);
   color: var(--sw-dtext);
 }
-.sw-site .srow .ico svg {
+.sw-site .srow .ico svg,
+.sw-site .srow .ico img {
   width: 17px;
   height: 17px;
 }
 .sw-site .light .srow .ico {
   background: rgba(28, 26, 23, 0.055);
   color: var(--sw-ink);
+}
+
+/* Each surface gets its own colour, so the list scans by mark alone: the
+   product's terracotta for what ships built in, a connector blue for MCP,
+   terminal green for the CLI, and Slack's real mark carrying its own. */
+.sw-site .srow .ico.brand,
+.sw-site .light .srow .ico.brand {
+  background: rgba(168, 94, 62, 0.14);
+  color: var(--sw-accent);
+}
+.sw-site .srow .ico.brand {
+  color: var(--sw-accent-lite);
+}
+.sw-site .srow .ico.mcp,
+.sw-site .light .srow .ico.mcp {
+  background: rgba(126, 138, 168, 0.16);
+  color: #5f6d90;
+}
+.sw-site .srow .ico.mcp {
+  color: #a9b4cd;
+}
+.sw-site .srow .ico.cli,
+.sw-site .light .srow .ico.cli {
+  background: rgba(60, 140, 84, 0.14);
+  color: #2f7a46;
+}
+.sw-site .srow .ico.cli {
+  color: #6fcf8d;
 }
 .sw-site .srow h3 {
   grid-row: 1;
