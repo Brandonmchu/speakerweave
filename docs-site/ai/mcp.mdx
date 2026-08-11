@@ -1,0 +1,34 @@
+---
+title: Hosted MCP server
+description: Connect Claude, ChatGPT, or any MCP client to your SpeakerWeave organization.
+---
+
+Every deployment hosts a remote MCP server at `/mcp` (Streamable HTTP) exposing 14 organization-scoped tools and 3 resources: events, submissions, decisions, speakers, portal invitations, scheduling, content status, reminders, evaluation summaries, and AI triage.
+
+## Connector UIs (OAuth)
+
+In claude.ai, Claude for Work, or ChatGPT, add a custom connector with just the URL:
+
+```
+https://speakerweave.com/mcp
+```
+
+The client discovers `/.well-known/oauth-protected-resource`, registers dynamically, and runs authorization-code + PKCE. SpeakerWeave's approval page exchanges an API token (from **Settings → API tokens**) for short-lived OAuth access with rotating refresh tokens — the raw API token is never stored by the client.
+
+## Header-capable clients (bearer)
+
+For Claude Code/Desktop or any client that supports custom headers:
+
+```json
+{
+  "mcpServers": {
+    "speakerweave": {
+      "type": "http",
+      "url": "https://speakerweave.com/mcp",
+      "headers": { "Authorization": "Bearer dais_your_api_token" }
+    }
+  }
+}
+```
+
+Tool calls are scoped to the organization that owns the token; cross-organization access is structurally impossible.

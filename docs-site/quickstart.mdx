@@ -1,0 +1,49 @@
+---
+title: Quickstart
+description: Self-host SpeakerWeave in about fifteen minutes.
+---
+
+<Steps>
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/Brandonmchu/speakerweave.git
+    cd speakerweave
+    python3.12 -m venv api/venv && source api/venv/bin/activate
+    pip install -r api/requirements.txt
+    (cd web && npm ci)
+    ```
+  </Step>
+  <Step title="Configure the environment">
+    ```bash
+    cp api/.env.example api/.env
+    cp web/.env.example web/.env
+    ```
+    Set `SUPABASE_URL`, `SUPABASE_SERVICE_API_KEY`, `SUPABASE_JWT_SECRET`, and `PORTAL_SESSION_SECRET` in `api/.env`. Every variable the code reads is documented in the example file. A Supabase free-tier project is the shortest path (the API expects PostgREST + Storage); any Postgres works with equivalent roles.
+  </Step>
+  <Step title="Apply migrations and seed">
+    ```bash
+    for m in api/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$m"; done
+    (cd api && python -m scripts.seed_demo seed)
+    ```
+    The seed creates a complete demo conference in `org_dev` — the same workspace the public demo uses.
+  </Step>
+  <Step title="Run it">
+    ```bash
+    (cd api && uvicorn main:app --reload)   # http://localhost:8000
+    (cd web && npm run dev)                 # http://localhost:5173
+    ```
+    Open `/dev-login` with the token printed by `python scripts/mint_dev_token.py`, or `/demo` for the public demo flow.
+  </Step>
+</Steps>
+
+## Optional layers
+
+Each activates with configuration alone and stays dormant otherwise:
+
+| Layer | Enable with |
+|---|---|
+| AI chat agent | `OPENAI_API_KEY` **or** `ANTHROPIC_API_KEY` ([details](/ai/chat-agent)) |
+| Email delivery | `RESEND_API_KEY` (without it, mail writes local `.eml` files) |
+| Clerk auth | `VITE_CLERK_PUBLISHABLE_KEY` + a `supabase` JWT template |
+| Slack bot | Manifest at `api/slack_manifest.json` + two secrets ([details](/ai/slack)) |
+| Airtable sync | Per-organization settings in the UI ([details](/integrations/airtable)) |

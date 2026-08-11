@@ -1,0 +1,17 @@
+---
+title: Airtable sync
+description: Mirror speakers and submissions into a base your team already lives in.
+---
+
+Configure Airtable per organization under **Settings → Integrations**. The sync upserts **Speakers** (keyed by email) and **Submissions** (keyed by friendly ID) into your base, creating both tables automatically when the token allows schema writes.
+
+## Token scopes
+
+The personal access token needs access to the target base plus:
+
+- `data.records:read`
+- `data.records:write`
+- `schema.bases:read`
+- `schema.bases:write` — only if SpeakerWeave should create the tables for you
+
+Tokens are stored server-side and masked in the UI. Trigger a sync any time with **Sync now**; the panel shows the last-synced timestamp and per-table counts.

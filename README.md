@@ -8,6 +8,8 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 
 > **Building with an AI agent? Start at [AGENTS.md](AGENTS.md).** It maps the codebase, invariants, provider swap points, reference stack, and exact quality gates.
 
+**Product & API docs:** the Mintlify site lives in [`docs-site/`](docs-site/) — `cd docs-site && mint dev` to preview locally, or connect the repo at mintlify.com to publish it.
+
 **Live demo:** [speakerweave.com](https://speakerweave.com) — enter the seeded workspace without signing up.
 
 - **CFP and conditional forms:** multi-page form builder, reusable contact/session fields, show/hide/require rules, routing rules, drafts, and server-side enforcement.
@@ -18,7 +20,7 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 - **Public program:** schedule and speaker pages, responsive script/iframe widgets, read-only JSON feeds, per-session calendar downloads, and a subscribable iCal feed.
 - **Full REST API:** organization-scoped API tokens, a stable `/v1` integration surface, and interactive FastAPI OpenAPI docs.
 - **Hosted MCP server:** remote Streamable HTTP at `/mcp`, with bearer-token access and OAuth 2.1 discovery/PKCE for Claude and ChatGPT connector UIs.
-- **Ask SpeakerWeave + Slack agent bot:** authenticated in-app chat plus signed Slack mentions and DMs, both using the same organization-scoped assistant engine and tool layer as MCP.
+- **AI chat agent + Slack bot:** a streaming in-app agent (threads, @-mention context, entity badges, Approve/Deny gates, MCP connectors) plus signed Slack mentions and DMs — one organization-scoped tool layer behind five surfaces: in-app, Slack, MCP (Claude/ChatGPT), and the CLI.
 - **Airtable sync:** per-organization credentials and upsert syncs for Speakers and Submissions.
 - **Outbox-backed email:** queued invitations and reminders, retry/idempotency handling, Resend delivery, native calendar invitations, and local `.eml` output when no provider key is configured.
 
@@ -35,7 +37,7 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 
 ## Architecture overview
 
-The browser never connects directly to the database. nginx serves the React/Vite build and proxies application API, public feed, MCP, and OAuth requests to FastAPI. FastAPI uses `supabase-py` as a PostgREST client with a Supabase service-role key; all tenant queries are scoped in the application by `org_id`, with database RLS enabled as a backstop. When enabled, the API lifespan also runs the email outbox worker.
+The browser never connects directly to the database. The web tier — nginx in the reference deployment, or the included Cloudflare Worker — serves the React/Vite build and proxies application API, public feed, MCP, and OAuth requests to FastAPI. FastAPI uses `supabase-py` as a PostgREST client with a Supabase service-role key; all tenant queries are scoped in the application by `org_id`, with database RLS enabled as a backstop. When enabled, the API lifespan also runs the email outbox worker.
 
 ```text
 Browser / embedded widget / MCP client / Slack

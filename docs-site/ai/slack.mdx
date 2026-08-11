@@ -1,0 +1,20 @@
+---
+title: Slack bot
+description: The same program brain answering mentions and DMs in your workspace.
+---
+
+The Slack bot shares the chat agent's organization-scoped tool layer — ask about submissions, speakers, schedules, or content from a mention or DM and it answers with live workspace data in native Slack formatting.
+
+## Setup
+
+1. Create a Slack app **from a manifest** and paste `api/slack_manifest.json` (it subscribes to `app_mention` and `message.im`, and points Slack at `/api/slack/events`).
+2. Install it to your workspace and invite the bot to a channel.
+3. Configure the API environment:
+   - `SLACK_SIGNING_SECRET` — request signature verification
+   - `SLACK_BOT_TOKEN` — the `xoxb-…` token
+   - `SLACK_DEFAULT_ORG` — the organization the workspace binds to
+   - a model key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) for real answers
+
+<Note>
+Re-install the app after registering scopes or the events URL — Slack only starts delivering events after the reinstall. The current implementation binds each deployment to one organization; add a workspace-to-organization table before serving multiple Slack workspaces from one deployment.
+</Note>

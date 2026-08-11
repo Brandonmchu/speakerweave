@@ -1,0 +1,5039 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "SpeakerWeave API",
+  "version": "1.0.0",
+  "description": "Organization-scoped REST API for conference program data. Authenticate every request with an API token from Settings \u2192 API tokens, sent as the x-access-token header."
+ },
+ "servers": [
+  {
+   "url": "https://speakerweave.com"
+  }
+ ],
+ "paths": {
+  "/v1/events": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Events",
+    "description": "List events in the token's organization, newest first.",
+    "operationId": "list_events_v1_events_get",
+    "parameters": [
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Events V1 Events Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Event",
+    "description": "Get one event, returning 404 for an event outside the token's org.",
+    "operationId": "get_event_v1_events__event_id__get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Event V1 Events  Event Id  Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/submissions": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Submissions",
+    "description": "List an event's sessions/submissions with status and track filters.",
+    "operationId": "list_submissions_v1_events__event_id__submissions_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "track",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Track"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Submissions V1 Events  Event Id  Submissions Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Create Submission",
+    "operationId": "create_submission_v1_events__event_id__submissions_post",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SubmissionCreateRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Create Submission V1 Events  Event Id  Submissions Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/sessions": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Submissions",
+    "description": "List an event's sessions/submissions with status and track filters.",
+    "operationId": "list_submissions_v1_events__event_id__sessions_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "track",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Track"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Submissions V1 Events  Event Id  Sessions Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/submissions/search": {
+   "post": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Search Submissions",
+    "description": "Search submissions using a Sessionboard-compatible JSON body.",
+    "operationId": "search_submissions_v1_events__event_id__submissions_search_post",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/SearchRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Search Submissions V1 Events  Event Id  Submissions Search Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/sessions/search": {
+   "post": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Search Submissions",
+    "description": "Search submissions using a Sessionboard-compatible JSON body.",
+    "operationId": "search_submissions_v1_events__event_id__sessions_search_post",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/SearchRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Search Submissions V1 Events  Event Id  Sessions Search Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/submissions/{submission_id}": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Submission",
+    "operationId": "get_submission_v1_submissions__submission_id__get",
+    "parameters": [
+     {
+      "name": "submission_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Submission Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Submission V1 Submissions  Submission Id  Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Update Submission",
+    "operationId": "update_submission_v1_submissions__submission_id__patch",
+    "parameters": [
+     {
+      "name": "submission_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Submission Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SubmissionPatchRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Update Submission V1 Submissions  Submission Id  Patch"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/contacts": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Contacts",
+    "description": "Legacy Sessionboard alias for the event speaker collection.",
+    "operationId": "list_contacts_v1_events__event_id__contacts_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Contacts V1 Events  Event Id  Contacts Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/contacts/search": {
+   "post": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Search Contacts",
+    "operationId": "search_contacts_v1_events__event_id__contacts_search_post",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/SearchRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Search Contacts V1 Events  Event Id  Contacts Search Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/speakers": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Speakers",
+    "operationId": "list_speakers_v1_events__event_id__speakers_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "filter",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Filter"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Speakers V1 Events  Event Id  Speakers Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Create Speaker",
+    "operationId": "create_speaker_v1_events__event_id__speakers_post",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SpeakerCreateRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Create Speaker V1 Events  Event Id  Speakers Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/speakers/{speaker_id}": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Speaker",
+    "operationId": "get_speaker_v1_speakers__speaker_id__get",
+    "parameters": [
+     {
+      "name": "speaker_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Speaker Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Speaker V1 Speakers  Speaker Id  Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "patch": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Update Speaker",
+    "operationId": "update_speaker_v1_speakers__speaker_id__patch",
+    "parameters": [
+     {
+      "name": "speaker_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Speaker Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/routes__v1_routes__SpeakerPatchRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Update Speaker V1 Speakers  Speaker Id  Patch"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/schedule": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Schedule",
+    "operationId": "get_schedule_v1_events__event_id__schedule_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Schedule V1 Events  Event Id  Schedule Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/sessions/{submission_id}/schedule": {
+   "put": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Place Session",
+    "operationId": "place_session_v1_sessions__submission_id__schedule_put",
+    "parameters": [
+     {
+      "name": "submission_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Submission Id"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SchedulePlacementRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Place Session V1 Sessions  Submission Id  Schedule Put"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Unschedule Session",
+    "operationId": "unschedule_session_v1_sessions__submission_id__schedule_delete",
+    "parameters": [
+     {
+      "name": "submission_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Submission Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Unschedule Session V1 Sessions  Submission Id  Schedule Delete"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/tracks": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Tracks",
+    "operationId": "list_tracks_v1_events__event_id__tracks_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Tracks V1 Events  Event Id  Tracks Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/formats": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Formats",
+    "operationId": "list_formats_v1_events__event_id__formats_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Formats V1 Events  Event Id  Formats Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/rooms": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Rooms",
+    "operationId": "list_rooms_v1_events__event_id__rooms_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Rooms V1 Events  Event Id  Rooms Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/content-items": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Content Items",
+    "operationId": "list_content_items_v1_events__event_id__content_items_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "type",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Type"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Content Items V1 Events  Event Id  Content Items Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/content-status": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Content Status",
+    "operationId": "get_content_status_v1_events__event_id__content_status_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Content Status V1 Events  Event Id  Content Status Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/events/{event_id}/evaluation-plans": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "List Evaluation Plans",
+    "operationId": "list_evaluation_plans_v1_events__event_id__evaluation_plans_get",
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Event Id"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 1,
+       "title": "Page"
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 25,
+       "title": "Pagesize"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response List Evaluation Plans V1 Events  Event Id  Evaluation Plans Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/v1/evaluation-plans/{plan_id}/summary": {
+   "get": {
+    "tags": [
+     "v1-public"
+    ],
+    "summary": "Get Evaluation Summary",
+    "operationId": "get_evaluation_summary_v1_evaluation_plans__plan_id__summary_get",
+    "parameters": [
+     {
+      "name": "plan_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Plan Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Evaluation Summary V1 Evaluation Plans  Plan Id  Summary Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "AddToEventRequest": {
+    "properties": {
+     "event_id": {
+      "type": "string",
+      "title": "Event Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "event_id"
+    ],
+    "title": "AddToEventRequest"
+   },
+   "AirtableConfigRequest": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     },
+     "base_id": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Base Id",
+      "default": ""
+     },
+     "enabled": {
+      "type": "boolean",
+      "title": "Enabled",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "AirtableConfigRequest"
+   },
+   "ApiTokenCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "Name",
+      "default": "API token"
+     }
+    },
+    "type": "object",
+    "title": "ApiTokenCreateRequest"
+   },
+   "AssignRequest": {
+    "properties": {
+     "session_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Session Ids"
+     },
+     "evaluator_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Evaluator Ids"
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "all_to_all",
+       "by_track"
+      ],
+      "title": "Mode",
+      "default": "all_to_all"
+     },
+     "include_decided": {
+      "type": "boolean",
+      "title": "Include Decided",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "AssignRequest"
+   },
+   "AudienceRequest": {
+    "properties": {
+     "roles": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string",
+         "enum": [
+          "speaker",
+          "submitter",
+          "chairperson",
+          "moderator"
+         ]
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Roles"
+     },
+     "statuses": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "pending",
+          "accept_queue",
+          "accepted",
+          "decline_queue",
+          "declined",
+          "withdrawn"
+         ]
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Statuses"
+     },
+     "all_roster": {
+      "type": "boolean",
+      "title": "All Roster",
+      "default": false
+     },
+     "contact_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 10000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Contact Ids"
+     }
+    },
+    "type": "object",
+    "title": "AudienceRequest"
+   },
+   "Body_upload_headshot_public_portal_headshot_post": {
+    "properties": {
+     "file": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "File"
+     }
+    },
+    "type": "object",
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_headshot_public_portal_headshot_post"
+   },
+   "Body_upload_speaker_photo_api_events__event_id__speakers__contact_id__photo_post": {
+    "properties": {
+     "file": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "File"
+     }
+    },
+    "type": "object",
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_speaker_photo_api_events__event_id__speakers__contact_id__photo_post"
+   },
+   "Body_upload_task_file_public_portal_tasks__assignment_id__upload_post": {
+    "properties": {
+     "file": {
+      "type": "string",
+      "contentMediaType": "application/octet-stream",
+      "title": "File"
+     }
+    },
+    "type": "object",
+    "required": [
+     "file"
+    ],
+    "title": "Body_upload_task_file_public_portal_tasks__assignment_id__upload_post"
+   },
+   "BulkUnassignRequest": {
+    "properties": {
+     "assignment_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Assignment Ids"
+     }
+    },
+    "type": "object",
+    "required": [
+     "assignment_ids"
+    ],
+    "title": "BulkUnassignRequest",
+    "description": "Drop several pairings at once \u2014 the undo for an over-broad assignment."
+   },
+   "CancelRequest": {
+    "properties": {
+     "thread_id": {
+      "type": "string",
+      "title": "Thread Id"
+     },
+     "turn_id": {
+      "type": "string",
+      "title": "Turn Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "thread_id",
+     "turn_id"
+    ],
+    "title": "CancelRequest"
+   },
+   "ChatMessage": {
+    "properties": {
+     "role": {
+      "type": "string",
+      "enum": [
+       "user",
+       "assistant"
+      ],
+      "title": "Role"
+     },
+     "content": {
+      "type": "string",
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Content"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "role",
+     "content"
+    ],
+    "title": "ChatMessage"
+   },
+   "ChatMetadata": {
+    "properties": {
+     "pathname": {
+      "type": "string",
+      "maxLength": 500,
+      "title": "Pathname",
+      "default": "/dashboard"
+     },
+     "timezone": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Timezone",
+      "default": "UTC"
+     },
+     "client_turn_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Client Turn Id"
+     }
+    },
+    "additionalProperties": true,
+    "type": "object",
+    "title": "ChatMetadata"
+   },
+   "ChatResponse": {
+    "properties": {
+     "reply": {
+      "type": "string",
+      "title": "Reply"
+     },
+     "tool_calls": {
+      "items": {
+       "$ref": "#/components/schemas/ToolCallAudit"
+      },
+      "type": "array",
+      "title": "Tool Calls"
+     }
+    },
+    "type": "object",
+    "required": [
+     "reply",
+     "tool_calls"
+    ],
+    "title": "ChatResponse"
+   },
+   "CoSpeakerInput": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "first_name": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "Last Name",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "CoSpeakerInput",
+    "description": "A co-presenter named by the submitter on the public form.\n\nEmail is the identity: it is what the contact is upserted on, so a\nco-speaker who later submits their own talk (or is imported by the\norganizer) resolves to the same person rather than a duplicate."
+   },
+   "CriterionInput": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "weight": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Weight"
+     },
+     "kind": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "scale",
+         "select",
+         "text"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Kind"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 50
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Options"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "CriterionInput",
+    "description": "One row of a scorecard.\n\n`kind` omitted means 'scale' \u2014 the weighted 1\u2013N rating that is the only\nthing a criterion could be before ABS-03 \u2014 so every existing client and\nevery stored plan keeps working untouched. 'select' collects one of\n`options`; 'text' collects a paragraph. Only scale criteria are weighted,\nwhich is why `weight` is optional here: a missing weight on a scale\ncriterion is still rejected (400) by `normalize_criteria`."
+   },
+   "CustomFieldRequest": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Label"
+     },
+     "field_type": {
+      "type": "string",
+      "title": "Field Type",
+      "default": "text"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Options"
+     }
+    },
+    "type": "object",
+    "required": [
+     "label"
+    ],
+    "title": "CustomFieldRequest"
+   },
+   "EmptyRequest": {
+    "properties": {},
+    "additionalProperties": false,
+    "type": "object",
+    "title": "EmptyRequest"
+   },
+   "EvaluatorCreateRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Email"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Name",
+      "default": ""
+     },
+     "track_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track Ids"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "EvaluatorCreateRequest"
+   },
+   "EvaluatorPatchRequest": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "track_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array",
+        "maxItems": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track Ids"
+     }
+    },
+    "type": "object",
+    "title": "EvaluatorPatchRequest"
+   },
+   "EventCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "slug": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Slug"
+     },
+     "timezone": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timezone"
+     },
+     "starts_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Starts At"
+     },
+     "ends_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ends At"
+     },
+     "location": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Location"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "EventCreateRequest"
+   },
+   "EventPatchRequest": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "slug": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Slug"
+     },
+     "timezone": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timezone"
+     },
+     "starts_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Starts At"
+     },
+     "ends_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ends At"
+     },
+     "location": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Location"
+     },
+     "day_start": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Day Start"
+     },
+     "day_end": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Day End"
+     },
+     "slot_minutes": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Slot Minutes"
+     }
+    },
+    "type": "object",
+    "title": "EventPatchRequest"
+   },
+   "FieldCreateRequest": {
+    "properties": {
+     "scope": {
+      "type": "string",
+      "title": "Scope"
+     },
+     "public_name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Public Name"
+     },
+     "field_type": {
+      "type": "string",
+      "title": "Field Type"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Options"
+     },
+     "required": {
+      "type": "boolean",
+      "title": "Required",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "scope",
+     "public_name",
+     "field_type"
+    ],
+    "title": "FieldCreateRequest"
+   },
+   "FieldPatchRequest": {
+    "properties": {
+     "public_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Public Name"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Options"
+     },
+     "required": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Required"
+     },
+     "field_type": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Field Type"
+     }
+    },
+    "type": "object",
+    "title": "FieldPatchRequest"
+   },
+   "FormCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "slug": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Slug"
+     },
+     "welcome_html": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Welcome Html"
+     },
+     "settings": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Settings"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "FormCreateRequest"
+   },
+   "FormFieldInput": {
+    "properties": {
+     "field_id": {
+      "type": "string",
+      "title": "Field Id"
+     },
+     "page": {
+      "type": "integer",
+      "maximum": 4.0,
+      "minimum": 1.0,
+      "title": "Page",
+      "default": 1
+     },
+     "order": {
+      "type": "integer",
+      "title": "Order",
+      "default": 0
+     },
+     "label_override": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Label Override"
+     },
+     "help_text": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Help Text"
+     },
+     "required": {
+      "type": "boolean",
+      "title": "Required",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "field_id"
+    ],
+    "title": "FormFieldInput"
+   },
+   "FormFieldsReplaceRequest": {
+    "properties": {
+     "fields": {
+      "items": {
+       "$ref": "#/components/schemas/FormFieldInput"
+      },
+      "type": "array",
+      "title": "Fields"
+     }
+    },
+    "type": "object",
+    "title": "FormFieldsReplaceRequest"
+   },
+   "FormPatchRequest": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "welcome_html": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Welcome Html"
+     },
+     "settings": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Settings"
+     }
+    },
+    "type": "object",
+    "title": "FormPatchRequest"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "type": "array",
+      "title": "Detail"
+     }
+    },
+    "type": "object",
+    "title": "HTTPValidationError"
+   },
+   "ImportRequest": {
+    "properties": {
+     "csv": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Csv"
+     },
+     "rows": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rows"
+     },
+     "event_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Event Id"
+     },
+     "dry_run": {
+      "type": "boolean",
+      "title": "Dry Run",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "ImportRequest"
+   },
+   "MCPConnectorRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "url": {
+      "type": "string",
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Url"
+     },
+     "auth_kind": {
+      "type": "string",
+      "enum": [
+       "oauth",
+       "bearer",
+       "none"
+      ],
+      "title": "Auth Kind"
+     },
+     "bearer_token": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 4000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bearer Token"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "name",
+     "url",
+     "auth_kind"
+    ],
+    "title": "MCPConnectorRequest"
+   },
+   "ManageLinkRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "ManageLinkRequest"
+   },
+   "ManualSubmissionRequest": {
+    "properties": {
+     "title": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Title"
+     },
+     "submitter_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Submitter Name",
+      "default": ""
+     },
+     "submitter_email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Submitter Email"
+     },
+     "abstract": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Abstract"
+     },
+     "track_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track Id"
+     },
+     "format_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Format Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "title",
+     "submitter_email"
+    ],
+    "title": "ManualSubmissionRequest",
+    "description": "An organizer typing in a submission that never came through a CFP form."
+   },
+   "MergeRequest": {
+    "properties": {
+     "primary_id": {
+      "type": "string",
+      "title": "Primary Id"
+     },
+     "duplicate_id": {
+      "type": "string",
+      "title": "Duplicate Id"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fields"
+     }
+    },
+    "type": "object",
+    "required": [
+     "primary_id",
+     "duplicate_id"
+    ],
+    "title": "MergeRequest"
+   },
+   "NoteRequest": {
+    "properties": {
+     "body": {
+      "type": "string",
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Body"
+     },
+     "author": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Author",
+      "default": "Organizer"
+     }
+    },
+    "type": "object",
+    "required": [
+     "body"
+    ],
+    "title": "NoteRequest"
+   },
+   "OutreachRequest": {
+    "properties": {
+     "person_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "minItems": 1,
+      "title": "Person Ids"
+     },
+     "subject": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Subject"
+     },
+     "body_html": {
+      "type": "string",
+      "maxLength": 100000,
+      "minLength": 1,
+      "title": "Body Html"
+     },
+     "event_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Event Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "person_ids",
+     "subject",
+     "body_html"
+    ],
+    "title": "OutreachRequest"
+   },
+   "ParticipantCreateRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Email"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Name",
+      "default": ""
+     },
+     "first_name": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 100,
+      "title": "Last Name",
+      "default": ""
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "speaker",
+       "moderator",
+       "chairperson"
+      ],
+      "title": "Role",
+      "default": "speaker"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "ParticipantCreateRequest",
+    "description": "Add a co-speaker to an existing submission."
+   },
+   "PermissionResponseRequest": {
+    "properties": {
+     "request_id": {
+      "type": "string",
+      "title": "Request Id"
+     },
+     "approved": {
+      "type": "boolean",
+      "title": "Approved"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "request_id",
+     "approved"
+    ],
+    "title": "PermissionResponseRequest"
+   },
+   "PersonCreateRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "title": "Email"
+     },
+     "first_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Last Name",
+      "default": ""
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 8000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "tags": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tags"
+     },
+     "pipeline_stage": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pipeline Stage"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "PersonCreateRequest"
+   },
+   "PersonPatchRequest": {
+    "properties": {
+     "email": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 320
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "first_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Name"
+     },
+     "last_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Name"
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 8000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "linkedin_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linkedin Url"
+     },
+     "twitter_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Twitter Url"
+     },
+     "phone": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Phone"
+     },
+     "tags": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tags"
+     },
+     "custom": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Custom"
+     }
+    },
+    "type": "object",
+    "title": "PersonPatchRequest"
+   },
+   "PlanCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "instructions": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 20000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Instructions"
+     },
+     "scale": {
+      "type": "string",
+      "enum": [
+       "1_5",
+       "1_10"
+      ],
+      "title": "Scale",
+      "default": "1_5"
+     },
+     "anonymized": {
+      "type": "boolean",
+      "title": "Anonymized",
+      "default": false
+     },
+     "criteria": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/CriterionInput"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Criteria"
+     },
+     "opens_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Opens At"
+     },
+     "closes_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Closes At"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "PlanCreateRequest"
+   },
+   "PlanPatchRequest": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "instructions": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 20000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Instructions"
+     },
+     "criteria": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/CriterionInput"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Criteria"
+     },
+     "anonymized": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Anonymized"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "draft",
+         "open",
+         "closed"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "opens_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Opens At"
+     },
+     "closes_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Closes At"
+     }
+    },
+    "type": "object",
+    "title": "PlanPatchRequest"
+   },
+   "ProfilePatch": {
+    "properties": {
+     "first_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Name"
+     },
+     "last_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 120
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Name"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 5000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "pronouns": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 60
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pronouns"
+     },
+     "linkedin_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linkedin Url"
+     },
+     "twitter_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Twitter Url"
+     },
+     "phone": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 60
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Phone"
+     }
+    },
+    "type": "object",
+    "title": "ProfilePatch"
+   },
+   "QuestionRuleInput": {
+    "properties": {
+     "target_field_id": {
+      "type": "string",
+      "title": "Target Field Id"
+     },
+     "logic": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Logic"
+     }
+    },
+    "type": "object",
+    "required": [
+     "target_field_id",
+     "logic"
+    ],
+    "title": "QuestionRuleInput"
+   },
+   "QuestionRulesReplaceRequest": {
+    "properties": {
+     "rules": {
+      "items": {
+       "$ref": "#/components/schemas/QuestionRuleInput"
+      },
+      "type": "array",
+      "title": "Rules"
+     }
+    },
+    "type": "object",
+    "title": "QuestionRulesReplaceRequest"
+   },
+   "RedeemRequest": {
+    "properties": {
+     "token": {
+      "type": "string",
+      "title": "Token"
+     }
+    },
+    "type": "object",
+    "required": [
+     "token"
+    ],
+    "title": "RedeemRequest"
+   },
+   "RemindRequest": {
+    "properties": {
+     "required_only": {
+      "type": "boolean",
+      "title": "Required Only",
+      "default": true
+     },
+     "item_type": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 40
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Item Type"
+     }
+    },
+    "type": "object",
+    "title": "RemindRequest"
+   },
+   "RenameThreadRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Name"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "RenameThreadRequest"
+   },
+   "RestoreRequest": {
+    "properties": {
+     "version": {
+      "type": "integer",
+      "minimum": 1.0,
+      "title": "Version"
+     }
+    },
+    "type": "object",
+    "required": [
+     "version"
+    ],
+    "title": "RestoreRequest"
+   },
+   "ReviewPutRequest": {
+    "properties": {
+     "scores": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Scores"
+     },
+     "comment": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 20000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Comment"
+     },
+     "abstained": {
+      "type": "boolean",
+      "title": "Abstained",
+      "default": false
+     },
+     "abstain_reason": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Abstain Reason"
+     },
+     "is_draft": {
+      "type": "boolean",
+      "title": "Is Draft",
+      "default": true
+     }
+    },
+    "type": "object",
+    "title": "ReviewPutRequest",
+    "description": "A reviewer's scorecard.\n\n`scores` is keyed by criterion name; the value is a number for a scale\ncriterion (as it always was) and a string for a choice or free-text one.\nThe plan's own criteria decide which is which \u2014 see `_validate_scores`."
+   },
+   "ReviewRequest": {
+    "properties": {
+     "decision": {
+      "type": "string",
+      "title": "Decision"
+     }
+    },
+    "type": "object",
+    "required": [
+     "decision"
+    ],
+    "title": "ReviewRequest"
+   },
+   "SchedulePatchRequest": {
+    "properties": {
+     "starts_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Starts At"
+     },
+     "ends_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ends At"
+     },
+     "room_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Room Id"
+     }
+    },
+    "type": "object",
+    "title": "SchedulePatchRequest",
+    "description": "All three keys are optional; an explicit null clears the field.\n\n`exclude_unset` at the call site is what makes \"unschedule this\" (null)\ndifferent from \"leave the room alone\" (omitted)."
+   },
+   "SchedulePlacementRequest": {
+    "properties": {
+     "room": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Room"
+     },
+     "start": {
+      "type": "string",
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Start"
+     }
+    },
+    "type": "object",
+    "required": [
+     "room",
+     "start"
+    ],
+    "title": "SchedulePlacementRequest"
+   },
+   "SearchRequest": {
+    "properties": {
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "track": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track"
+     },
+     "page": {
+      "type": "integer",
+      "title": "Page",
+      "default": 1
+     },
+     "pageSize": {
+      "type": "integer",
+      "title": "Pagesize",
+      "default": 25
+     }
+    },
+    "type": "object",
+    "title": "SearchRequest"
+   },
+   "SegmentRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind",
+      "default": "dynamic"
+     },
+     "filter": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Filter"
+     },
+     "member_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Member Ids"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "SegmentRequest"
+   },
+   "SendRequest": {
+    "properties": {
+     "template_key": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 80,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Template Key"
+     },
+     "subject": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Subject"
+     },
+     "body_html": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Body Html"
+     },
+     "audience": {
+      "$ref": "#/components/schemas/AudienceRequest"
+     }
+    },
+    "type": "object",
+    "title": "SendRequest"
+   },
+   "SessionDecisionRequest": {
+    "properties": {
+     "decision": {
+      "type": "string",
+      "enum": [
+       "approve",
+       "maybe",
+       "deny"
+      ],
+      "title": "Decision"
+     },
+     "feedback": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 10000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Feedback"
+     },
+     "email_speaker": {
+      "type": "boolean",
+      "title": "Email Speaker",
+      "default": false
+     }
+    },
+    "type": "object",
+    "required": [
+     "decision"
+    ],
+    "title": "SessionDecisionRequest"
+   },
+   "SessionPatchRequest": {
+    "properties": {
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "content_approval": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "draft",
+         "in_review",
+         "approved"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Content Approval"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Description"
+     },
+     "abstract": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Abstract"
+     }
+    },
+    "type": "object",
+    "title": "SessionPatchRequest",
+    "description": "A status move between tabs, an edit of the title/abstract, or both.\n\nEvery field is optional and read with ``exclude_unset``: sending only\n``title`` must not blank the description, and sending ``description: \"\"``\nmust clear it. ``abstract`` is accepted as an alias for ``description`` \u2014\nthe CFP form and the manual-add dialog both call that field the abstract."
+   },
+   "SingleAssignmentRequest": {
+    "properties": {
+     "evaluator_id": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Evaluator Id"
+     },
+     "session_id": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Session Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "evaluator_id",
+     "session_id"
+    ],
+    "title": "SingleAssignmentRequest",
+    "description": "One reviewer, one submission \u2014 the deliberate pairing the bulk modes\ncan't express."
+   },
+   "SpeakerCreateRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Email"
+     },
+     "first_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Last Name",
+      "default": ""
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "speaker_status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Speaker Status"
+     },
+     "logistics_notes": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Logistics Notes"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "SpeakerCreateRequest"
+   },
+   "SpeakerImportRequest": {
+    "properties": {
+     "csv": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 1000000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Csv"
+     },
+     "rows": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/SpeakerRowInput"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rows"
+     }
+    },
+    "type": "object",
+    "title": "SpeakerImportRequest",
+    "description": "Bulk add: paste/upload CSV text, or hand a structured list (manual add)."
+   },
+   "SpeakerRowInput": {
+    "properties": {
+     "first_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Last Name",
+      "default": ""
+     },
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "title": "Email",
+      "default": ""
+     },
+     "company": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Company",
+      "default": ""
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 300,
+      "title": "Title",
+      "default": ""
+     }
+    },
+    "type": "object",
+    "title": "SpeakerRowInput"
+   },
+   "StageRequest": {
+    "properties": {
+     "stage": {
+      "type": "string",
+      "title": "Stage"
+     },
+     "score": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 100.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Score"
+     },
+     "rationale": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rationale"
+     },
+     "enroll": {
+      "type": "boolean",
+      "title": "Enroll",
+      "default": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "stage"
+    ],
+    "title": "StageRequest"
+   },
+   "SubmissionCreateRequest": {
+    "properties": {
+     "title": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Title"
+     },
+     "abstract": {
+      "type": "string",
+      "maxLength": 50000,
+      "title": "Abstract",
+      "default": ""
+     },
+     "submitter_email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Submitter Email"
+     },
+     "submitter_first_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Submitter First Name",
+      "default": ""
+     },
+     "submitter_last_name": {
+      "type": "string",
+      "maxLength": 200,
+      "title": "Submitter Last Name",
+      "default": ""
+     },
+     "track_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track Id"
+     },
+     "format_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Format Id"
+     }
+    },
+    "type": "object",
+    "required": [
+     "title",
+     "submitter_email"
+    ],
+    "title": "SubmissionCreateRequest"
+   },
+   "SubmissionEditRequest": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 400
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "abstract": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 10000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Abstract"
+     },
+     "track_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Track Id"
+     },
+     "format_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Format Id"
+     }
+    },
+    "type": "object",
+    "title": "SubmissionEditRequest"
+   },
+   "SubmissionPatchRequest": {
+    "properties": {
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Status"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "abstract": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Abstract"
+     },
+     "feedback": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Feedback"
+     }
+    },
+    "type": "object",
+    "title": "SubmissionPatchRequest"
+   },
+   "SubmissionRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     },
+     "first_name": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "First Name",
+      "default": ""
+     },
+     "last_name": {
+      "type": "string",
+      "maxLength": 120,
+      "title": "Last Name",
+      "default": ""
+     },
+     "answers": {
+      "additionalProperties": true,
+      "type": "object",
+      "title": "Answers"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Title"
+     },
+     "description": {
+      "type": "string",
+      "maxLength": 10000,
+      "title": "Description",
+      "default": ""
+     },
+     "co_speakers": {
+      "items": {
+       "$ref": "#/components/schemas/CoSpeakerInput"
+      },
+      "type": "array",
+      "title": "Co Speakers"
+     }
+    },
+    "type": "object",
+    "required": [
+     "email",
+     "title"
+    ],
+    "title": "SubmissionRequest"
+   },
+   "SubmitterParticipantRequest": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 400
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "email": {
+      "type": "string",
+      "format": "email",
+      "title": "Email"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "email"
+    ],
+    "title": "SubmitterParticipantRequest"
+   },
+   "TaskCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "description": {
+      "type": "string",
+      "maxLength": 5000,
+      "title": "Description",
+      "default": ""
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind",
+      "default": "todo"
+     },
+     "link_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Link Url"
+     },
+     "due_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Due At"
+     },
+     "required": {
+      "type": "boolean",
+      "title": "Required",
+      "default": false
+     },
+     "contact_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Contact Ids"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "TaskCreateRequest"
+   },
+   "TaxonomyCreateRequest": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name"
+     },
+     "color": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     },
+     "capacity": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Capacity"
+     },
+     "default_duration_min": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 1440.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Default Duration Min"
+     },
+     "order": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Order"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "title": "TaxonomyCreateRequest"
+   },
+   "TaxonomyPatchRequest": {
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "color": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Color"
+     },
+     "capacity": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Capacity"
+     },
+     "default_duration_min": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 1440.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Default Duration Min"
+     },
+     "order": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Order"
+     }
+    },
+    "type": "object",
+    "title": "TaxonomyPatchRequest"
+   },
+   "TemplateCreateRequest": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "maxLength": 80,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "title": "Key"
+     },
+     "subject": {
+      "type": "string",
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Subject"
+     },
+     "body_html": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Body Html"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "subject",
+     "body_html"
+    ],
+    "title": "TemplateCreateRequest"
+   },
+   "TemplatePatchRequest": {
+    "properties": {
+     "key": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.-]+$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Key"
+     },
+     "subject": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Subject"
+     },
+     "body_html": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Body Html"
+     }
+    },
+    "type": "object",
+    "title": "TemplatePatchRequest"
+   },
+   "ToolCallAudit": {
+    "properties": {
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "summary": {
+      "type": "string",
+      "title": "Summary"
+     }
+    },
+    "type": "object",
+    "required": [
+     "name",
+     "summary"
+    ],
+    "title": "ToolCallAudit"
+   },
+   "TriageOverrideRequest": {
+    "properties": {
+     "score": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Score"
+     }
+    },
+    "type": "object",
+    "title": "TriageOverrideRequest",
+    "description": "A human correction to one AI score. null clears the override."
+   },
+   "TriageRunRequest": {
+    "properties": {
+     "include_decided": {
+      "type": "boolean",
+      "title": "Include Decided",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "TriageRunRequest"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "type": "array",
+      "title": "Location"
+     },
+     "msg": {
+      "type": "string",
+      "title": "Message"
+     },
+     "type": {
+      "type": "string",
+      "title": "Error Type"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "ctx": {
+      "type": "object",
+      "title": "Context"
+     }
+    },
+    "type": "object",
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError"
+   },
+   "WithdrawRequest": {
+    "properties": {
+     "token": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 400
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Token"
+     }
+    },
+    "type": "object",
+    "title": "WithdrawRequest"
+   },
+   "agent__router__ChatRequest": {
+    "properties": {
+     "thread_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Thread Id"
+     },
+     "message": {
+      "type": "string",
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Message"
+     },
+     "metadata": {
+      "$ref": "#/components/schemas/ChatMetadata"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "message"
+    ],
+    "title": "ChatRequest"
+   },
+   "routes__admin_routes__SpeakerPatchRequest": {
+    "properties": {
+     "first_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Name"
+     },
+     "last_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Name"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 320
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "logistics_notes": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Logistics Notes"
+     },
+     "speaker_status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Speaker Status"
+     }
+    },
+    "type": "object",
+    "title": "SpeakerPatchRequest"
+   },
+   "routes__assistant_routes__ChatRequest": {
+    "properties": {
+     "messages": {
+      "items": {
+       "$ref": "#/components/schemas/ChatMessage"
+      },
+      "type": "array",
+      "maxItems": 30,
+      "minItems": 1,
+      "title": "Messages"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "messages"
+    ],
+    "title": "ChatRequest"
+   },
+   "routes__portal_admin_routes__CommentRequest": {
+    "properties": {
+     "body": {
+      "type": "string",
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Body"
+     },
+     "notify": {
+      "type": "boolean",
+      "title": "Notify",
+      "default": true
+     }
+    },
+    "type": "object",
+    "required": [
+     "body"
+    ],
+    "title": "CommentRequest"
+   },
+   "routes__portal_routes__CommentRequest": {
+    "properties": {
+     "body": {
+      "type": "string",
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Body"
+     }
+    },
+    "type": "object",
+    "required": [
+     "body"
+    ],
+    "title": "CommentRequest"
+   },
+   "routes__v1_routes__SpeakerPatchRequest": {
+    "properties": {
+     "first_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Name"
+     },
+     "last_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Name"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 320
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "company_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Company Name"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "about": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "About"
+     },
+     "photo_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Photo Url"
+     },
+     "pronouns": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pronouns"
+     },
+     "linkedin_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Linkedin Url"
+     },
+     "twitter_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 2000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Twitter Url"
+     },
+     "phone": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Phone"
+     },
+     "speaker_status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Speaker Status"
+     },
+     "logistics_notes": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 50000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Logistics Notes"
+     }
+    },
+    "type": "object",
+    "title": "SpeakerPatchRequest"
+   }
+  },
+  "securitySchemes": {
+   "apiToken": {
+    "type": "apiKey",
+    "in": "header",
+    "name": "x-access-token"
+   }
+  }
+ },
+ "security": [
+  {
+   "apiToken": []
+  }
+ ]
+}

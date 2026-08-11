@@ -1,0 +1,22 @@
+---
+title: MCP connectors
+description: Give the chat agent your business tools — Every is the first preset; any MCP server can join.
+---
+
+MCP connectors extend the [chat agent](/ai/chat-agent) with external tools, managed under **Settings → Integrations → MCP connectors**.
+
+## Presets
+
+[Every](https://every.ai) ships as the first preset: set `EVERY_MCP_URL` on the API and it appears in the catalog ready for one-click OAuth (discovery, dynamic client registration, PKCE). Once connected, the agent can work with your clients, proposals, and invoices — for example drafting a speaking-fee proposal for a confirmed speaker.
+
+## Custom servers
+
+**Add custom server** accepts any MCP server speaking Streamable HTTP, with three auth modes:
+
+- **OAuth** — standard MCP OAuth discovery, exactly like the preset flow
+- **Bearer token** — validated with a live `initialize` + `list_tools` ping before the connector is accepted
+- **None** — for internal, network-trusted servers
+
+## Runtime behavior
+
+Connected tools surface to the agent as `mcp__<connector>__<tool>`. Read-style tools run freely; every external **mutation** passes the same inline Approve/Deny gate as native sensitive actions, with the connector named on the approval card. One unreachable connector never blocks the rest of the chat — the agent notes it and continues.

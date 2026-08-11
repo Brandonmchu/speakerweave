@@ -1,0 +1,33 @@
+---
+title: Hosting
+description: Tuned out of the box for Railway and Cloudflare — portable to any two-service host.
+---
+
+SpeakerWeave ships two production-ready deployment paths in the repository. Both are exercised against the live site.
+
+## Railway (reference)
+
+Two services from the same repo:
+
+1. **API** — root directory `api`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`, health check `/health`.
+2. **Web** — root directory `web`, builds the included Dockerfile (nginx serving the Vite build, precompressed assets, and the backend proxy). Set `BACKEND_URL` to the API origin.
+
+Cross-service URLs (`FRONTEND_URL`, `PUBLIC_APP_URL`, `PUBLIC_API_URL`, `CORS_ALLOWED_ORIGINS`) are documented in `api/.env.example`.
+
+## Cloudflare Workers (edge web tier)
+
+The web tier also ships as a Cloudflare Worker — static assets from the edge with Brotli and SPA fallback, and the identical `/api`, `/public`, `/mcp`, and OAuth proxy contract, including SSE chat streaming:
+
+```bash
+cd web && npm run build && npx wrangler deploy
+```
+
+Configuration lives in `web/wrangler.jsonc` (point `BACKEND_URL` at your API origin). The reference edge deployment runs live at [speakerweave-web.brandon-c2f.workers.dev](https://speakerweave-web.brandon-c2f.workers.dev) against the same API and database as the primary site.
+
+<Note>
+The API tier is a standard Python/FastAPI container — Railway is the reference home, and any container host (Fly, Render, ECS, a VPS) works unchanged. Run migrations before code that requires them.
+</Note>
+
+## Anything else
+
+The hosting contract is deliberately small: serve the SPA with history fallback, route `/api`, `/public`, `/mcp`, `/oauth`, and `/.well-known/oauth-*` to the API origin, keep secrets server-side, and inject `VITE_*` at build time. `AGENTS.md` documents the invariants for adapting either tier.

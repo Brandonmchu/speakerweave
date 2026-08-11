@@ -17,3 +17,6 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 web/.ds-css/
+
+# Mintlify local preview artifacts
+docs-site/.mintlify/

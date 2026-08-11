@@ -1,0 +1,13 @@
+---
+title: Embeds & feeds
+description: Put the schedule and speaker gallery on any site; consume the program as JSON or iCal.
+---
+
+**Settings → Embed & share** generates copy-paste snippets for the public schedule and speaker widgets, with live preview and configuration (track filter, accent color, compact layout):
+
+- **Script embed** — `/public/program/{event_slug}/embed.js` drops an auto-resizing iframe into any page.
+- **iframe embed** — a plain `<iframe>` for CMSes that strip scripts (`/e/{event_slug}/schedule` and `/e/{event_slug}/speakers` are framable cross-origin by design).
+- **JSON feeds** — `/public/program/{event_slug}/schedule` and `/public/program/{event_slug}/speakers`, read-only and unauthenticated.
+- **iCal** — `/public/program/{event_slug}/calendar.ics` for the whole accepted program, plus per-session downloads on the public schedule.
+
+Feeds and widgets update live when the program changes — snippets carry no version token. Sessions gated by [content approval](/ai/chat-agent) or unscheduled/unpublished states are excluded from all public output.

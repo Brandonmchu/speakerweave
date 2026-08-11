@@ -1,0 +1,50 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "SpeakerWeave",
+  "colors": {
+    "primary": "#4F46E5",
+    "light": "#818CF8",
+    "dark": "#4338CA"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["introduction", "quickstart", "hosting"]
+          },
+          {
+            "group": "AI surfaces",
+            "pages": ["ai/chat-agent", "ai/mcp", "ai/slack", "ai/cli"]
+          },
+          {
+            "group": "Integrations",
+            "pages": ["integrations/airtable", "integrations/embeds", "integrations/mcp-connectors"]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["api/authentication"]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": "openapi.json"
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Brandonmchu/speakerweave"
+    }
+  }
+}

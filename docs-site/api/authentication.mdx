@@ -1,0 +1,19 @@
+---
+title: Authentication
+description: Organization-scoped API tokens for the /v1 surface.
+---
+
+Create a token under **Settings → API tokens**. The raw `dais_…` value is shown once; only its SHA-256 hash is stored. Send it on every request as the `x-access-token` header:
+
+```bash
+curl https://speakerweave.com/v1/events \
+  -H 'x-access-token: dais_your_api_token'
+```
+
+Every response is scoped to the organization that owns the token — there is no cross-organization access, and unknown or foreign resource IDs return the same `404`.
+
+Tokens can carry a `read` scope (safe for dashboards and exports) or full access. Revoke any token instantly from the same settings page.
+
+<Note>
+The same tokens authenticate the [hosted MCP server](/ai/mcp) and the [`sw` CLI](/ai/cli). The interactive OpenAPI explorer for the entire application (beyond `/v1`) is served by the API itself at `/docs`.
+</Note>

@@ -1,0 +1,27 @@
+---
+title: Chat agent
+description: An Every-style in-app agent — streaming, @-mentions, entity badges, and approval gates. Bring your own OpenAI or Anthropic key.
+---
+
+The chat agent is a right-side panel on every organizer page: threads, streaming responses, `@`-mention any submission/speaker/session as context, clickable entity badges that navigate the app, and inline Approve/Deny confirmation before anything sensitive happens (emails, decisions, publishing, deletes).
+
+## One switch
+
+The agent is **dormant by default** and activates only when a provider key exists:
+
+| State | Configuration |
+|---|---|
+| Off (default) | No key set — no UI renders, no routes mount, no AI SDK imports |
+| OpenAI (recommended) | `OPENAI_API_KEY` — OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning |
+| Anthropic | `ANTHROPIC_API_KEY` (or `ASSISTANT_PROVIDER=anthropic`) — same event protocol on Claude |
+| Force off | `ASSISTANT_ENABLED=false` even with keys present |
+
+The frontend follows automatically via `GET /api/agent/capabilities` — there is no second flag.
+
+## Architecture
+
+All agent code is quarantined in `api/agent/` and `web/src/agent/`, each mounted from a single line. Deleting both directories (and their mount lines) removes the feature entirely. The provider harness is shared — tool registry, SSE vocabulary, permission gate, thread persistence — with the model loop as the only swappable part. The full provider-swap notes (what differs when running on Claude) live in the repo at `docs/chat-agent.md`.
+
+## MCP connectors
+
+Organizations can attach external tool servers from Settings → Integrations: [Every](https://every.ai) ships as the first preset, and any Streamable-HTTP MCP server can be added with OAuth (discovery + dynamic client registration + PKCE), a static bearer token, or no auth. External tools are namespaced `mcp__<connector>__<tool>` and every external mutation passes the same Approve/Deny gate. See [MCP connectors](/integrations/mcp-connectors).

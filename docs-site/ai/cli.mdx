@@ -1,0 +1,20 @@
+---
+title: sw CLI
+description: Conference operations from any shell or script.
+---
+
+The companion CLI (`cli/` in the repo, Python 3.11+) exposes the platform as the `sw` command — including `sw ask`, the same agent brain from your terminal.
+
+```bash
+pipx install ./cli
+sw auth login                       # paste an organization API token
+sw events list
+sw submissions list --status pending
+sw submissions accept SESS-102
+sw schedule auto-place
+sw content remind
+sw ask "which speakers still owe headshots?"
+sw ask -i                           # interactive REPL
+```
+
+Every command supports `--json` for scripting. Configuration precedence, the full command tree, and the CLI's isolated test suite are documented in `cli/README.md`.
