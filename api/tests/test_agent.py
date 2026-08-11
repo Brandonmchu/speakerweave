@@ -441,8 +441,9 @@ async def test_mcp_oauth_discovery_pkce_exchange_and_state_maps_to_connector(
     from agent.router import mcp_connector_callback
 
     class _FakeCallbackRequest:
-        base_url = "http://testserver/"
-        headers: dict[str, str] = {}
+        def __init__(self) -> None:
+            self.base_url = "http://testserver/"
+            self.headers: dict[str, str] = {}
 
     callback = await mcp_connector_callback(
         _FakeCallbackRequest(), "authorization-code", query["state"][0]
