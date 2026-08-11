@@ -440,9 +440,16 @@ async def test_mcp_oauth_discovery_pkce_exchange_and_state_maps_to_connector(
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     from agent.router import mcp_connector_callback
 
-    callback = await mcp_connector_callback("authorization-code", query["state"][0])
+    class _FakeCallbackRequest:
+        base_url = "http://testserver/"
+        headers: dict[str, str] = {}
+
+    callback = await mcp_connector_callback(
+        _FakeCallbackRequest(), "authorization-code", query["state"][0]
+    )
     assert callback.status_code == 302
-    assert callback.headers["location"] == "/settings?mcp=connected:every"
+    assert callback.headers["location"].endswith("/settings?mcp=connected:every")
+    assert callback.headers["location"].startswith("http")
 
     stored = fake_db.rows("org_integrations")
     assert len(stored) == 1

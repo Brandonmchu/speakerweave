@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -19,6 +19,7 @@ from agent.events import PUBLIC_EVENT_TYPES, format_sse_event
 from agent.prompt import build_system_prompt
 from agent.tools import TurnContext
 from auth import get_current_user_or_api_org
+from services.oauth import public_origin as oauth_public_origin
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -617,10 +618,13 @@ async def connect_mcp_connector(
 
 
 @router.get("/integrations/mcp/callback")
-async def mcp_connector_callback(code: str, state: str) -> RedirectResponse:
+async def mcp_connector_callback(request: Request, code: str, state: str) -> RedirectResponse:
     require_enabled()
     key = await mcp_connectors.finish_callback(code, state)
-    return RedirectResponse(url=f"/settings?mcp=connected:{key}", status_code=302)
+    # The callback is served from the API origin; a relative redirect would
+    # strand the user there instead of back in the web app.
+    origin = oauth_public_origin(request)
+    return RedirectResponse(url=f"{origin}/settings?mcp=connected:{key}", status_code=302)
 
 
 @router.delete("/integrations/mcp/{key}")
