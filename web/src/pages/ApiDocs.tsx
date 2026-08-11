@@ -1,4 +1,5 @@
 import { ArrowLeft, Bot, KeyRound, Sparkles, Terminal } from 'lucide-react'
+import { BrandMark } from '@/ui/brand'
 import { Link } from 'react-router-dom'
 
 import {
@@ -55,10 +56,8 @@ function TopBar() {
     <header className="sticky top-0 z-10 border-b border-border bg-card/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-8">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-            S
-          </div>
-          <span className="text-lg font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+          <BrandMark className="h-8 w-8" />
+          <span className="text-lg font-semibold tracking-tight text-foreground">speakerweave</span>
           <span className="ml-1 rounded-full bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary">
             API reference
           </span>

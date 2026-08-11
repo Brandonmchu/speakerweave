@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, KeyRound } from 'lucide-react'
 
@@ -50,10 +51,8 @@ export function DevLogin() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            S
-          </div>
-          <span className="text-lg font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+          <BrandMark className="h-8 w-8" />
+          <span className="text-lg font-semibold tracking-tight text-foreground">speakerweave</span>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 shadow-soft">

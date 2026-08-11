@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CalendarClock, CheckCircle2, Pencil, Inbox as InboxIcon, UserPlus, Users } from 'lucide-react'
@@ -567,10 +568,8 @@ function SubmitterShell({ children, eyebrow }: { children: ReactNode; eyebrow?: 
     <div className="min-h-screen bg-[#FBFBFB]">
       <div className="mx-auto w-full max-w-[820px] px-5 py-10 sm:py-16">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            S
-          </div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+          <BrandMark className="h-7 w-7" />
+          <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
           {eyebrow && (
             <>
               <span className="text-border">/</span>

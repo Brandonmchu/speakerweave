@@ -6,6 +6,7 @@
  * only posts its height up to the embed.js iframe.
  */
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { Link } from 'react-router-dom'
 
 import { initialsOf, sanitizeAccent } from '@/lib/programApi'
@@ -129,10 +130,8 @@ export function ProgramShell({
         className="sticky top-0 z-10 border-b border-border bg-card/90 backdrop-blur"
       >
         <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-5 py-3.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            S
-          </div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+          <BrandMark className="h-7 w-7" />
+          <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
           {eventName && (
             <>
               <span className="text-border">/</span>

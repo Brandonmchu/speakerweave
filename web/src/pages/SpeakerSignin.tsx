@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Mail } from 'lucide-react'
@@ -37,7 +38,7 @@ export function SpeakerSignin() {
           to="/"
           className="mb-6 inline-flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm text-primary-foreground">S</span>
+          <BrandMark className="h-7 w-7" />
           dais
         </Link>
 

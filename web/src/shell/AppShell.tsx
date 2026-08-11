@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -376,10 +377,8 @@ export function AppShell() {
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-navigation-border bg-navigation md:flex">
         <div className="flex h-14 items-center gap-2 px-5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            S
-          </div>
-          <span className="text-[15px] font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+          <BrandMark className="h-7 w-7" />
+          <span className="text-[15px] font-semibold tracking-tight text-foreground">speakerweave</span>
         </div>
 
         {/* Event switcher — a static single-event dropdown today, but the chevron

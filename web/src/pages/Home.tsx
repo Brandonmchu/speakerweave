@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BrandMark } from '@/ui/brand'
 import { preload } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -230,10 +231,8 @@ export function Home() {
       <header className="relative z-20 border-b border-border/80 bg-background/90 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-5 sm:px-8">
           <Link to="/" className="flex items-center gap-2.5" aria-label="SpeakerWeave home">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-soft">
-              S
-            </span>
-            <span className="text-lg font-semibold tracking-tight text-foreground">SpeakerWeave</span>
+            <BrandMark className="h-8 w-8" />
+            <span className="text-lg font-semibold tracking-tight text-foreground">speakerweave</span>
           </Link>
 
           <nav aria-label="Public program" className="ml-auto hidden items-center gap-1 md:flex">
@@ -627,8 +626,8 @@ export function Home() {
       <footer className="border-t border-border bg-card/60">
         <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-8 sm:px-8 md:flex-row md:items-center">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">S</span>
-            <span className="text-sm font-semibold text-foreground">SpeakerWeave</span>
+            <BrandMark className="h-7 w-7" />
+            <span className="text-sm font-semibold text-foreground">speakerweave</span>
           </div>
           <nav
             aria-label="Footer"
