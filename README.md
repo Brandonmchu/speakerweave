@@ -160,6 +160,16 @@ Railway is the reference, but any two-service host works:
 3. **Cross-service URLs:** on the API, set `FRONTEND_URL` and `PUBLIC_APP_URL` to the public web origin, `PUBLIC_API_URL` to the directly reachable API origin, and `CORS_ALLOWED_ORIGINS` to an explicit comma-separated allowlist.
 4. **Workers:** set `OUTBOX_WORKER_ENABLED=1` to drain queued mail. Multiple uvicorn workers are supported by optimistic row claims, although in-process rate limits are divided by the configured worker count.
 
+#### Cloudflare Workers (edge web tier)
+
+The web tier also ships as a Cloudflare Worker (`web/wrangler.jsonc` + `web/worker/index.js`): static assets served from Cloudflare's edge with Brotli and SPA fallback, and the same `/api`, `/public`, `/mcp`, and OAuth proxy contract as the nginx image — SSE chat streaming included. Point `BACKEND_URL` in `wrangler.jsonc` at your API origin, then:
+
+```bash
+cd web && npm run build && npx wrangler deploy
+```
+
+The reference deployment runs live at `https://speakerweave-web.brandon-c2f.workers.dev` against the same API and database as the primary site.
+
 ## Tech stack + bring your own
 
 | Layer | This implementation | Swap guidance |
@@ -167,7 +177,7 @@ Railway is the reference, but any two-service host works:
 | Database | Supabase Postgres, Supabase Storage, and `supabase-py`/PostgREST | Use whatever you'd like — just point the data layer at compatible PostgREST or replace its client and storage adapter. In this implementation, we use `SUPABASE_URL` plus `SUPABASE_SERVICE_API_KEY` with Supabase Postgres. |
 | Auth | Clerk in the SPA; HS256 JWT verification in FastAPI | Use whatever you'd like — just point web token acquisition at a JWT issuer that supplies an `org_id` claim and signs with `SUPABASE_JWT_SECRET`. In this implementation, we use Clerk's `supabase` JWT template; the dev-token flow needs no external auth. |
 | Email | One `send_email` boundary in `api/services/mailer.py` | Use whatever you'd like — just point the outbox worker at your provider implementation of that function. In this implementation, we use Resend and write local `.eml` files when its key is absent. |
-| Hosting | Two Railway services: uvicorn API and nginx/static SPA | Use whatever you'd like — just point a Python container or uvicorn service and a static SPA host at one another. In this implementation, we use Railway. |
+| Hosting | Two Railway services: uvicorn API and nginx/static SPA — plus a ready-made Cloudflare Workers web tier (`web/wrangler.jsonc`) | Use whatever you'd like — just point a Python container or uvicorn service and a static SPA host at one another. In this implementation, we use Railway, with an edge deployment on Cloudflare Workers. |
 | AI | Optional chat agent (OpenAI Agents SDK or Anthropic), triage, and shared tool-use adapters for Slack/MCP/CLI | Use whatever you'd like — the in-app agent runs on your `OPENAI_API_KEY` (default, `gpt-5.6-luna` at `xhigh` effort) or `ANTHROPIC_API_KEY` behind one provider switch, and disappears entirely when neither is set. See [docs/chat-agent.md](docs/chat-agent.md). Triage falls back to reviewer-score heuristics without a key. |
 | Integrations | Optional, per-organization Airtable settings; Slack Events API bot | Use whatever you'd like — just point the integration service boundaries at your systems. In this implementation, we use Airtable and Slack, and the core conference workflows run without either. |
 
