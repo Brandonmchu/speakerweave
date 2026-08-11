@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from typing import Any
 
-from agent import every_mcp
+from agent import mcp_connectors
 from agent.events import semantic_event
 from agent.permissions import with_permission_guidance
 from agent.tools import TurnContext, invoke_tool, registered_tools
@@ -87,7 +87,7 @@ async def stream_response(
             from openai.types.shared.reasoning import Reasoning
 
             async with AsyncExitStack() as stack:
-                external_definitions, external_handler = await every_mcp.openai_tools(
+                external_definitions, external_handler = await mcp_connectors.openai_tools(
                     stack, context.org_id, context.progress_queue
                 )
                 definitions = [
@@ -97,12 +97,14 @@ async def stream_response(
                 function_tools = []
                 for definition in definitions:
                     tool_name = str(definition["name"])
+                    connector_name = definition.get("connector_name")
 
                     async def on_invoke_tool(
                         _tool_context: Any,
                         arguments_json: str,
                         *,
                         _tool_name: str = tool_name,
+                        _connector_name: Any = connector_name,
                     ) -> str:
                         try:
                             arguments = json.loads(arguments_json or "{}")
@@ -110,6 +112,8 @@ async def stream_response(
                             arguments = {}
                         if not isinstance(arguments, dict):
                             arguments = {}
+                        if _connector_name:
+                            arguments["_connector_name"] = str(_connector_name)
                         return await invoke_tool(
                             context,
                             _tool_name,

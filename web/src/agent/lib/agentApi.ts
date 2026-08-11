@@ -152,9 +152,3 @@ export async function getPendingPermission(threadId: string): Promise<Permission
   return 'request_id' in response ? response : null
 }
 
-export const connectEvery = () =>
-  apiPost<{ authorize_url: string }>('/api/agent/integrations/every/connect', {})
-
-export const disconnectEvery = () =>
-  apiPost<{ ok: boolean }>('/api/agent/integrations/every/disconnect', {})
-

@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent import context_search, every_mcp, permissions, threads, titles, tools
+from agent import context_search, mcp_connectors, permissions, threads, titles, tools
 from agent.events import PUBLIC_EVENT_TYPES, format_sse_event
 from agent.router import (
     _ACTIVE_TURNS,
@@ -36,11 +36,11 @@ from tests.conftest import OTHER_ORG_ID, TEST_ORG_ID
 def clear_agent_registries():
     permissions._PENDING.clear()
     _ACTIVE_TURNS.clear()
-    every_mcp._OAUTH_ATTEMPTS.clear()
+    mcp_connectors._OAUTH_ATTEMPTS.clear()
     yield
     permissions._PENDING.clear()
     _ACTIVE_TURNS.clear()
-    every_mcp._OAUTH_ATTEMPTS.clear()
+    mcp_connectors._OAUTH_ATTEMPTS.clear()
 
 
 def _context(
@@ -189,7 +189,7 @@ async def test_permission_label_resolution_is_org_scoped(fake_db):
     assert ("eq", "org_id", TEST_ORG_ID) in query["filters"]
 
 
-def test_permission_policy_covers_dais_and_every_mutations():
+def test_permission_policy_covers_dais_and_external_mcp_mutations():
     assert permissions.permission_action_for_tool("decide_submission") == (
         "DECIDE_SUBMISSION"
     )
@@ -198,10 +198,19 @@ def test_permission_policy_covers_dais_and_every_mutations():
     )
     assert permissions.permission_action_for_tool("send_communication") == "SEND_EMAIL"
     assert permissions.permission_action_for_tool("delete_form") == "DELETE"
-    assert permissions.permission_action_for_tool("every_create_proposal") == (
+    assert permissions.permission_action_for_tool("mcp__every__create_proposal") == (
         "EXTERNAL_MCP_ACTION"
     )
-    assert permissions.permission_action_for_tool("every_list_invoices") is None
+    assert permissions.permission_action_for_tool("mcp__every__list_invoices") is None
+    assert permissions.permission_action_for_tool("mcp__crm__find_contact") is None
+    assert permissions.permission_action_for_tool("mcp__crm__update_contact") == (
+        "EXTERNAL_MCP_ACTION"
+    )
+    assert permissions.permission_description(
+        "EXTERNAL_MCP_ACTION",
+        "mcp__crm__update_contact",
+        {"_connector_name": "Sales CRM"},
+    ) == "Allow Sales CRM to run update_contact?"
     assert permissions.permission_action_for_tool("list_submissions") is None
 
 
@@ -333,16 +342,16 @@ def test_capabilities_on_off_matrix(
     assert (resolve_provider() if enabled else None) == provider
 
     async def disconnected(_org_id):
-        return {"available": False, "connected": False, "connected_email": None}
+        return 0
 
-    monkeypatch.setattr("agent.router.every_mcp.connection_status", disconnected)
+    monkeypatch.setattr("agent.router.mcp_connectors.connected_count", disconnected)
     with TestClient(_test_app()) as client:
         response = client.get("/api/agent/capabilities")
         assert response.status_code == 200
         assert response.json() == {
             "assistant": enabled,
             "provider": provider,
-            "every_mcp": {"available": False, "connected": False},
+            "mcp": {"available": True, "connectors_connected": 0},
         }
         if not enabled:
             assert client.get("/api/agent/threads").status_code == 404
@@ -362,7 +371,7 @@ def test_title_generation_only_runs_for_first_reply_on_default_thread():
     )
 
 
-async def test_every_oauth_discovery_pkce_exchange_and_scoped_storage(
+async def test_mcp_oauth_discovery_pkce_exchange_and_state_maps_to_connector(
     monkeypatch, fake_db
 ):
     requests: list[tuple[str, str, dict[str, Any]]] = []
@@ -417,9 +426,9 @@ async def test_every_oauth_discovery_pkce_exchange_and_scoped_storage(
     monkeypatch.setenv("EVERY_MCP_URL", "https://mcp.every.test/mcp")
     monkeypatch.setenv("PUBLIC_API_URL", "https://api.speakerweave.test")
     monkeypatch.setenv("PUBLIC_WEB_URL", "https://speakerweave.test")
-    monkeypatch.setattr(every_mcp.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(mcp_connectors.httpx, "AsyncClient", FakeClient)
 
-    authorize_url = await every_mcp.begin_connect(TEST_ORG_ID, "dev_user")
+    authorize_url = await mcp_connectors.begin_connect(TEST_ORG_ID, "dev_user", "every")
     parsed = urlsplit(authorize_url)
     query = parse_qs(parsed.query)
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
@@ -427,24 +436,252 @@ async def test_every_oauth_discovery_pkce_exchange_and_scoped_storage(
     )
     assert query["code_challenge_method"] == ["S256"]
     assert len(query["code_challenge"][0]) == 43
-    await every_mcp.finish_callback("authorization-code", query["state"][0])
+    assert query["state"][0] not in mcp_connectors._OAUTH_ATTEMPTS
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    from agent.router import mcp_connector_callback
+
+    callback = await mcp_connector_callback("authorization-code", query["state"][0])
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/settings?mcp=connected:every"
 
     stored = fake_db.rows("org_integrations")
     assert len(stored) == 1
     assert stored[0]["org_id"] == TEST_ORG_ID
-    assert stored[0]["kind"] == "every_mcp"
-    assert stored[0]["config"]["access_token"] == "every-access-token"
-    status = await every_mcp.connection_status(TEST_ORG_ID)
-    assert status == {
-        "available": True,
-        "connected": True,
-        "connected_email": "owner@example.com",
-    }
+    assert stored[0]["provider"] == "mcp_connector"
+    assert stored[0]["kind"] == "mcp_connector:every"
+    assert stored[0]["config"]["tokens"]["access_token"] == "every-access-token"
+    listed = await mcp_connectors.list_connectors(TEST_ORG_ID)
+    assert listed[0]["key"] == "every"
+    assert listed[0]["connected"] is True
+    assert "tokens" not in listed[0]
     registration = next(item for item in requests if item[1].endswith("/register"))
     assert registration[2]["json"]["redirect_uris"] == [
-        "https://api.speakerweave.test/api/agent/integrations/every/callback",
-        "https://speakerweave.test/api/agent/integrations/every/callback",
+        "https://api.speakerweave.test/api/agent/integrations/mcp/callback",
+        "https://speakerweave.test/api/agent/integrations/mcp/callback",
     ]
+
+
+async def test_mcp_preset_catalog_merges_environment_and_connection(monkeypatch, fake_db):
+    monkeypatch.setenv("EVERY_MCP_URL", "")
+    assert await mcp_connectors.list_connectors(TEST_ORG_ID) == []
+
+    monkeypatch.setenv("EVERY_MCP_URL", "https://mcp.every.test/mcp")
+    available = await mcp_connectors.list_connectors(TEST_ORG_ID)
+    assert available == [
+        {
+            "key": "every",
+            "name": "Every",
+            "url": "https://mcp.every.test/mcp",
+            "auth_kind": "oauth",
+            "preset": True,
+            "connected": False,
+            "status": "disconnected",
+            "description": "Business tools: proposals, invoices, clients",
+        }
+    ]
+
+    fake_db.seed(
+        "org_integrations",
+        {
+            "org_id": TEST_ORG_ID,
+            "provider": "mcp_connector",
+            "kind": "mcp_connector:every",
+            "config": {
+                "key": "every",
+                "name": "Stale name",
+                "url": "https://stale.test/mcp",
+                "auth_kind": "oauth",
+                "status": "connected",
+                "connected_at": "2026-08-10T14:00:00+00:00",
+                "tokens": {"access_token": "secret-access"},
+            },
+        },
+    )
+    connected = (await mcp_connectors.list_connectors(TEST_ORG_ID))[0]
+    assert connected["name"] == "Every"
+    assert connected["url"] == "https://mcp.every.test/mcp"
+    assert connected["connected"] is True
+    assert "tokens" not in connected
+
+
+def test_custom_mcp_crud_validates_live_and_never_returns_secrets(monkeypatch, fake_db):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    pings: list[tuple[str, dict[str, str]]] = []
+
+    async def valid(url, headers):
+        pings.append((url, dict(headers)))
+
+    monkeypatch.setattr(mcp_connectors, "validate_connection", valid)
+    with TestClient(_test_app()) as client:
+        created = client.post(
+            "/api/agent/integrations/mcp",
+            json={
+                "name": "Sales CRM",
+                "url": "https://crm.example.com/mcp",
+                "auth_kind": "bearer",
+                "bearer_token": "super-secret-token",
+            },
+        )
+        assert created.status_code == 200
+        assert created.json()["key"] == "sales-crm"
+        assert created.json()["connected"] is True
+        assert "super-secret-token" not in created.text
+        assert pings == [
+            (
+                "https://crm.example.com/mcp",
+                {"Authorization": "Bearer super-secret-token"},
+            )
+        ]
+
+        listed = client.get("/api/agent/integrations/mcp")
+        assert listed.status_code == 200
+        assert listed.json()["connectors"][0]["name"] == "Sales CRM"
+        assert "super-secret-token" not in listed.text
+        assert "bearer_token" not in listed.text
+        assert "tokens" not in listed.text
+
+        removed = client.delete("/api/agent/integrations/mcp/sales-crm")
+        assert removed.status_code == 200
+        assert client.get("/api/agent/integrations/mcp").json() == {"connectors": []}
+
+    writes = [entry for entry in fake_db.log if entry["table"] == "org_integrations"]
+    assert writes
+    assert all(("eq", "org_id", TEST_ORG_ID) in entry["filters"] for entry in writes if entry["op"] != "insert")
+
+
+def test_custom_mcp_validation_failure_is_422_and_not_persisted(monkeypatch, fake_db):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+
+    async def invalid(_url, _headers):
+        raise RuntimeError("tools/list rejected the credential")
+
+    monkeypatch.setattr(mcp_connectors, "validate_connection", invalid)
+    with TestClient(_test_app()) as client:
+        response = client.post(
+            "/api/agent/integrations/mcp",
+            json={
+                "name": "Broken CRM",
+                "url": "https://crm.example.com/mcp",
+                "auth_kind": "none",
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "MCP validation failed: tools/list rejected the credential"
+    )
+    assert fake_db.rows("org_integrations") == []
+
+
+def test_custom_mcp_rejects_insecure_remote_url(monkeypatch, fake_db):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    with TestClient(_test_app()) as client:
+        response = client.post(
+            "/api/agent/integrations/mcp",
+            json={
+                "name": "Remote",
+                "url": "http://crm.example.com/mcp",
+                "auth_kind": "none",
+            },
+        )
+    assert response.status_code == 422
+    assert "HTTPS" in response.json()["detail"]
+    assert fake_db.rows("org_integrations") == []
+
+
+async def test_runtime_attach_isolates_broken_connector_and_keeps_healthy_tools(
+    monkeypatch, fake_db
+):
+    import agents.mcp
+
+    for key, name in (("broken", "Broken CRM"), ("healthy", "Healthy CRM")):
+        fake_db.seed(
+            "org_integrations",
+            {
+                "org_id": TEST_ORG_ID,
+                "provider": "mcp_connector",
+                "kind": f"mcp_connector:{key}",
+                "config": {
+                    "key": key,
+                    "name": name,
+                    "url": f"https://{key}.example.com/mcp",
+                    "auth_kind": "none",
+                    "status": "connected",
+                    "tokens": {},
+                    "bearer_token": None,
+                },
+            },
+        )
+
+    class FakeServer:
+        def __init__(self, *, name, **_kwargs):
+            self.name = name
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self):
+            if self.name == "Broken CRM":
+                raise RuntimeError("offline")
+            return [
+                SimpleNamespace(
+                    name="list_contacts",
+                    description="List CRM contacts",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+            ]
+
+        async def call_tool(self, name, arguments):
+            return {"tool": name, "arguments": arguments}
+
+    monkeypatch.setattr(agents.mcp, "MCPServerStreamableHttp", FakeServer)
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    from contextlib import AsyncExitStack
+
+    async with AsyncExitStack() as stack:
+        definitions, handler = await mcp_connectors.openai_tools(
+            stack, TEST_ORG_ID, queue
+        )
+        assert [item["name"] for item in definitions] == [
+            "mcp__healthy__list_contacts"
+        ]
+        assert handler is not None
+        assert await handler("mcp__healthy__list_contacts", {"q": "Ada"}) == {
+            "tool": "list_contacts",
+            "arguments": {"q": "Ada"},
+        }
+    assert await queue.get() == {
+        "type": "progress",
+        "message": "Couldn't reach Broken CRM — continuing without it",
+    }
+
+
+def test_capabilities_counts_connected_mcp_connectors(monkeypatch, fake_db):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    for key, status in (("one", "connected"), ("two", "connected"), ("three", "error")):
+        fake_db.seed(
+            "org_integrations",
+            {
+                "org_id": TEST_ORG_ID,
+                "provider": "mcp_connector",
+                "kind": f"mcp_connector:{key}",
+                "config": {
+                    "key": key,
+                    "name": key.title(),
+                    "url": f"https://{key}.example.com/mcp",
+                    "auth_kind": "none",
+                    "status": status,
+                },
+            },
+        )
+    with TestClient(_test_app()) as client:
+        response = client.get("/api/agent/capabilities")
+    assert response.json()["mcp"] == {
+        "available": True,
+        "connectors_connected": 2,
+    }
 
 
 async def test_history_selects_newest_first_with_limit_and_reverses(fake_db):
@@ -541,11 +778,11 @@ async def test_openai_runtime_uses_stateless_xhigh_streaming_settings(monkeypatc
         captured.update(kwargs)
         return FakeRun()
 
-    async def no_every(_stack, _org_id, _queue):
+    async def no_connectors(_stack, _org_id, _queue):
         return [], None
 
     monkeypatch.setattr(agents.Runner, "run_streamed", staticmethod(fake_run_streamed))
-    monkeypatch.setattr(runtime_openai.every_mcp, "openai_tools", no_every)
+    monkeypatch.setattr(runtime_openai.mcp_connectors, "openai_tools", no_connectors)
     events = [
         event
         async for event in runtime_openai.stream_response(
@@ -606,12 +843,12 @@ async def test_anthropic_runtime_streams_same_message_events(monkeypatch):
         def __init__(self, **_kwargs):
             self.messages = FakeMessages()
 
-    async def no_every(_stack, _org_id, _queue):
+    async def no_connectors(_stack, _org_id, _queue):
         return [], None
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
     monkeypatch.setattr(anthropic, "AsyncAnthropic", FakeClient)
-    monkeypatch.setattr(runtime_anthropic.every_mcp, "anthropic_tools", no_every)
+    monkeypatch.setattr(runtime_anthropic.mcp_connectors, "anthropic_tools", no_connectors)
     events = [
         event
         async for event in runtime_anthropic.stream_response(

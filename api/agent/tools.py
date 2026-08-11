@@ -18,6 +18,7 @@ from agent.permissions import (
     denied_tool_result,
     permission_action_for_tool,
     request_permission,
+    strip_display_fields,
     with_permission_guidance,
 )
 from services import assistant, content_pipeline, integration_api
@@ -453,8 +454,8 @@ async def invoke_tool(
             )
         elif tool_name in LOCAL_TOOL_HANDLERS:
             result = await LOCAL_TOOL_HANDLERS[tool_name](context.org_id, clean_arguments)
-        elif tool_name.startswith("every_") and external_handler is not None:
-            result = await external_handler(tool_name.removeprefix("every_"), clean_arguments)
+        elif tool_name.startswith("mcp__") and external_handler is not None:
+            result = await external_handler(tool_name, strip_display_fields(clean_arguments))
         else:
             result = await assistant.run_tool(context.org_id, tool_name, clean_arguments)
     except HTTPException as exc:

@@ -8,13 +8,13 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agent import context_search, every_mcp, permissions, threads, titles
+from agent import context_search, mcp_connectors, permissions, threads, titles
 from agent.events import PUBLIC_EVENT_TYPES, format_sse_event
 from agent.prompt import build_system_prompt
 from agent.tools import TurnContext
@@ -116,6 +116,29 @@ class PermissionResponseRequest(BaseModel):
     approved: bool
 
 
+class MCPConnectorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=50)
+    url: str = Field(..., min_length=1, max_length=2_000)
+    auth_kind: Literal["oauth", "bearer", "none"]
+    bearer_token: str | None = Field(default=None, max_length=4_000)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Name cannot be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def require_bearer_token(self) -> MCPConnectorRequest:
+        if self.auth_kind == "bearer" and not (self.bearer_token or "").strip():
+            raise ValueError("Bearer token is required")
+        return self
+
+
 @dataclass
 class ActiveTurn:
     thread_id: str
@@ -162,20 +185,13 @@ async def capabilities(
     _user_id, org_id = auth
     enabled = assistant_enabled()
     try:
-        every_status = await every_mcp.connection_status(org_id)
+        connector_count = await mcp_connectors.connected_count(org_id)
     except Exception:  # noqa: BLE001 - capability discovery must degrade closed
-        every_status = {
-            "available": every_mcp.is_available(),
-            "connected": False,
-            "connected_email": None,
-        }
+        connector_count = 0
     return {
         "assistant": enabled,
         "provider": resolve_provider() if enabled else None,
-        "every_mcp": {
-            "available": every_status["available"],
-            "connected": every_status["connected"],
-        },
+        "mcp": {"connectors_connected": connector_count, "available": True},
     }
 
 
@@ -310,21 +326,17 @@ async def chat_stream(
         return _streaming_response(_busy_stream(thread_id, turn_id))
 
     try:
-        history_result, event_result, every_result = await asyncio.gather(
+        history_result, event_result, connector_result = await asyncio.gather(
             threads.load_history(thread_id, org_id),
             threads.current_event_context(org_id),
-            every_mcp.connection_status(org_id),
+            mcp_connectors.connected_count(org_id),
             return_exceptions=True,
         )
         if isinstance(history_result, BaseException):
             raise history_result
         history = history_result
         event = None if isinstance(event_result, BaseException) else event_result
-        every_status = (
-            {"connected": False}
-            if isinstance(every_result, BaseException)
-            else every_result
-        )
+        connector_count = 0 if isinstance(connector_result, BaseException) else connector_result
         await threads.persist_user_message(
             thread_id=thread_id,
             org_id=org_id,
@@ -342,7 +354,7 @@ async def chat_stream(
         user_id=user_id,
         metadata=metadata,
         event=event,
-        every_connected=bool(every_status.get("connected")),
+        mcp_connectors_connected=int(connector_count),
     )
     full_prompt = threads.format_history(history, payload.message)
 
@@ -560,36 +572,63 @@ async def permission_response(
     return {"ok": True}
 
 
-@router.get("/integrations/every")
-async def every_status(
+@router.get("/integrations/mcp")
+async def get_mcp_connectors(
     auth: tuple = Depends(get_current_user_or_api_org),
 ) -> dict[str, Any]:
     require_enabled()
     _user_id, org_id = auth
-    return await every_mcp.connection_status(org_id)
+    return {"connectors": await mcp_connectors.list_connectors(org_id)}
 
 
-@router.post("/integrations/every/connect")
-async def connect_every(
+@router.post("/integrations/mcp")
+async def post_mcp_connector(
+    payload: MCPConnectorRequest,
+    auth: tuple = Depends(get_current_user_or_api_org),
+) -> dict[str, Any]:
+    require_enabled()
+    user_id, org_id = auth
+    try:
+        connector, authorize_url = await mcp_connectors.create_connector(
+            org_id,
+            user_id,
+            name=payload.name,
+            url=payload.url,
+            auth_kind=payload.auth_kind,
+            bearer_token=payload.bearer_token,
+        )
+    except mcp_connectors.ConnectorValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if authorize_url:
+        return {"authorize_url": authorize_url}
+    return connector
+
+
+@router.post("/integrations/mcp/{key}/connect")
+async def connect_mcp_connector(
+    key: str,
     auth: tuple = Depends(get_current_user_or_api_org),
 ) -> dict[str, str]:
     require_enabled()
     user_id, org_id = auth
-    return {"authorize_url": await every_mcp.begin_connect(org_id, user_id)}
+    return {"authorize_url": await mcp_connectors.begin_connect(org_id, user_id, key)}
 
 
-@router.get("/integrations/every/callback")
-async def every_callback(code: str, state: str) -> RedirectResponse:
+@router.get("/integrations/mcp/callback")
+async def mcp_connector_callback(code: str, state: str) -> RedirectResponse:
     require_enabled()
-    await every_mcp.finish_callback(code, state)
-    return RedirectResponse(url="/settings?every=connected", status_code=302)
+    key = await mcp_connectors.finish_callback(code, state)
+    return RedirectResponse(url=f"/settings?mcp=connected:{key}", status_code=302)
 
 
-@router.post("/integrations/every/disconnect")
-async def disconnect_every(
+@router.delete("/integrations/mcp/{key}")
+async def delete_mcp_connector(
+    key: str,
     auth: tuple = Depends(get_current_user_or_api_org),
 ) -> dict[str, bool]:
     require_enabled()
     _user_id, org_id = auth
-    await every_mcp.disconnect(org_id)
+    await mcp_connectors.delete_connector(org_id, key)
     return {"ok": True}

@@ -32,7 +32,7 @@ PATCH_TARGET_MODULES = (
     "routes.schedule_routes",
     "routes.taxonomy_routes",
     "agent.context_search",
-    "agent.every_mcp",
+    "agent.mcp_connectors",
     "agent.permissions",
     "agent.threads",
     "agent.tools",

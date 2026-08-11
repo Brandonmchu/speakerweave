@@ -38,6 +38,28 @@ export interface SlackStatus {
   source: 'environment'
 }
 
+export type MCPAuthKind = 'oauth' | 'bearer' | 'none'
+
+export interface MCPConnector {
+  key: string
+  name: string
+  url: string
+  auth_kind: MCPAuthKind
+  preset: boolean
+  description?: string
+  connected: boolean
+  status: string
+  connected_at?: string
+  last_error?: string
+}
+
+export interface MCPConnectorInput {
+  name: string
+  url: string
+  auth_kind: MCPAuthKind
+  bearer_token?: string
+}
+
 export const getAirtableConfig = () =>
   apiGet<AirtableConfig>('/api/integrations/airtable')
 
@@ -52,6 +74,20 @@ export const syncAirtable = () =>
 
 export const getSlackStatus = () =>
   apiGet<SlackStatus>('/api/integrations/slack/status')
+
+export const listMCPConnectors = () =>
+  apiGet<{ connectors: MCPConnector[] }>('/api/agent/integrations/mcp').then(
+    (response) => response.connectors,
+  )
+
+export const createMCPConnector = (input: MCPConnectorInput) =>
+  apiPost<MCPConnector | { authorize_url: string }>('/api/agent/integrations/mcp', input)
+
+export const connectMCPConnector = (key: string) =>
+  apiPost<{ authorize_url: string }>(`/api/agent/integrations/mcp/${key}/connect`, {})
+
+export const deleteMCPConnector = (key: string) =>
+  request<{ ok: boolean }>(`/api/agent/integrations/mcp/${key}`, { method: 'DELETE' })
 
 export const SLACK_MANIFEST = JSON.stringify(
   {

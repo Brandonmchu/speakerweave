@@ -221,7 +221,7 @@ For claude.ai, Claude for Work, or ChatGPT connector UIs, add a custom connector
 
 An Every-style agent panel lives on the right side of every organizer page: threads, streaming answers, `@`-mention any submission/speaker/session as context, clickable entity badges that route through the app, agent-driven navigation ("show me the unstaffed sessions"), and inline Approve/Deny confirmation before anything sensitive (emails, decisions, publishing, deletes) happens.
 
-It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning effort) or `ANTHROPIC_API_KEY`, and the same harness runs on either provider. No key, no UI, no routes, no imports. All of it is quarantined in `api/agent/` + `web/src/agent/` with one mount line each, so removing the feature from your fork is a two-deletion job. Optionally connect an [Every](https://every.ai) account to give the agent your business tools (proposals, invoicing) over MCP OAuth. Full details, including what to adjust when running it on Claude instead: [docs/chat-agent.md](docs/chat-agent.md).
+It is **off until you add a key** — set `OPENAI_API_KEY` (default runtime: OpenAI Agents SDK, `gpt-5.6-luna` at `xhigh` reasoning effort) or `ANTHROPIC_API_KEY`, and the same harness runs on either provider. No key, no UI, no routes, no imports. All of it is quarantined in `api/agent/` + `web/src/agent/` with one mount line each, so removing the feature from your fork is a two-deletion job. Connect Every — or any MCP server your org runs — to give the agent external tools. Full details, including what to adjust when running it on Claude instead: [docs/chat-agent.md](docs/chat-agent.md).
 
 ### Slack agent
 

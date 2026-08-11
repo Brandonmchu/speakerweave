@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
@@ -8,13 +8,16 @@ import {
   Copy,
   ExternalLink,
   KeyRound,
+  Loader2,
   Plus,
+  PlugZap,
   Settings,
   Trash2,
   X,
 } from 'lucide-react'
 
 import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
+import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
 import {
   createApiToken,
   createTaxonomy,
@@ -47,13 +50,19 @@ import {
   toDateInput,
 } from '@/lib/eventDateTime'
 import {
+  connectMCPConnector,
+  createMCPConnector,
+  deleteMCPConnector,
   getAirtableConfig,
   getSlackStatus,
+  listMCPConnectors,
   saveAirtableConfig,
   SLACK_MANIFEST,
   syncAirtable,
   type AirtableConfig,
   type AirtableSyncResult,
+  type MCPAuthKind,
+  type MCPConnector,
 } from '@/lib/integrationsApi'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/pages/Forms'
@@ -113,11 +122,31 @@ export function slugError(value: string): string | null {
 }
 
 export function SettingsPage() {
+  const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const eventsQuery = useQuery({
     queryKey: ['events'],
     queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
   })
+  const capabilitiesQuery = useQuery({
+    queryKey: agentKeys.capabilities,
+    queryFn: getAgentCapabilities,
+    staleTime: Infinity,
+    retry: false,
+  })
   const event = eventsQuery.data?.[0]
+
+  useEffect(() => {
+    const result = searchParams.get('mcp')
+    if (!result?.startsWith('connected:')) return
+    const key = result.slice('connected:'.length)
+    toast({ title: 'MCP connector connected', description: key ? `${key} is ready to use.` : undefined })
+    void queryClient.invalidateQueries({ queryKey: ['integrations', 'mcp'] })
+    void queryClient.invalidateQueries({ queryKey: agentKeys.capabilities })
+    const next = new URLSearchParams(searchParams)
+    next.delete('mcp')
+    setSearchParams(next, { replace: true })
+  }, [queryClient, searchParams, setSearchParams])
 
   if (!eventsQuery.isPending && !eventsQuery.error && !event) {
     return <Navigate to="/onboarding" replace />
@@ -192,6 +221,7 @@ export function SettingsPage() {
             title="Tags"
             description="Free-form labels for filtering and reporting."
           />
+          {capabilitiesQuery.data?.assistant === true && <MCPConnectorsCard />}
           <AirtableSyncCard />
           <SlackBotCard />
           <ApiTokensSection />
@@ -204,6 +234,289 @@ export function SettingsPage() {
 /* -------------------------------------------------------------------------- */
 /* Integrations                                                               */
 /* -------------------------------------------------------------------------- */
+
+interface MCPDraft {
+  name: string
+  url: string
+  auth_kind: MCPAuthKind
+  bearer_token: string
+}
+
+const EMPTY_MCP_DRAFT: MCPDraft = {
+  name: '',
+  url: '',
+  auth_kind: 'oauth',
+  bearer_token: '',
+}
+
+export function mcpDraftError(draft: MCPDraft): string | null {
+  const name = draft.name.trim()
+  if (!name || name.length > 50) return 'Name must be between 1 and 50 characters.'
+  let parsed: URL
+  try {
+    parsed = new URL(draft.url.trim())
+  } catch {
+    return 'Enter a valid MCP server URL.'
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname.toLowerCase())
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback)) {
+    return 'Use HTTPS. HTTP is allowed only for localhost.'
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return 'The server URL cannot include credentials, a query, or a fragment.'
+  }
+  if (draft.auth_kind === 'bearer' && !draft.bearer_token.trim()) {
+    return 'Enter the bearer token for this server.'
+  }
+  return null
+}
+
+function connectorStatus(connector: MCPConnector) {
+  if (connector.connected) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-success-strong">
+        Connected <Check className="h-3.5 w-3.5" />
+      </span>
+    )
+  }
+  if (connector.last_error) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-xs font-medium text-destructive-strong"
+        title={connector.last_error}
+      >
+        <AlertCircle className="h-3.5 w-3.5" /> Error
+      </span>
+    )
+  }
+  return <span className="text-xs text-muted-foreground">Not connected</span>
+}
+
+function MCPConnectorsCard() {
+  const queryClient = useQueryClient()
+  const queryKey = ['integrations', 'mcp'] as const
+  const query = useQuery({ queryKey, queryFn: listMCPConnectors })
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [draft, setDraft] = useState<MCPDraft>(EMPTY_MCP_DRAFT)
+  const [inlineError, setInlineError] = useState<string | null>(null)
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey }),
+      queryClient.invalidateQueries({ queryKey: agentKeys.capabilities }),
+    ])
+  }
+  const connect = useMutation({
+    mutationFn: connectMCPConnector,
+    onSuccess: ({ authorize_url }) => {
+      window.open(authorize_url, '_blank', 'noopener,noreferrer')
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't connect MCP server", description: error.message }),
+  })
+  const remove = useMutation({
+    mutationFn: deleteMCPConnector,
+    onSuccess: async () => {
+      await refresh()
+      toast({ title: 'MCP connector disconnected' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't disconnect MCP server", description: error.message }),
+  })
+  const create = useMutation({
+    mutationFn: createMCPConnector,
+    onSuccess: async (result) => {
+      await refresh()
+      setDialogOpen(false)
+      setDraft(EMPTY_MCP_DRAFT)
+      setInlineError(null)
+      if ('authorize_url' in result) {
+        window.open(result.authorize_url, '_blank', 'noopener,noreferrer')
+      } else {
+        toast({ title: `${result.name} connected` })
+      }
+    },
+    onError: (error: Error) => setInlineError(error.message),
+  })
+
+  return (
+    <>
+      <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="mcp-connectors-card">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-foreground">MCP connectors</h2>
+              <Badge variant="muted">
+                {(query.data ?? []).filter((connector) => connector.connected).length} connected
+              </Badge>
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Give the assistant tools from business systems and internal MCP servers.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" /> Add custom server
+          </Button>
+        </div>
+
+        <div className="divide-y divide-border">
+          {query.isPending ? (
+            <div className="space-y-2 px-5 py-4">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-4/5" />
+            </div>
+          ) : query.error ? (
+            <div className="flex items-center justify-between gap-3 px-5 py-4">
+              <p className="text-sm text-destructive-strong">{query.error.message}</p>
+              <Button size="sm" variant="secondary" onClick={() => query.refetch()}>Try again</Button>
+            </div>
+          ) : query.data?.length ? (
+            query.data.map((connector) => (
+              <div key={connector.key} className="flex flex-wrap items-center gap-3 px-5 py-4" data-testid={`mcp-connector-${connector.key}`}>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
+                  <PlugZap className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground">{connector.name}</p>
+                    {connector.preset && <Badge variant="outline">Preset</Badge>}
+                    <Badge variant="muted">{connector.auth_kind === 'bearer' ? 'Bearer token' : connector.auth_kind === 'oauth' ? 'OAuth' : 'No auth'}</Badge>
+                  </div>
+                  <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={connector.url}>{connector.url}</p>
+                  {connector.description && <p className="mt-1 text-xs text-muted-foreground">{connector.description}</p>}
+                </div>
+                <div className="flex min-w-32 flex-col items-end gap-2">
+                  {connectorStatus(connector)}
+                  <div className="flex items-center gap-1.5">
+                    {!connector.connected && connector.auth_kind === 'oauth' && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={connect.isPending}
+                        onClick={() => connect.mutate(connector.key)}
+                      >
+                        {connect.isPending && connect.variables === connector.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        Connect
+                      </Button>
+                    )}
+                    {(connector.connected || connector.status === 'error') && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(connector.key)}
+                      >
+                        Disconnect
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="px-5 py-6 text-sm text-muted-foreground">
+              No connector presets are configured. Add your organization's MCP server to begin.
+            </p>
+          )}
+        </div>
+      </section>
+
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open)
+          if (!open) {
+            setDraft(EMPTY_MCP_DRAFT)
+            setInlineError(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add custom MCP server</DialogTitle>
+            <DialogDescription>
+              SpeakerWeave validates the connection before making its tools available to the assistant.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const error = mcpDraftError(draft)
+              setInlineError(error)
+              if (error) return
+              create.mutate({
+                name: draft.name.trim(),
+                url: draft.url.trim(),
+                auth_kind: draft.auth_kind,
+                ...(draft.auth_kind === 'bearer' ? { bearer_token: draft.bearer_token } : {}),
+              })
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="mcp-name">Name</Label>
+              <Input
+                id="mcp-name"
+                value={draft.name}
+                maxLength={50}
+                placeholder="Sales CRM"
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mcp-url">Server URL</Label>
+              <Input
+                id="mcp-url"
+                value={draft.url}
+                placeholder="https://crm.example.com/mcp"
+                spellCheck={false}
+                onChange={(event) => setDraft({ ...draft, url: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mcp-auth-kind">Authentication</Label>
+              <NativeSelect
+                id="mcp-auth-kind"
+                value={draft.auth_kind}
+                onValueChange={(auth_kind) => setDraft({ ...draft, auth_kind: auth_kind as MCPAuthKind })}
+                options={[
+                  { value: 'oauth', label: 'OAuth' },
+                  { value: 'bearer', label: 'Bearer token' },
+                  { value: 'none', label: 'None' },
+                ]}
+              />
+            </div>
+            {draft.auth_kind === 'bearer' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="mcp-bearer-token">Bearer token</Label>
+                <Input
+                  id="mcp-bearer-token"
+                  type="password"
+                  autoComplete="new-password"
+                  value={draft.bearer_token}
+                  onChange={(event) => setDraft({ ...draft, bearer_token: event.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">Write-only. The token is never returned to the browser.</p>
+              </div>
+            )}
+            {inlineError && (
+              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive-strong">
+                {inlineError}
+              </p>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={create.isPending} onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={create.isPending}>
+                {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {create.isPending ? 'Validating…' : 'Add server'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
 
 interface AirtableDraft {
   token: string

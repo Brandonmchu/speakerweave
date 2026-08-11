@@ -21,7 +21,7 @@ The frontend needs no configuration at all: it asks `GET /api/agent/capabilities
 
 All chat-agent code is quarantined in two directories:
 
-- `api/agent/` — the FastAPI module: router, both provider runtimes, SSE event vocabulary, thread persistence, permission gate, context search, Every MCP client. Mounted from a single guarded `include_router` line in `api/main.py`.
+- `api/agent/` — the FastAPI module: router, both provider runtimes, SSE event vocabulary, thread persistence, permission gate, context search, and MCP connector framework. Mounted from a single guarded `include_router` line in `api/main.py`.
 - `web/src/agent/` — the React module: panel shell, threads, composer with `@` mentions, streaming consumer + pacer, markdown renderer, work trace, permission prompt. Mounted from a single conditional block in `web/src/shell/AppShell.tsx`.
 
 **Don't want it?** Set no keys — it stays dormant, costs nothing, imports nothing.
@@ -48,13 +48,13 @@ If you default to the Anthropic lane (or point the OpenAI lane at a different mo
 
 ## Sensitive actions require approval
 
-Tools that send email, record accept/decline decisions, publish the schedule, delete data, or invoke a mutating Every tool are permission-gated: the run pauses, the composer becomes an Approve/Deny card (180-second expiry), and a denial is returned to the model as a structured refusal so the conversation continues gracefully. The gated list lives in `api/agent/permissions.py` — extend it as you add tools.
+Tools that send email, record accept/decline decisions, publish the schedule, delete data, or invoke a mutating external MCP tool are permission-gated: the run pauses, the composer becomes an Approve/Deny card (180-second expiry), and a denial is returned to the model as a structured refusal so the conversation continues gracefully. The gated list lives in `api/agent/permissions.py` — extend it as you add tools.
 
-## Connect Every (optional layer)
+## MCP connectors (optional layer)
 
-If your organization runs its business on [Every](https://every.ai), set `EVERY_MCP_URL` (e.g. `https://admin-mcp.every.ai/mcp`) and connect an account from the chat panel or Settings → Integrations. SpeakerWeave performs the standard MCP OAuth flow (discovery, dynamic client registration, PKCE) and the agent gains `every_*` tools — drafting proposals for confirmed speakers, checking a sponsor's invoice status — with all mutations behind the same Approve/Deny gate. Disconnecting removes the tokens; the agent degrades gracefully if Every is unreachable.
+Organizations can connect external tool servers from Settings → Integrations. [Every](https://every.ai) is the first preset: set `EVERY_MCP_URL` (for example, `https://admin-mcp.every.ai/mcp`) and it appears in the catalog ready for OAuth connection. Teams can also add any custom server with OAuth, a static bearer token, or no authentication. Tools are namespaced as `mcp__<connector>__<tool>`, every mutation uses the same Approve/Deny gate, and one unreachable connector never prevents the remaining tools or the chat itself from working.
 
-The same pattern works for any MCP server that implements the standard OAuth flow — `api/agent/every_mcp.py` is deliberately a generic client with one configured endpoint.
+A compatible custom server exposes MCP over Streamable HTTP and supports either standard MCP OAuth discovery (including dynamic client registration and PKCE) or a static bearer token. Connector definitions, org-scoped credentials, refresh handling, and both runtime bridges live in `api/agent/mcp_connectors.py`.
 
 ## Wire protocol (for custom frontends)
 

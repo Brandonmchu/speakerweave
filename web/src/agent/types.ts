@@ -10,9 +10,9 @@ export type AgentEntityType =
 export interface AgentCapabilities {
   assistant: boolean
   provider: 'openai' | 'anthropic' | null
-  every_mcp: {
+  mcp: {
     available: boolean
-    connected: boolean
+    connectors_connected: number
   }
 }
 
@@ -95,4 +95,3 @@ export type AgentStreamEvent =
   | { type: 'error'; message: string; code?: string }
   | { type: 'cancelled' }
   | { type: 'keepalive' }
-

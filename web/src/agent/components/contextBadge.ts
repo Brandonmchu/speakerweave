@@ -99,7 +99,7 @@ export interface ParsedContextToken {
 }
 
 /**
- * Every's wire objects are JSON embedded directly in prose. This scanner keeps
+ * Entity wire objects are JSON embedded directly in prose. This scanner keeps
  * the same key contract while also accepting escaped quotes in display text,
  * which a flat `[^\"]*` regex cannot round-trip safely.
  */
@@ -203,4 +203,3 @@ export function insertContextBadge(
   }
   return false
 }
-

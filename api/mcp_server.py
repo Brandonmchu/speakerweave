@@ -19,7 +19,8 @@ try:
     from mcp.server import MCPServer
     from mcp.server.mcpserver import Context
 except ImportError:  # mcp < 2
-    from mcp.server.fastmcp import Context, FastMCP as MCPServer
+    from mcp.server.fastmcp import Context
+    from mcp.server.fastmcp import FastMCP as MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.datastructures import Headers
 from starlette.requests import Request

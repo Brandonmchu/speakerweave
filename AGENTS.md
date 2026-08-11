@@ -167,6 +167,6 @@ venv/bin/python scripts/mint_dev_token.py   # print a short-lived organizer toke
 - **MCP:** Streamable HTTP tools/resources and bearer/OAuth auth live in `api/mcp_server.py` and mount at `/mcp` from `api/main.py`.
 - **OAuth:** discovery, dynamic registration, PKCE authorization, and token rotation live in `api/routes/oauth_routes.py`, `api/services/oauth.py`, and `api/migrations/015_oauth.sql`.
 - **Assistant:** shared prompts, tools, guarded execution, and the model loop live in `api/services/assistant.py`; the authenticated in-app boundary is `api/routes/assistant_routes.py` and Slack stays a thin transport in `api/services/slack_agent.py`.
-- **Chat agent:** the streaming in-app panel is `api/agent/` (SSE harness, provider runtimes, permissions, Every MCP client) + `web/src/agent/`; it reuses the assistant tool registry and is documented in `docs/chat-agent.md`.
+- **Chat agent:** the streaming in-app panel is `api/agent/` (SSE harness, provider runtimes, permissions, MCP connector framework) + `web/src/agent/`; it reuses the assistant tool registry and is documented in `docs/chat-agent.md`.
 - **Slack:** import `api/slack_manifest.json`; signed events enter through `api/routes/slack_routes.py` and delegate to the shared assistant engine.
 - **Airtable:** per-organization configuration enters through `api/routes/integration_routes.py` and sync/upsert behavior lives in `api/services/airtable_sync.py`.

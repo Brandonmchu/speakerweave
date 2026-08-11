@@ -165,6 +165,7 @@ async def save_config(
             {
                 "org_id": org_id,
                 "kind": AIRTABLE_KIND,
+                "provider": AIRTABLE_KIND,
                 "config": next_config,
                 "updated_at": updated_at,
             },
@@ -184,6 +185,7 @@ async def _store_last_synced(org_id: str, config: dict[str, Any], synced_at: str
             {
                 "org_id": org_id,
                 "kind": AIRTABLE_KIND,
+                "provider": AIRTABLE_KIND,
                 "config": next_config,
                 "updated_at": synced_at,
             },

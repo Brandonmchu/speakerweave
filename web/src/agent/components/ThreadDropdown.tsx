@@ -6,15 +6,10 @@ import {
   Ellipsis,
   Loader2,
   Pencil,
-  Plug,
   Search,
   Trash2,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-
 import { useAgent } from '@/agent/AgentProvider'
-import { agentKeys, connectEvery, disconnectEvery } from '@/agent/lib/agentApi'
-import type { AgentCapabilities } from '@/agent/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/ui/button'
 import {
@@ -39,7 +34,6 @@ function relativeTime(value: string | null, fallback: string): string {
 
 export function ThreadDropdown() {
   const {
-    capabilities,
     threads,
     threadsLoading,
     activeThreadId,
@@ -48,7 +42,6 @@ export function ThreadDropdown() {
     deleteThread,
     respondingThreadIds,
   } = useAgent()
-  const queryClient = useQueryClient()
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -58,7 +51,6 @@ export function ThreadDropdown() {
   const [renameValue, setRenameValue] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [everyBusy, setEveryBusy] = useState(false)
 
   const activeThread = threads.find((thread) => thread.id === activeThreadId)
   const filtered = useMemo(() => {
@@ -101,12 +93,6 @@ export function ThreadDropdown() {
       document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [activeIndex, filtered, open, selectThread])
-
-  const updateCapability = (connected: boolean) => {
-    queryClient.setQueryData<AgentCapabilities>(agentKeys.capabilities, (current) =>
-      current ? { ...current, every_mcp: { ...current.every_mcp, connected } } : current,
-    )
-  }
 
   return (
     <>
@@ -229,38 +215,6 @@ export function ThreadDropdown() {
                 ))
               )}
             </div>
-            {capabilities.every_mcp.available && (
-              <div className="border-t border-border p-1.5">
-                <button
-                  type="button"
-                  disabled={everyBusy}
-                  onClick={async () => {
-                    setEveryBusy(true)
-                    try {
-                      if (capabilities.every_mcp.connected) {
-                        await disconnectEvery()
-                        updateCapability(false)
-                        toast({ title: 'Every disconnected' })
-                      } else {
-                        const response = await connectEvery()
-                        window.open(response.authorize_url, '_blank', 'noopener,noreferrer')
-                      }
-                    } catch (error) {
-                      toast({ variant: 'destructive', title: "Couldn't update Every", description: error instanceof Error ? error.message : 'Try again.' })
-                    } finally {
-                      setEveryBusy(false)
-                    }
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                >
-                  {everyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
-                  <span className="flex-1">{capabilities.every_mcp.connected ? 'Every connected' : 'Connect Every'}</span>
-                  {capabilities.every_mcp.connected && (
-                    <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success-strong">Every ✓</span>
-                  )}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -337,4 +291,3 @@ export function ThreadDropdown() {
     </>
   )
 }
-

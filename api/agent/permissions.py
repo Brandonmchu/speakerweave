@@ -30,13 +30,13 @@ PERMISSION_REQUIRED_TOOLS: dict[str, str] = {
     "send_session_invites": "SEND_EMAIL",
 }
 
-_EVERY_READ_PREFIXES = (
+_EXTERNAL_READ_PREFIXES = (
     "list_",
     "get_",
     "view_",
     "search_",
-    "fetch_",
     "read_",
+    "find_",
 )
 
 
@@ -78,9 +78,9 @@ def permission_action_for_tool(tool_name: str) -> str | None:
         normalized.startswith(("send_", "queue_")) or "_send_" in normalized
     ):
         return "SEND_EMAIL"
-    if normalized.startswith("every_"):
-        every_name = normalized.removeprefix("every_")
-        if not every_name.startswith(_EVERY_READ_PREFIXES):
+    if normalized.startswith("mcp__") and "__" in normalized.removeprefix("mcp__"):
+        external_name = normalized.split("__", 2)[-1]
+        if not external_name.startswith(_EXTERNAL_READ_PREFIXES):
             return "EXTERNAL_MCP_ACTION"
     return None
 
@@ -180,7 +180,9 @@ def permission_description(
     if action == "DELETE":
         return f"Delete the item requested by {tool_name}?"
     if action == "EXTERNAL_MCP_ACTION":
-        return f"Allow the connected Every workspace action {tool_name}?"
+        connector = str(tool_input.get("_connector_name") or tool_name.split("__", 2)[1])
+        external_name = tool_name.split("__", 2)[-1]
+        return f"Allow {connector} to run {external_name}?"
     return f"Allow {tool_name}?"
 
 

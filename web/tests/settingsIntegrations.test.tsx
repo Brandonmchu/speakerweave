@@ -23,6 +23,9 @@ const CONFIG = {
 }
 
 let syncError: string | null = null
+let agentEnabled = false
+let mcpCreateError: string | null = null
+let mcpConnectors: Array<Record<string, unknown>> = []
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
 
 function json(payload: unknown, status = 200) {
@@ -40,6 +43,19 @@ function stubFetch() {
       const method = init.method ?? 'GET'
       const body = init.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ url, method, body })
+      if (url.endsWith('/api/agent/capabilities')) {
+        return json({
+          assistant: agentEnabled,
+          provider: agentEnabled ? 'openai' : null,
+          mcp: { available: true, connectors_connected: mcpConnectors.filter((item) => item.connected).length },
+        })
+      }
+      if (url.endsWith('/api/agent/integrations/mcp') && method === 'POST') {
+        if (mcpCreateError) return json({ detail: mcpCreateError }, 422)
+        return json({ ...body, key: 'custom-server', preset: false, connected: true, status: 'connected' })
+      }
+      if (url.endsWith('/api/agent/integrations/mcp')) return json({ connectors: mcpConnectors })
+      if (url.includes('/api/agent/integrations/mcp/') && method === 'DELETE') return json({ ok: true })
       if (url.endsWith('/api/integrations/airtable/sync')) {
         if (syncError) return json({ detail: syncError }, 400)
         return json({
@@ -85,6 +101,9 @@ function renderSettings() {
 beforeEach(() => {
   calls = []
   syncError = null
+  agentEnabled = false
+  mcpCreateError = null
+  mcpConnectors = []
   window.localStorage.setItem('dais.token', 'test-token')
   stubFetch()
 })
@@ -152,5 +171,75 @@ describe('Settings integrations', () => {
     expect(manifest).toContain('"message.im"')
     expect(manifest).toContain('https://speakerweave.com/api/slack/events')
     expect(screen.getByTestId('copy-slack-manifest')).toBeInTheDocument()
+  })
+
+  it('renders preset, connected, disconnected, and error connector states', async () => {
+    agentEnabled = true
+    mcpConnectors = [
+      {
+        key: 'every',
+        name: 'Every',
+        url: 'https://mcp.every.test/mcp',
+        auth_kind: 'oauth',
+        preset: true,
+        description: 'Business tools: proposals, invoices, clients',
+        connected: false,
+        status: 'disconnected',
+      },
+      {
+        key: 'crm',
+        name: 'Sales CRM',
+        url: 'https://crm.example.com/a/very/long/mcp/endpoint',
+        auth_kind: 'bearer',
+        preset: false,
+        connected: true,
+        status: 'connected',
+      },
+      {
+        key: 'internal',
+        name: 'Internal tools',
+        url: 'https://tools.example.com/mcp',
+        auth_kind: 'oauth',
+        preset: false,
+        connected: false,
+        status: 'error',
+        last_error: 'Authorization expired',
+      },
+    ]
+    renderSettings()
+
+    expect(await screen.findByTestId('mcp-connectors-card')).toBeInTheDocument()
+    expect(await screen.findByTestId('mcp-connector-every')).toHaveTextContent('Preset')
+    expect(screen.getByTestId('mcp-connector-every')).toHaveTextContent('Not connected')
+    expect(screen.getByTestId('mcp-connector-crm')).toHaveTextContent('Connected')
+    expect(screen.getByTestId('mcp-connector-internal')).toHaveTextContent('Error')
+    expect(screen.getByTitle('Authorization expired')).toBeInTheDocument()
+  })
+
+  it('validates the add-custom dialog and shows a server 422 inline', async () => {
+    agentEnabled = true
+    mcpCreateError = 'MCP validation failed: tools/list rejected the credential'
+    renderSettings()
+    fireEvent.click(await screen.findByRole('button', { name: /add custom server/i }))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sales CRM' } })
+    fireEvent.change(screen.getByLabelText('Server URL'), { target: { value: 'http://crm.example.com/mcp' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Use HTTPS')
+    expect(calls.filter((call) => call.url.endsWith('/api/agent/integrations/mcp') && call.method === 'POST')).toHaveLength(0)
+
+    fireEvent.change(screen.getByLabelText('Server URL'), { target: { value: 'https://crm.example.com/mcp' } })
+    fireEvent.change(screen.getByLabelText('Authentication'), { target: { value: 'none' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('tools/list rejected the credential')
+  })
+
+  it('hides MCP connector management when assistant capabilities are off', async () => {
+    agentEnabled = false
+    renderSettings()
+    expect(await screen.findByText('Airtable sync')).toBeInTheDocument()
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/agent/capabilities'), expect.anything()))
+    expect(screen.queryByTestId('mcp-connectors-card')).not.toBeInTheDocument()
+    expect(calls.some((call) => call.url.endsWith('/api/agent/integrations/mcp'))).toBe(false)
   })
 })

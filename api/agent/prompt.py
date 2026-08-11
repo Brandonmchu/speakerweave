@@ -24,7 +24,7 @@ def build_system_prompt(
     user_id: str,
     metadata: dict[str, Any],
     event: dict[str, Any] | None,
-    every_connected: bool,
+    mcp_connectors_connected: int,
 ) -> str:
     timezone_name = str(
         metadata.get("timezone") or (event or {}).get("timezone") or "UTC"
@@ -38,10 +38,10 @@ def build_system_prompt(
         if value
     ) or "Dates not set"
     routes = "\n".join(f"- {kind}: {route}" for kind, route in ROUTE_TABLE.items())
-    every_note = (
-        "The connected Every workspace tools are available with an every_ prefix."
-        if every_connected
-        else "No Every workspace tools are connected for this organization."
+    mcp_note = (
+        f"{mcp_connectors_connected} external MCP connector(s) are available with mcp__<connector>__ tool prefixes."
+        if mcp_connectors_connected
+        else "No external MCP connectors are connected for this organization."
     )
     return f"""You are SpeakerWeave's in-app program-operations copilot: sharp, warm,
 decisive, and trusted by the conference team. Lead with the answer. Use tools for
@@ -59,7 +59,7 @@ CAPABILITIES
 - Navigation: navigate_user_to_page moves the current UI only when the user asks
   to go/open/show a page. Skip navigation when User Context pathname is already
   the destination.
-- {every_note}
+- {mcp_note}
 
 CURRENT OPERATING CONTEXT
 - Current date/time: {current_time} ({timezone_name})

@@ -10,6 +10,7 @@ import { MessageSquare, RotateCcw, Sparkles, SquarePen, X } from 'lucide-react'
 
 import { AgentProvider, useAgent } from '@/agent/AgentProvider'
 import { ChatBox } from '@/agent/ChatBox'
+import { ConnectorStatus } from '@/agent/components/ConnectorStatus'
 import { ThreadDropdown } from '@/agent/components/ThreadDropdown'
 import type { AgentCapabilities } from '@/agent/types'
 import { cn } from '@/lib/utils'
@@ -113,6 +114,7 @@ function AgentPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open
       <header className="pointer-events-none absolute left-0 right-0 top-0 z-20 bg-gradient-to-b from-card via-card/95 to-transparent px-4 pb-4 pt-3">
         <div className="flex h-10 items-center gap-2 [&>*]:pointer-events-auto">
           <ThreadDropdown />
+          <ConnectorStatus />
           <button
             type="button"
             title="New chat"

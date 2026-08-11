@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from typing import Any
 
-from agent import every_mcp
+from agent import mcp_connectors
 from agent.events import semantic_event
 from agent.permissions import with_permission_guidance
 from agent.tools import TurnContext, invoke_tool, registered_tools
@@ -65,12 +65,21 @@ async def stream_response(
                 {"role": "user", "content": full_prompt}
             ]
             async with AsyncExitStack() as stack:
-                external_definitions, external_handler = await every_mcp.anthropic_tools(
+                external_definitions, external_handler = await mcp_connectors.anthropic_tools(
                     stack, context.org_id, context.progress_queue
                 )
                 definitions = [
                     *registered_tools(),
                     *(with_permission_guidance(item) for item in external_definitions),
+                ]
+                connector_names = {
+                    str(item["name"]): str(item["connector_name"])
+                    for item in external_definitions
+                    if item.get("connector_name")
+                }
+                definitions = [
+                    {key: value for key, value in item.items() if key != "connector_name"}
+                    for item in definitions
                 ]
                 for _iteration in range(MAX_ITERATIONS):
                     if context.cancel_event.is_set():
@@ -123,6 +132,9 @@ async def stream_response(
                         arguments = _value(block, "input", {}) or {}
                         if not isinstance(arguments, dict):
                             arguments = {}
+                        connector_name = connector_names.get(str(_value(block, "name", "")))
+                        if connector_name:
+                            arguments["_connector_name"] = connector_name
                         result = await invoke_tool(
                             context,
                             str(_value(block, "name", "")),

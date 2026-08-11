@@ -47,7 +47,7 @@ describe('agent capability gate', () => {
   })
 
   it.each([
-    ['disabled capability', 200, { assistant: false, provider: null, every_mcp: { available: false, connected: false } }],
+    ['disabled capability', 200, { assistant: false, provider: null, mcp: { available: true, connectors_connected: 0 } }],
     ['missing capability route', 404, { detail: 'Not found' }],
   ])('renders no chat affordance for a %s', async (_label, capabilityStatus, capabilityBody) => {
     vi.stubGlobal(
@@ -79,7 +79,15 @@ describe('agent capability gate', () => {
           return jsonResponse({
             assistant: true,
             provider: 'openai',
-            every_mcp: { available: false, connected: false },
+            mcp: { available: true, connectors_connected: 2 },
+          })
+        }
+        if (url.endsWith('/api/agent/integrations/mcp')) {
+          return jsonResponse({
+            connectors: [
+              { key: 'crm', name: 'Sales CRM', url: 'https://crm.example.com/mcp', auth_kind: 'none', preset: false, connected: true, status: 'connected' },
+              { key: 'ops', name: 'Ops tools', url: 'https://ops.example.com/mcp', auth_kind: 'oauth', preset: false, connected: false, status: 'error', last_error: 'Offline' },
+            ],
           })
         }
         if (url.endsWith('/api/agent/threads')) return jsonResponse({ threads: [] })
@@ -91,6 +99,10 @@ describe('agent capability gate', () => {
     fireEvent.click(await screen.findByTestId('ask-agent'))
     expect(await screen.findByRole('complementary', { name: 'Ask SpeakerWeave' })).toBeVisible()
     expect(screen.getByText('Ask about your program')).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByLabelText('MCP connectors, 2 connected'), { key: 'Enter' })
+    expect(await screen.findByText('Sales CRM')).toBeInTheDocument()
+    expect(screen.getByText('Needs attention')).toBeInTheDocument()
+    expect(screen.getByText('Manage in Settings')).toBeInTheDocument()
     expect(window.localStorage.getItem('sw.chat.open')).toBe('true')
   })
 })
