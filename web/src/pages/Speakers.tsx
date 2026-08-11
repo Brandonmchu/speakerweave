@@ -3,20 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
-  Building2,
-  Calendar,
-  CheckCircle2,
   ChevronDown,
-  Clock,
-  Circle,
   Download,
-  FileText,
-  Mail,
   ImagePlus,
-  MapPin,
-  MessageSquare,
   Pencil,
-  Plane,
   Plus,
   Search,
   Send,
@@ -48,6 +38,7 @@ import {
   type TaskKind,
 } from '@/lib/speakersApi'
 import { cn } from '@/lib/utils'
+import { GradientAvatar } from '@/ui/avatar'
 import { CopyButton } from '@/ui/copy-button'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -57,6 +48,7 @@ import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { NativeSelect } from '@/ui/native-select'
+import { Progress } from '@/ui/progress'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 import { Textarea } from '@/ui/textarea'
@@ -75,11 +67,11 @@ type RosterSpeaker = EventSpeaker & { speaker_status: SpeakerStatus | null }
 
 const WORKFLOW_META: Record<
   SpeakerStatus,
-  { label: string; variant: 'success' | 'warning' | 'destructive' }
+  { label: string; dot: string }
 > = {
-  invited: { label: 'Invited', variant: 'warning' },
-  confirmed: { label: 'Confirmed', variant: 'success' },
-  declined: { label: 'Declined', variant: 'destructive' },
+  invited: { label: 'Invited', dot: 'before:bg-warning' },
+  confirmed: { label: 'Confirmed', dot: 'before:bg-success' },
+  declined: { label: 'Declined', dot: 'before:bg-destructive' },
 }
 
 const WORKFLOW_OPTIONS: Array<{ value: string; label: string }> = [
@@ -102,7 +94,7 @@ function WorkflowStatusBadge({ status }: { status: SpeakerStatus | null }) {
     )
   }
   const meta = WORKFLOW_META[status]
-  return <Badge variant={meta.variant}>{meta.label}</Badge>
+  return <Badge variant="dot" className={meta.dot}>{meta.label}</Badge>
 }
 
 export function Speakers() {
@@ -249,16 +241,11 @@ export function Speakers() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Speakers</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Manage your speaker roster, onboarding, and communications{event ? ` for ${event.name}` : ''}.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Speakers</h1>
+          <p className="page-subtitle">
+            Manage your speaker roster, onboarding, and communications{event ? ` for ${event.name}` : ''}.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" onClick={() => setImportOpen(true)} disabled={!event}>
@@ -341,7 +328,7 @@ export function Speakers() {
         </div>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <div className="mt-4 bg-card">
         {error ? (
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
@@ -405,8 +392,9 @@ export function Speakers() {
                   <Checkbox checked={headerChecked} onCheckedChange={toggleAll} aria-label="Select all speakers" />
                 </TableHead>
                 <TableHead>Speaker</TableHead>
+                <TableHead>Company</TableHead>
                 <TableHead className="w-[120px]">Status</TableHead>
-                <TableHead className="w-[90px] text-center">Sessions</TableHead>
+                <TableHead className="w-[90px]">Sessions</TableHead>
                 <TableHead className="w-[180px]">Onboarding</TableHead>
                 <TableHead className="w-[150px]">Last portal visit</TableHead>
                 <TableHead className="w-[160px] text-right">Invite</TableHead>
@@ -432,27 +420,25 @@ export function Speakers() {
                       onClick={() => setOpenContactId(speaker.contact_id)}
                       className="flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                     >
-                      <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
+                      <Avatar id={speaker.contact_id} name={speaker.name} photoUrl={speaker.photo_url} size={24} />
                       <div className="min-w-0">
                         <div className="truncate font-medium text-foreground group-hover:underline">{speaker.name}</div>
-                        {(speaker.title || speaker.company_name) && (
-                          <div className="mt-0.5 truncate text-xs text-foreground/75">
-                            {[speaker.title, speaker.company_name].filter(Boolean).join(' · ')}
-                          </div>
-                        )}
                         {speaker.email && (
-                          <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
-                            <Mail className="h-3 w-3 shrink-0" />
+                          <div className="truncate text-[11.5px] text-muted-foreground">
                             {speaker.email}
                           </div>
                         )}
                       </div>
                     </button>
                   </TableCell>
+                  <TableCell>
+                    <div className="truncate text-foreground">{speaker.company_name ?? '—'}</div>
+                    {speaker.title && <div className="truncate text-[11.5px] text-muted-foreground">{speaker.title}</div>}
+                  </TableCell>
                   <TableCell data-testid={`speaker-status-${speaker.contact_id}`}>
                     <WorkflowStatusBadge status={speaker.speaker_status} />
                   </TableCell>
-                  <TableCell className="text-center tabular-nums text-foreground">
+                  <TableCell className="font-mono text-[11px] tabular-nums text-foreground">
                     {speaker.session_count}
                   </TableCell>
                   <TableCell>
@@ -466,7 +452,7 @@ export function Speakers() {
                       }
                     />
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="font-mono text-[10.5px] text-muted-foreground">
                     {relative(speaker.last_portal_access_at)}
                   </TableCell>
                   <TableCell className="text-right">
@@ -483,7 +469,7 @@ export function Speakers() {
                 </TableRow>
                 {expandedContactId === speaker.contact_id && (
                   <TableRow data-testid={`speaker-tasks-${speaker.contact_id}`} className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="bg-muted/25 px-6 py-3">
+                    <TableCell colSpan={8} className="bg-foreground/[0.028] px-6 py-3">
                       <SpeakerTaskList speaker={speaker} />
                     </TableCell>
                   </TableRow>
@@ -601,7 +587,7 @@ function SpeakerDrawer({
       <DialogContent
         className={cn(
           'left-auto right-0 top-0 h-screen max-h-screen w-full max-w-none translate-x-0 translate-y-0',
-          'flex flex-col gap-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-xl',
+          'flex flex-col gap-0 rounded-none border-0 p-0 sm:max-w-xl',
           'data-[state=open]:slide-in-from-right-8 data-[state=closed]:slide-out-to-right-8'
         )}
       >
@@ -719,23 +705,17 @@ function SpeakerProfileBody({
 
   return (
     <>
-      <div className="border-b border-border px-6 py-5 pr-12">
+      <div className="px-6 pb-4 pt-6 pr-12">
         <div className="flex items-start gap-3">
-          <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
+          <Avatar id={speaker.contact_id} name={speaker.name} photoUrl={speaker.photo_url} size={44} />
           <div className="min-w-0 flex-1">
             <DialogTitle className="text-xl leading-snug">{speaker.name}</DialogTitle>
             <DialogDescription className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {speaker.email && (
-                <span className="inline-flex items-center gap-1">
-                  <Mail className="h-3.5 w-3.5" />
-                  {speaker.email}
-                </span>
+                <span>{speaker.email}</span>
               )}
               {(speaker.title || speaker.company_name) && (
-                <span className="inline-flex items-center gap-1">
-                  <Building2 className="h-3.5 w-3.5" />
-                  {[speaker.title, speaker.company_name].filter(Boolean).join(' · ')}
-                </span>
+                <span>{[speaker.title, speaker.company_name].filter(Boolean).join(' · ')}</span>
               )}
             </DialogDescription>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -743,8 +723,7 @@ function SpeakerProfileBody({
                   what it means so it can't be read as the workflow status the
                   organizer sets below. */}
               {speaker.invited ? (
-                <Badge variant="success" className="gap-1">
-                  <CheckCircle2 className="h-3 w-3" />
+                <Badge variant="muted">
                   Portal invited
                 </Badge>
               ) : (
@@ -788,7 +767,7 @@ function SpeakerProfileBody({
         {editing ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/25 p-3">
-              <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
+              <Avatar id={speaker.contact_id} name={speaker.name} photoUrl={speaker.photo_url} size={44} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground">Speaker photo</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -874,7 +853,7 @@ function SpeakerProfileBody({
         ) : (
           <div className="space-y-6">
             {speaker.about && (
-              <Section icon={<FileText className="h-4 w-4" />} title="Bio">
+              <Section title="Bio">
                 <p className="whitespace-pre-wrap text-sm text-foreground">{speaker.about}</p>
               </Section>
             )}
@@ -883,7 +862,7 @@ function SpeakerProfileBody({
                 speaker's flight needs to find the field, not infer that it
                 doesn't exist. A backend without migration 009 sends null and
                 this reads as "nothing recorded yet". */}
-            <Section icon={<Plane className="h-4 w-4" />} title="Travel &amp; logistics">
+            <Section title="Travel &amp; logistics">
               {speaker.logistics_notes?.trim() ? (
                 <p data-testid="logistics-notes" className="whitespace-pre-wrap text-sm text-foreground">
                   {speaker.logistics_notes}
@@ -895,14 +874,11 @@ function SpeakerProfileBody({
               )}
             </Section>
 
-            <Section
-              icon={<FileText className="h-4 w-4" />}
-              title={`Submissions (${profile.submissions.length})`}
-            >
+            <Section title={`Submissions (${profile.submissions.length})`}>
               {profile.submissions.length === 0 ? (
                 <Muted>No submissions yet.</Muted>
               ) : (
-                <ul className="space-y-2">
+                <ul className="divide-y divide-border">
                   {profile.submissions.map((s) => (
                     <li key={s.id} className="flex items-center justify-between gap-3">
                       <span className="min-w-0 truncate text-sm text-foreground">{s.title || 'Untitled'}</span>
@@ -913,7 +889,7 @@ function SpeakerProfileBody({
               )}
             </Section>
 
-            <Section icon={<Calendar className="h-4 w-4" />} title={`Sessions (${profile.sessions.length})`}>
+            <Section title={`Sessions (${profile.sessions.length})`}>
               {profile.sessions.length === 0 ? (
                 <Muted>Not on the program yet.</Muted>
               ) : (
@@ -926,18 +902,12 @@ function SpeakerProfileBody({
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                         {s.scheduled ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {formatDateTime(s.starts_at)}
-                          </span>
+                          <span>{formatDateTime(s.starts_at)}</span>
                         ) : (
                           <span>Not scheduled</span>
                         )}
                         {s.room && (
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {s.room}
-                          </span>
+                          <span>{s.room}</span>
                         )}
                         {s.role && <span className="capitalize">{s.role}</span>}
                       </div>
@@ -947,10 +917,7 @@ function SpeakerProfileBody({
               )}
             </Section>
 
-            <Section
-              icon={<CheckCircle2 className="h-4 w-4" />}
-              title={`Onboarding (${profile.speaker.tasks_done}/${profile.speaker.tasks_total})`}
-            >
+            <Section title={`Onboarding (${profile.speaker.tasks_done}/${profile.speaker.tasks_total})`}>
               {profile.onboarding.length === 0 ? (
                 <Muted>No onboarding tasks assigned.</Muted>
               ) : (
@@ -961,16 +928,23 @@ function SpeakerProfileBody({
                     // that is already finished is not late, it is finished.
                     const late = !done && isOverdue(t.due_at)
                     return (
-                      <li key={t.assignment_id} className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <span className={cn('block truncate text-sm', done ? 'text-muted-foreground line-through' : 'text-foreground')}>
-                            {t.name || 'Task'}
+                      <li key={t.assignment_id} className="flex items-center gap-2 py-2">
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'h-[5px] w-[5px] shrink-0 rounded-full',
+                            done ? 'bg-success' : late ? 'bg-warning' : 'bg-status-neutral'
+                          )}
+                        />
+                        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                          <span className={cn('block truncate text-[12.5px]', done ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                            {t.name || 'Task'} <span className="text-placeholder">· {taskStatusLabel(t.status)}</span>
                           </span>
                           {t.due_at ? (
                             <span
                               data-testid={`speaker-task-due-${t.assignment_id}`}
                               className={cn(
-                                'mt-0.5 block text-xs',
+                                'shrink-0 font-mono text-[10.5px]',
                                 late ? 'font-medium text-destructive' : 'text-muted-foreground'
                               )}
                             >
@@ -978,14 +952,11 @@ function SpeakerProfileBody({
                               {late && ' · overdue'}
                             </span>
                           ) : (
-                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                            <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
                               No due date
                             </span>
                           )}
                         </div>
-                        <Badge variant={done ? 'success' : t.status === 'submitted' ? 'warning' : 'outline'}>
-                          {taskStatusLabel(t.status)}
-                        </Badge>
                       </li>
                     )
                   })}
@@ -993,10 +964,7 @@ function SpeakerProfileBody({
               )}
             </Section>
 
-            <Section
-              icon={<MessageSquare className="h-4 w-4" />}
-              title={`Communications (${profile.communications.length})`}
-            >
+            <Section title={`Communications (${profile.communications.length})`}>
               {profile.communications.length === 0 ? (
                 <Muted>No emails sent to this speaker yet.</Muted>
               ) : (
@@ -1007,7 +975,10 @@ function SpeakerProfileBody({
                         <div className="truncate text-sm text-foreground">{c.subject || c.template_key || 'Email'}</div>
                         <div className="text-xs text-muted-foreground">{relative(c.sent_at ?? c.created_at)}</div>
                       </div>
-                      <Badge variant={c.status === 'sent' ? 'success' : c.status === 'failed' ? 'destructive' : 'muted'}>
+                      <Badge
+                        variant="dot"
+                        className={c.status === 'sent' ? 'before:bg-success' : c.status === 'failed' ? 'before:bg-destructive' : 'before:bg-warning'}
+                      >
                         {c.status ?? 'queued'}
                       </Badge>
                     </li>
@@ -1022,13 +993,10 @@ function SpeakerProfileBody({
   )
 }
 
-function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section>
-      <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
-      </h3>
+    <section className="border-t border-border py-5 first:border-t-0 first:pt-0">
+      <h3 className="section-label mb-2">{title}</h3>
       {children}
     </section>
   )
@@ -1488,21 +1456,17 @@ const STATUS_META: Record<SubmissionStatus, { label: string; variant: 'default' 
 
 function StatusBadge({ status }: { status: SubmissionStatus }) {
   const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
-  return <Badge variant={meta.variant}>{meta.label}</Badge>
-}
-
-function taskStatusLabel(status: string | null): string {
-  switch (status) {
-    case 'approved':
-    case 'done':
-      return 'Done'
-    case 'submitted':
-      return 'In review'
-    case 'denied':
-      return 'Needs redo'
-    default:
-      return 'To do'
-  }
+  const dot =
+    status === 'accepted'
+      ? 'before:bg-success'
+      : status === 'pending'
+        ? 'before:bg-warning'
+        : status === 'accept_queue' || status === 'decline_queue'
+          ? 'before:bg-status-queue'
+          : status === 'declined'
+            ? 'before:bg-destructive'
+            : 'before:bg-status-neutral'
+  return <Badge variant="dot" className={dot}>{meta.label}</Badge>
 }
 
 function OnboardingCell({
@@ -1518,7 +1482,6 @@ function OnboardingCell({
     return <span className="text-sm text-muted-foreground">No tasks</span>
   }
   const complete = speaker.tasks_outstanding === 0
-  const pct = Math.round((speaker.tasks_done / speaker.tasks_total) * 100)
   return (
     <button
       type="button"
@@ -1528,19 +1491,17 @@ function OnboardingCell({
       onClick={onToggle}
       className="flex items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
     >
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-        <div
-          className={complete ? 'h-full bg-success' : 'h-full bg-primary'}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <Progress
+        value={speaker.tasks_done}
+        max={speaker.tasks_total}
+        aria-label={`${speaker.name} onboarding progress`}
+      />
       {complete ? (
-        <Badge variant="success" className="gap-1">
-          <CheckCircle2 className="h-3 w-3" />
+        <Badge variant="dot" className="before:bg-success">
           Done
         </Badge>
       ) : (
-        <span className="text-xs tabular-nums text-muted-foreground">
+        <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
           {speaker.tasks_done}/{speaker.tasks_total}
         </span>
       )}
@@ -1555,21 +1516,16 @@ function SpeakerTaskList({ speaker }: { speaker: EventSpeaker }) {
     return <p className="text-sm text-muted-foreground">Task details are not available yet.</p>
   }
   return (
-    <ul className="grid gap-2 sm:grid-cols-2" aria-label={`Tasks for ${speaker.name}`}>
+    <ul className="grid gap-x-5 sm:grid-cols-2" aria-label={`Tasks for ${speaker.name}`}>
       {tasks.map((task) => (
-        <li key={task.assignment_id || task.task_id} className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2">
-          {task.done ? (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-          ) : (
-            <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
-          <div className="min-w-0 flex-1">
-            <p className={cn('truncate text-sm', task.done ? 'text-muted-foreground line-through' : 'text-foreground')}>
-              {task.name}
+        <li key={task.assignment_id || task.task_id} className="flex items-center gap-2 border-b border-border py-2">
+          <span className={cn('h-[5px] w-[5px] shrink-0 rounded-full', task.done ? 'bg-success' : 'bg-status-neutral')} />
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <p className={cn('truncate text-[12.5px]', task.done ? 'text-muted-foreground line-through' : 'text-foreground')}>
+              {task.name} <span className="text-placeholder">· {task.done ? 'Done' : task.status === 'submitted' ? 'In review' : task.status === 'denied' ? 'Needs changes' : 'Not done'}</span>
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {task.done ? 'Done' : task.status === 'submitted' ? 'In review' : task.status === 'denied' ? 'Needs changes' : 'Not done'}
-              {task.due_at ? ` · ${dueLabel(task.due_at)}` : ''}
+            <p className="shrink-0 font-mono text-[10.5px] text-placeholder">
+              {task.due_at ? dueLabel(task.due_at) : task.done ? 'Done' : task.status === 'submitted' ? 'In review' : 'No due date'}
             </p>
           </div>
         </li>
@@ -1578,16 +1534,18 @@ function SpeakerTaskList({ speaker }: { speaker: EventSpeaker }) {
   )
 }
 
-function Avatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+function Avatar({ id, name, photoUrl, size = 24 }: { id: string; name: string; photoUrl: string | null; size?: 24 | 44 }) {
   if (photoUrl) {
-    return <img src={photoUrl} alt={name} className="h-9 w-9 shrink-0 rounded-full object-cover" />
+    return <img src={photoUrl} alt={name} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />
   }
-  const label = name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase() || '?'
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-subtle text-xs font-semibold text-primary">
-      {label}
-    </div>
-  )
+  return <GradientAvatar id={id} name={name} size={size} />
+}
+
+function taskStatusLabel(status: string | null): string {
+  if (status === 'approved' || status === 'done') return 'Done'
+  if (status === 'submitted') return 'In review'
+  if (status === 'denied') return 'Needs redo'
+  return 'To do'
 }
 
 function relative(value: string | null): ReactNode {

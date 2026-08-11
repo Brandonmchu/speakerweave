@@ -312,7 +312,7 @@ function Scorecard({
   const speakerNames = !home.plan.anonymized ? presenterNames(session.speakers) : []
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+    <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
       <div className="border-b border-border px-5 py-6 sm:px-7">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {session.friendly_id && <span className="font-mono">{session.friendly_id}</span>}
@@ -509,7 +509,7 @@ function RatingRow({
             className={cn(
               'h-10 rounded-md border text-sm font-semibold tabular-nums transition-[color,background-color,border-color,transform] active:scale-[0.97]',
               value === score
-                ? 'border-primary bg-primary text-primary-foreground'
+                ? 'border-primary/20 bg-primary-subtle text-foreground'
                 : 'border-input bg-card text-muted-foreground hover:border-primary/60 hover:bg-primary-subtle hover:text-primary'
             )}
           >
@@ -635,10 +635,10 @@ function nextAssignmentId(assignments: ReviewerAssignment[], currentId: string):
 
 function PublicReviewShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-[100dvh] bg-[#FBFBFB]">
+    <div className="min-h-[100dvh] bg-background">
       <div className="mx-auto w-full max-w-[1180px] px-4 py-7 sm:px-6 sm:py-10">
         <div className="mb-6 flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">d</div>
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground font-serif text-sm font-semibold text-white">d</div>
           <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
           <span className="text-border">/</span>
           <span className="text-sm text-muted-foreground">Reviewer portal</span>
@@ -662,7 +662,7 @@ function StateMessage({
   action?: React.ReactNode
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-6 py-16 text-center shadow-soft">
+    <div className="rounded-lg border border-border bg-card px-6 py-16 text-center">
       <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-muted">{icon}</div>
       <h1 className="mt-4 text-lg font-semibold text-foreground">{title}</h1>
       <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>
@@ -674,7 +674,7 @@ function StateMessage({
 function ReviewLoading() {
   return (
     <PublicReviewShell>
-      <div className="rounded-lg border border-border bg-card p-6 shadow-soft sm:p-8">
+      <div className="rounded-lg border border-border bg-card p-6 sm:p-8">
         <div className="flex items-center gap-3">
           <Skeleton className="h-6 w-24" />
           <Skeleton className="h-6 w-28" />

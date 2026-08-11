@@ -25,8 +25,8 @@ export default {
       },
       fontFamily: {
         sans: [
-          'Inter',
-          'Geist',
+          'Instrument Sans Variable',
+          'Instrument Sans',
           '-apple-system',
           'BlinkMacSystemFont',
           'Segoe UI',
@@ -35,7 +35,8 @@ export default {
           'Arial',
           'sans-serif',
         ],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['JetBrains Mono Variable', 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        serif: ['Instrument Serif', 'Georgia', 'serif'],
       },
       fontSize: {
         '2xs': ['11px', { lineHeight: '14px' }],
@@ -92,6 +93,8 @@ export default {
           DEFAULT: 'hsl(var(--status-solid))',
           foreground: 'hsl(var(--status-solid-foreground))',
         },
+        'status-neutral': 'hsl(var(--status-neutral))',
+        'status-queue': 'hsl(var(--status-queue))',
         popover: {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',

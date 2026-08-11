@@ -187,7 +187,7 @@ function ReviewWindowFields({
   )
 }
 
-const TRACK_FALLBACK_COLOR = '#4962E2'
+const TRACK_FALLBACK_COLOR = '#7E8AA8'
 
 function TrackDot({ color }: { color?: string | null }) {
   return (
@@ -316,8 +316,8 @@ export function Evaluation() {
             <ClipboardCheck className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Evaluation</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <h1 className="page-title">Evaluation</h1>
+            <p className="page-subtitle">
               Build a review committee, collect consistent scores, and make the final call
               {event ? ` for ${event.name}` : ''}.
             </p>
@@ -353,7 +353,7 @@ export function Evaluation() {
         />
       ) : (
         <div className="mt-7 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="self-start overflow-hidden rounded-lg border border-border bg-card shadow-soft lg:sticky lg:top-5">
+          <aside className="self-start overflow-hidden rounded-lg border border-border bg-card lg:sticky lg:top-5">
             <div className="border-b border-border px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Plans
@@ -566,7 +566,7 @@ function PlanWorkspace({
   })
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-5 sm:px-6">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2348,7 +2348,7 @@ function PageMessage({
   action?: ReactNode
 }) {
   return (
-    <div className="mt-7 rounded-lg border border-border bg-card px-6 py-14 text-center shadow-soft">
+    <div className="mt-7 rounded-lg border border-border bg-card px-6 py-14 text-center">
       <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-muted">{icon}</div>
       <h2 className="mt-4 text-base font-semibold text-foreground">{title}</h2>
       <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>

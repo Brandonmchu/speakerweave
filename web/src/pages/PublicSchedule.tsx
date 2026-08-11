@@ -58,6 +58,24 @@ function htmlToText(html: string): string {
     .trim()
 }
 
+function formatEventDateRange(start: string | null, end: string | null, zone: string | null): string {
+  if (!start) return ''
+  try {
+    const options: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', timeZone: zone || 'UTC' }
+    const formatter = new Intl.DateTimeFormat('en-US', options)
+    const startDate = new Date(start)
+    if (!end) return formatter.format(startDate)
+    const endDate = new Date(end)
+    const startMonth = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: zone || 'UTC' }).format(startDate)
+    const endMonth = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: zone || 'UTC' }).format(endDate)
+    const startDay = new Intl.DateTimeFormat('en-US', { day: 'numeric', timeZone: zone || 'UTC' }).format(startDate)
+    const endDay = new Intl.DateTimeFormat('en-US', { day: 'numeric', timeZone: zone || 'UTC' }).format(endDate)
+    return startMonth === endMonth ? `${startMonth} ${startDay}–${endDay}` : `${formatter.format(startDate)}–${formatter.format(endDate)}`
+  } catch {
+    return start
+  }
+}
+
 /**
  * A reader's anonymous, device-local "my schedule": starred session ids kept in
  * localStorage (keyed per event slug), no login. Exported so the speakers page
@@ -259,9 +277,13 @@ export function PublicSchedule() {
       <div className={compact ? 'space-y-4' : 'space-y-6'}>
         {days.length > 1 && (
           <Tabs value={activeDate} onValueChange={setActiveDate}>
-            <TabsList variant="underline">
+            <TabsList variant="underline" className="w-auto gap-2 border-0 [&>span]:hidden">
               {days.map((day) => (
-                <TabsTrigger key={day.date} value={day.date}>
+                <TabsTrigger
+                  key={day.date}
+                  value={day.date}
+                  className="rounded-full bg-foreground/[0.045] px-3 py-1 text-xs data-[state=active]:bg-foreground data-[state=active]:text-white"
+                >
                   {formatDayLabel(day.date)}
                 </TabsTrigger>
               ))}
@@ -400,7 +422,7 @@ export function PublicSchedule() {
           </div>
         </div>
 
-        {zoneNote && (
+        {zoneNote && embed && (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="h-3.5 w-3.5" />
             {zoneNote}
@@ -424,7 +446,7 @@ export function PublicSchedule() {
                 {flatResults.length === 1 ? '' : 's'}
                 {' across all days'}
               </p>
-              <ol className={compact ? 'space-y-2' : 'space-y-3'}>
+              <ol className="divide-y divide-border border-t border-border">
                 {flatResults.map(({ session, date }, i) => (
                   <li key={session.id || `${session.title}-${i}`}>
                     <SessionCard
@@ -448,7 +470,7 @@ export function PublicSchedule() {
             description="Try a different track, format or room — or clear your search."
           />
         ) : (
-          <ol className={compact ? 'space-y-2' : 'space-y-3'}>
+          <ol className="divide-y divide-border border-t border-border">
             {dayResults.map((session, i) => (
               <li key={session.id || `${session.title}-${i}`}>
                 <SessionCard
@@ -498,11 +520,19 @@ export function PublicSchedule() {
       accent={accent}
       compact={compact}
     >
-      {!compact && query.data?.event.location && (
-        <p className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <MapPin className="h-4 w-4" />
-          {query.data.event.location}
-        </p>
+      {!compact && query.data && (
+        <header className="mb-8">
+          <h1 className="font-serif text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">
+            {query.data.event.name}
+          </h1>
+          <p className="mt-3 flex flex-wrap items-center gap-x-2 text-[13px] text-muted-foreground">
+            {formatEventDateRange(query.data.event.starts_at, query.data.event.ends_at, zone) && (
+              <span>{formatEventDateRange(query.data.event.starts_at, query.data.event.ends_at, zone)}</span>
+            )}
+            {query.data.event.location && <><span aria-hidden>·</span><span>{query.data.event.location}</span></>}
+            {zoneNote && <><span aria-hidden>·</span><span>{zoneNote}</span></>}
+          </p>
+        </header>
       )}
       {body}
     </ProgramShell>
@@ -564,31 +594,36 @@ function SessionCard({
         }
       }}
       className={cn(
-        'cursor-pointer rounded-xl border border-border bg-card text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        compact ? 'p-3' : 'p-4 sm:p-5'
+        'cursor-pointer bg-card text-left transition-colors hover:bg-foreground/[0.028] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        compact ? 'py-3' : 'py-6'
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:gap-5">
-        <div className="shrink-0 sm:w-32">
+      <div className={cn('grid gap-3', compact ? 'grid-cols-[92px_minmax(0,1fr)]' : 'sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-5')}>
+        <div className="shrink-0">
           {date && (
-            <div className="text-xs font-medium text-primary">{formatDayLabel(date)}</div>
+            <div className="mb-1 font-mono text-[10px] text-placeholder">{formatDayLabel(date)}</div>
           )}
-          <div className="text-sm font-semibold text-foreground">{time}</div>
-          {session.room && <div className="mt-0.5 text-xs text-muted-foreground">{session.room}</div>}
+          <div className="font-mono text-[11px] leading-5 text-foreground">{time}</div>
+          {(session.room || session.format) && (
+            <div className="mt-0.5 text-[11px] text-placeholder">
+              {session.room}
+              {session.room && session.format ? ' · ' : ''}
+              {session.format && <FormatTag format={session.format} />}
+            </div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {session.track && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span
                   aria-hidden
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: session.track.color ?? '#94a3b8' }}
+                  className="h-[5px] w-[5px] rounded-full bg-status-queue"
+                  style={session.track.color ? { backgroundColor: session.track.color } : undefined}
                 />
                 {session.track.name}
               </span>
             )}
-            {session.format && <FormatTag format={session.format} />}
             <div className="ml-auto flex items-center gap-1">
               {session.starts_at && (
                 <CardIconButton
@@ -601,14 +636,14 @@ function SessionCard({
               <StarButton starred={starred} onToggle={onToggleStar} />
             </div>
           </div>
-          <h3 className="mt-1.5 text-base font-semibold tracking-tight text-foreground">
+          <h3 className="mt-1.5 text-[17px] font-medium leading-6 tracking-[-0.015em] text-foreground">
             {session.title}
           </h3>
           {summary && (
             <p
               data-testid="session-summary"
               className={cn(
-                'mt-1 text-sm leading-relaxed text-muted-foreground',
+                'mt-1 max-w-[68ch] text-[12.5px] leading-5 text-muted-foreground',
                 !expanded && 'line-clamp-2'
               )}
             >
@@ -632,13 +667,13 @@ function SessionCard({
             </button>
           )}
           {session.speakers.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
               {session.speakers.map((speaker) => (
                 <div key={speaker.name} className="flex items-center gap-2">
-                  <span className="h-7 w-7 shrink-0 overflow-hidden rounded-full ring-1 ring-border">
+                  <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full">
                     <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
                   </span>
-                  <span className="text-sm">
+                  <span className="text-[12.5px]">
                     <span className="font-medium text-foreground">{speaker.name}</span>
                     {(speaker.title || speaker.company) && (
                       <span className="text-muted-foreground">
@@ -662,7 +697,7 @@ function FormatTag({ format }: { format: string }) {
   return (
     <span
       data-testid="session-format"
-      className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+      className="text-inherit"
     >
       {format}
     </span>
@@ -691,7 +726,7 @@ function StarButton({
       }}
       className={cn(
         'flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-        starred && 'border-amber-300 text-amber-500 hover:text-amber-600',
+        starred && 'border-warning/50 text-warning-strong hover:text-warning',
         className
       )}
     >
@@ -828,7 +863,7 @@ function SessionDetailBody({
                 <span
                   aria-hidden
                   className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: session.track.color ?? '#94a3b8' }}
+                  style={{ backgroundColor: session.track.color ?? '#CFC9BE' }}
                 />
                 {session.track.name}
               </span>
@@ -865,7 +900,7 @@ function SessionDetailBody({
           className={cn(
             'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
             starred
-              ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              ? 'border-warning/50 bg-warning/10 text-warning-strong hover:bg-warning/15'
               : 'border-border bg-card text-foreground hover:bg-muted'
           )}
         >
@@ -956,10 +991,10 @@ function TrackChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-normal transition-colors',
         active
-          ? 'border-primary bg-primary/10 text-primary'
-          : 'border-border bg-card text-muted-foreground hover:text-foreground'
+          ? 'bg-foreground text-white'
+          : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground'
       )}
     >
       {color && <span aria-hidden className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}

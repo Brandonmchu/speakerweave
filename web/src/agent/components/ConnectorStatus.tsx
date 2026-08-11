@@ -33,10 +33,10 @@ export function ConnectorStatus() {
           type="button"
           title={`${count} MCP connector${count === 1 ? '' : 's'} connected`}
           aria-label={`MCP connectors, ${count} connected`}
-          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-soft transition-colors hover:bg-accent hover:text-foreground active:scale-[0.97]"
+          className="relative flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:translate-y-px"
         >
           {count > 0 ? <PlugZap className="h-4 w-4" /> : <Plug className="h-4 w-4" />}
-          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-primary px-1 text-center font-mono text-[9px] font-semibold leading-4 text-primary-foreground">
+          <span className="absolute -right-0.5 -top-0.5 min-w-3 rounded-full bg-foreground px-0.5 text-center font-mono text-[8px] font-medium leading-3 text-background">
             {count}
           </span>
         </button>

@@ -14,12 +14,10 @@ import {
   FileArchive,
   FileText,
   History,
-  Image as ImageIcon,
   Loader2,
   MessageSquare,
   RotateCcw,
   Send,
-  User,
 } from 'lucide-react'
 
 import { apiGet, unwrapList, type EventSummary } from '@/lib/api'
@@ -68,17 +66,10 @@ const STATUS_OPTIONS = [
   { value: 'missing', label: 'Missing' },
 ]
 
-const STATUS_META: Record<string, { label: string; variant: 'success' | 'warning' | 'muted' }> = {
-  received: { label: 'Received', variant: 'success' },
-  needs_changes: { label: 'Needs changes', variant: 'warning' },
-  missing: { label: 'Missing', variant: 'muted' },
-}
-
-const TYPE_ICON: Record<string, typeof FileText> = {
-  slides: FileText,
-  headshot: ImageIcon,
-  bio: User,
-  other: FileText,
+const STATUS_META: Record<string, { label: string; dot: string }> = {
+  received: { label: 'Received', dot: 'before:bg-success' },
+  needs_changes: { label: 'Needs changes', dot: 'before:bg-warning' },
+  missing: { label: 'Missing', dot: 'before:bg-destructive' },
 }
 
 /** Off (server order) -> soonest first -> latest first -> off. */
@@ -199,17 +190,12 @@ export function ContentLibrary() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <FileArchive className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Content library</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Every slide deck, headshot and bio your speakers have sent
-              {event ? ` for ${event.name}` : ''}.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Content</h1>
+          <p className="page-subtitle">
+            Every slide deck, headshot and bio your speakers have sent
+            {event ? ` for ${event.name}` : ''}.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -240,10 +226,20 @@ export function ContentLibrary() {
         </div>
       </header>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      {library && (
+        <div className="mt-6 grid border-y border-border bg-card sm:grid-cols-4">
+          <ContentStat label="Total" value={rawItems.length} />
+          <ContentStat label="Received" value={library.counts.received ?? 0} />
+          <ContentStat label="Needs changes" value={library.counts.needs_changes ?? 0} />
+          <ContentStat label="Missing" value={library.counts.missing ?? 0} />
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="w-44">
           <NativeSelect
             aria-label="Filter by type"
+            className="bg-transparent px-0 pr-5 hover:bg-transparent"
             value={type}
             onValueChange={(v) => setType(v as ContentType | 'all')}
             options={TYPE_OPTIONS}
@@ -252,21 +248,20 @@ export function ContentLibrary() {
         <div className="w-44">
           <NativeSelect
             aria-label="Filter by status"
+            className="bg-transparent px-0 pr-5 hover:bg-transparent"
             value={status}
             onValueChange={(v) => setStatus(v as ContentStatus | 'all')}
             options={STATUS_OPTIONS}
           />
         </div>
         {library && (
-          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-            <span>{library.counts.received ?? 0} received</span>
-            <span>{library.counts.needs_changes ?? 0} needs changes</span>
-            <span>{library.counts.missing ?? 0} missing</span>
+          <div className="ml-auto font-mono text-[10.5px] tabular-nums text-placeholder">
+            {items.length} of {rawItems.length}
           </div>
         )}
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <div className="mt-4 bg-card">
         {error ? (
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
@@ -333,13 +328,12 @@ export function ContentLibrary() {
                 </TableHead>
                 <TableHead className="w-[140px]">Status</TableHead>
                 <TableHead className="w-[150px]">Uploaded</TableHead>
-                <TableHead className="w-[90px] text-center">Version</TableHead>
-                <TableHead className="w-[110px] text-right">Open</TableHead>
+                <TableHead className="w-[90px]">Version</TableHead>
+                <TableHead className="w-[110px]">Open</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.map((item) => {
-                const Icon = TYPE_ICON[item.type] ?? FileText
                 const selectable = Boolean(item.current_file)
                 return (
                   <TableRow key={item.item_id} data-state={selectedSet.has(item.item_id) ? 'selected' : undefined}>
@@ -367,8 +361,7 @@ export function ContentLibrary() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="inline-flex items-center gap-1.5 text-sm capitalize text-foreground">
-                        <Icon className="h-4 w-4 text-muted-foreground" />
+                      <span className="capitalize text-foreground">
                         {item.type}
                       </span>
                     </TableCell>
@@ -416,12 +409,12 @@ export function ContentLibrary() {
                       <UploadedCell uploadedAt={item.uploaded_at} />
                     </TableCell>
                     <TableCell
-                      className="text-center tabular-nums text-sm text-muted-foreground"
+                      className="font-mono text-[10.5px] tabular-nums text-muted-foreground"
                       data-testid="content-version-cell"
                     >
                       {item.current_version > 0 ? `v${item.current_version}` : '—'}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell>
                       <Button size="sm" variant="secondary" onClick={() => setOpenItem(item)}>
                         Open
                       </Button>
@@ -434,7 +427,7 @@ export function ContentLibrary() {
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted-foreground">
         {outstanding.length > 0 && (
           <p>
             {outstanding.length} speaker{outstanding.length === 1 ? '' : 's'} still outstanding on
@@ -755,6 +748,15 @@ function ItemDialog({
 
 // ── bits ──────────────────────────────────────────────────────────────────────
 
+function ContentStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="border-b border-border px-5 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <p className="font-mono text-[21px] font-medium tabular-nums leading-6 text-foreground">{value}</p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
 /**
  * A real `<input type="checkbox">`, not the Radix widget.
  *
@@ -806,7 +808,7 @@ function DueCell({ dueAt, done }: { dueAt: string | null; done: boolean }) {
     <span
       data-overdue={late ? 'true' : undefined}
       className={cn(
-        'inline-flex items-center gap-1.5 text-sm tabular-nums',
+        'inline-flex items-center gap-1.5 font-mono text-[10.5px] tabular-nums',
         late ? 'font-medium text-destructive' : 'text-foreground'
       )}
     >
@@ -824,16 +826,16 @@ function DueCell({ dueAt, done }: { dueAt: string | null; done: boolean }) {
 function UploadedCell({ uploadedAt }: { uploadedAt: string | null }) {
   if (!uploadedAt) return <span className="text-sm text-muted-foreground">—</span>
   return (
-    <span className="text-sm text-foreground" title={absolute(uploadedAt)}>
+    <span className="font-mono text-[10.5px] text-muted-foreground" title={absolute(uploadedAt)}>
       {absolute(uploadedAt)}
     </span>
   )
 }
 
 function StatusBadge({ status, approved = false }: { status: string; approved?: boolean }) {
-  if (approved) return <Badge variant="success">Approved</Badge>
-  const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
-  return <Badge variant={meta.variant}>{meta.label}</Badge>
+  if (approved) return <Badge variant="dot" className="before:bg-success">Approved</Badge>
+  const meta = STATUS_META[status] ?? { label: status, dot: 'before:bg-status-neutral' }
+  return <Badge variant="dot" className={meta.dot}>{meta.label}</Badge>
 }
 
 function relative(value: string): ReactNode {

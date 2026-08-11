@@ -52,7 +52,6 @@ export function ThreadDropdown() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const activeThread = threads.find((thread) => thread.id === activeThreadId)
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
     return threads
@@ -106,19 +105,19 @@ export function ThreadDropdown() {
             setSearch('')
             setActiveIndex(0)
           }}
-          className="flex h-9 max-w-[240px] items-center gap-2 rounded-full border border-border bg-card px-3 text-left text-xs font-semibold text-foreground shadow-soft transition-colors hover:bg-accent active:scale-[0.98]"
+          className="flex h-[27px] items-center gap-1.5 rounded-lg bg-foreground/[0.045] px-2.5 text-left text-[12.5px] font-medium text-foreground transition-colors hover:bg-foreground/[0.07] active:translate-y-px"
         >
           {activeThreadId && respondingThreadIds.has(activeThreadId) ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
           ) : (
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
           )}
-          <span className="min-w-0 flex-1 truncate">{activeThread?.name || 'New chat'}</span>
+          <span>Chat</span>
           <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
         </button>
 
         {open && (
-          <div className="absolute left-0 top-full z-30 mt-2 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover shadow-lifted animate-in fade-in-0 zoom-in-95 slide-in-from-top-1">
+          <div className="absolute left-0 top-full z-30 mt-2 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl bg-popover shadow-lifted animate-in fade-in-0 zoom-in-95 slide-in-from-top-1">
             <div className="relative border-b border-border p-2">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -187,7 +186,7 @@ export function ThreadDropdown() {
                       <Ellipsis className="h-3.5 w-3.5" />
                     </button>
                     {rowMenu === thread.id && (
-                      <div className="absolute right-1 top-9 z-40 w-32 rounded-lg border border-border bg-popover p-1 shadow-raised">
+                      <div className="absolute right-1 top-9 z-40 w-32 rounded-lg bg-popover p-1 shadow-raised">
                         <button
                           type="button"
                           onClick={() => {

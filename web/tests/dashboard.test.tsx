@@ -95,17 +95,15 @@ function renderDashboard() {
 }
 
 /**
- * The stat card is a label above a big number — read the number under it.
- * `getAllByText` because a label like "Onboarded" also appears as a row badge;
- * only the card version sits inside a Card.
+ * The stat row is a label beneath a mono number — read the number paired with it.
  */
 function statValue(label: string): string {
-  const card = screen
+  const block = screen
     .getAllByText(label)
-    .map((node) => node.closest('[data-slot="card"]'))
-    .find(Boolean)
-  if (!card) throw new Error(`No stat card labelled "${label}"`)
-  return within(card as HTMLElement).getByText(/^\d+$/).textContent ?? ''
+    .map((node) => node.parentElement)
+    .find((node): node is HTMLElement => /^\d+$/.test(node?.firstElementChild?.textContent ?? ''))
+  if (!block) throw new Error(`No stat block labelled "${label}"`)
+  return block.firstElementChild?.textContent ?? ''
 }
 
 let requestedUrls: string[] = []
@@ -133,7 +131,7 @@ describe('Dashboard', () => {
 
   it('renders the header while the first payload is still loading', async () => {
     renderDashboard()
-    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Today' })).toBeInTheDocument()
     // Nothing is claimed about the numbers until they arrive.
     expect(screen.queryByText('Speaker onboarding')).not.toBeInTheDocument()
     expect(await screen.findByText('Speaker onboarding')).toBeInTheDocument()
@@ -152,11 +150,11 @@ describe('Dashboard', () => {
     expect(statValue('Total speakers')).toBe('3')
     expect(statValue('Onboarded')).toBe('1')
     expect(statValue('Outstanding tasks')).toBe('2')
-    expect(screen.getByText('33% of speakers')).toBeInTheDocument()
+    expect(screen.getByText(/33% of speakers/)).toBeInTheDocument()
 
-    const funnel = screen.getByText('Submission funnel').closest('[data-slot="card"]') as HTMLElement
-    expect(within(funnel).getByText('14 total')).toBeInTheDocument()
-    expect(within(funnel).getByText('Accept Queue')).toBeInTheDocument()
+    const funnel = screen.getByText('Submission funnel').parentElement as HTMLElement
+    expect(statValue('Submission funnel')).toBe('14')
+    expect(within(funnel).getByText('Accept queue')).toBeInTheDocument()
     expect(within(funnel).getByText('Accepted')).toBeInTheDocument()
   })
 
@@ -166,7 +164,7 @@ describe('Dashboard', () => {
     // Owing: progress + an explicit count.
     const grace = (await screen.findByText('Grace Hopper')).closest('tr') as HTMLElement
     expect(within(grace).getByText('1/3 done')).toBeInTheDocument()
-    expect(within(grace).getByText('2 outstanding')).toBeInTheDocument()
+    expect(within(grace).getByText(/2 outstanding/)).toBeInTheDocument()
     expect(within(grace).getByText('2 days ago')).toBeInTheDocument()
     expect(within(grace).getByText('Portal invite')).toBeInTheDocument()
     expect(within(grace).getByText('suppressed')).toBeInTheDocument()

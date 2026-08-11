@@ -116,47 +116,47 @@ const SpeakersContext = createContext<SpeakerRegistry>({})
  * interpolation.
  */
 const PALETTE: Record<string, { surface: string; bar: string; title: string; meta: string; chip: string }> = {
-  indigo: {
-    surface: 'bg-indigo-50 border-indigo-200',
-    bar: 'bg-indigo-500',
-    title: 'text-indigo-950',
-    meta: 'text-indigo-700',
-    chip: 'bg-indigo-100 text-indigo-700 ring-indigo-200',
+  slate: {
+    surface: 'border-status-queue/25 bg-status-queue/10',
+    bar: 'bg-status-queue',
+    title: 'text-foreground',
+    meta: 'text-muted-foreground',
+    chip: 'bg-status-queue/10 text-foreground ring-status-queue/20',
   },
   violet: {
-    surface: 'bg-violet-50 border-violet-200',
-    bar: 'bg-violet-500',
-    title: 'text-violet-950',
-    meta: 'text-violet-700',
-    chip: 'bg-violet-100 text-violet-700 ring-violet-200',
+    surface: 'border-primary/20 bg-primary-subtle',
+    bar: 'bg-primary',
+    title: 'text-foreground',
+    meta: 'text-muted-foreground',
+    chip: 'bg-primary-subtle text-foreground ring-primary/20',
   },
   sky: {
-    surface: 'bg-sky-50 border-sky-200',
-    bar: 'bg-sky-500',
-    title: 'text-sky-950',
-    meta: 'text-sky-700',
-    chip: 'bg-sky-100 text-sky-700 ring-sky-200',
+    surface: 'border-status-neutral/60 bg-status-neutral/15',
+    bar: 'bg-status-neutral',
+    title: 'text-foreground',
+    meta: 'text-muted-foreground',
+    chip: 'bg-status-neutral/20 text-foreground ring-status-neutral/50',
   },
   emerald: {
-    surface: 'bg-emerald-50 border-emerald-200',
-    bar: 'bg-emerald-500',
-    title: 'text-emerald-950',
-    meta: 'text-emerald-700',
-    chip: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    surface: 'border-success/25 bg-success/10',
+    bar: 'bg-success',
+    title: 'text-foreground',
+    meta: 'text-muted-foreground',
+    chip: 'bg-success/10 text-foreground ring-success/20',
   },
   amber: {
-    surface: 'bg-amber-50 border-amber-200',
-    bar: 'bg-amber-500',
-    title: 'text-amber-950',
-    meta: 'text-amber-700',
-    chip: 'bg-amber-100 text-amber-700 ring-amber-200',
+    surface: 'border-warning/25 bg-warning/10',
+    bar: 'bg-warning',
+    title: 'text-foreground',
+    meta: 'text-muted-foreground',
+    chip: 'bg-warning/10 text-foreground ring-warning/20',
   },
 }
 
 const PALETTE_KEYS = Object.keys(PALETTE)
 
 function palette(color: string) {
-  return PALETTE[color] ?? PALETTE.indigo
+  return PALETTE[color] ?? PALETTE.slate
 }
 
 /**
@@ -166,7 +166,7 @@ function palette(color: string) {
  * same colour and keeps that colour stable across reloads.
  */
 function paletteFor(trackId: string | null | undefined): string {
-  if (!trackId) return 'indigo'
+  if (!trackId) return 'slate'
   let hash = 0
   for (let i = 0; i < trackId.length; i += 1) {
     hash = (hash * 31 + trackId.charCodeAt(i)) >>> 0
@@ -338,7 +338,7 @@ function SessionCard({
   return (
     <div
       className={cn(
-        'relative flex h-full overflow-hidden rounded-md border shadow-soft transition-shadow',
+        'relative flex h-full overflow-hidden rounded-md border transition-shadow',
         colors.surface,
         conflicted && 'ring-2 ring-destructive ring-offset-1 ring-offset-card',
         dragging && 'shadow-lifted',
@@ -519,14 +519,14 @@ function DropGhost({ preview, grid }: { preview: Preview; grid: GridGeometry }) 
         'pointer-events-none absolute inset-x-1 z-20 rounded-md border-2 border-dashed transition-[top] duration-75',
         conflicting
           ? 'border-destructive bg-destructive/10'
-          : 'border-primary bg-primary/10'
+          : 'border-foreground bg-foreground/[0.045]'
       )}
       style={{ top: preview.startSlot * SLOT_PX, height: preview.slots * SLOT_PX }}
     >
       <span
         className={cn(
           'absolute -top-2.5 left-2 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-tight tabular-nums shadow-soft',
-          conflicting ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground'
+          conflicting ? 'bg-destructive text-destructive-foreground' : 'bg-foreground text-white'
         )}
       >
         {formatMinutes(slotToMin(grid, preview.startSlot))}
@@ -620,7 +620,7 @@ function RoomColumn({
                     event.stopPropagation()
                     onUnschedule(session.id)
                   }}
-                  className="absolute right-0.5 top-0.5 z-20 inline-flex h-4 w-4 items-center justify-center rounded border border-border bg-card/90 text-muted-foreground opacity-0 shadow-soft transition-opacity hover:border-destructive hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
+          className="absolute right-0.5 top-0.5 z-20 inline-flex h-4 w-4 items-center justify-center rounded border border-border bg-card/90 text-muted-foreground opacity-0 transition-opacity hover:border-destructive hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -668,7 +668,7 @@ function UnscheduledPanel({
       ref={setNodeRef}
       data-testid="unscheduled-panel"
       className={cn(
-        'flex flex-col rounded-lg border bg-card shadow-soft transition-colors',
+        'flex flex-col rounded-lg border bg-card transition-colors',
         isOver && active ? 'border-primary bg-primary-subtle' : 'border-border'
       )}
     >
@@ -708,9 +708,9 @@ function UnscheduledPanel({
                       onSelect(session.id)
                     }}
                     className={cn(
-                      'absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-soft transition-colors',
+                      'absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none transition-colors',
                       selectedId === session.id
-                        ? 'border-primary bg-primary text-primary-foreground'
+                        ? 'border-foreground bg-foreground text-white'
                         : 'border-border bg-card/90 text-muted-foreground hover:border-primary hover:text-primary'
                     )}
                   >
@@ -904,7 +904,7 @@ function DaySwitcher({
       role="tablist"
       aria-label="Conference day"
       data-testid="day-switcher"
-      className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1 shadow-soft"
+      className="flex items-center gap-1 overflow-x-auto"
     >
       {days.map((d, index) => {
         const active = value === d
@@ -919,7 +919,7 @@ function DaySwitcher({
             className={cn(
               'flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
               active
-                ? 'bg-primary text-primary-foreground shadow-soft'
+                ? 'bg-foreground text-white'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             )}
           >
@@ -987,7 +987,7 @@ function OutsideEventDatesPanel({
         </p>
       </div>
 
-      <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <ul className="divide-y divide-border overflow-hidden bg-card">
         {sessions.map((session) => (
           <li
             key={session.id}
@@ -1059,7 +1059,7 @@ function ListView({
   )
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+    <div className="mt-4 overflow-hidden bg-card">
       {scheduled.length === 0 ? (
         <p className="px-5 py-12 text-center text-sm text-muted-foreground">
           Nothing scheduled yet. Switch to the Rooms view to drag sessions onto the grid.
@@ -1784,7 +1784,7 @@ export function Agenda() {
 
   /** One card frame for every state that isn't the grid. */
   const panel = (children: React.ReactNode) => (
-    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+    <div className="mt-4 overflow-hidden bg-card">
       {children}
     </div>
   )
@@ -1925,7 +1925,7 @@ export function Agenda() {
           <div
             className={cn(
               'min-w-0 flex-1',
-              !showingOutside && 'overflow-hidden rounded-lg border border-border bg-card shadow-soft'
+              !showingOutside && 'overflow-hidden bg-card'
             )}
           >
             {showingOutside ? (
@@ -2019,8 +2019,8 @@ export function Agenda() {
                 <CalendarDays className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">Agenda</h1>
-                <p className="mt-0.5 text-sm text-muted-foreground">
+                <h1 className="page-title">Agenda</h1>
+                <p className="page-subtitle">
                   Drag a session onto the grid{eventName ? ` for ${eventName}` : ''}, or hit Place
                   and click a slot. Conflicts are flagged live, before you drop.
                 </p>
@@ -2147,7 +2147,7 @@ export function Agenda() {
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="view-public-page"
-                  className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-primary bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                  className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-strong"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   View public page

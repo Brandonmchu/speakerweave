@@ -49,8 +49,8 @@ const NativeSelect = React.forwardRef<HTMLSelectElement, NativeSelectProps>(
           value={value ?? ''}
           onChange={(event) => onValueChange?.(event.target.value)}
           className={cn(
-            'flex h-9 w-full appearance-none items-center rounded-md border border-input bg-card px-3 py-1 pr-9 text-sm transition-colors outline-none',
-            'hover:border-primary/50 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20',
+            'flex h-[30px] w-full appearance-none items-center rounded-lg border border-transparent bg-foreground/[0.045] px-3 py-1 pr-8 text-[13px] transition-[color,background-color,border-color,box-shadow] outline-none',
+            'hover:bg-foreground/[0.07] focus-visible:border-input focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-primary/15',
             'disabled:cursor-not-allowed disabled:opacity-50',
             'aria-invalid:border-destructive',
             showingPlaceholder ? 'text-placeholder' : 'text-foreground',
@@ -73,7 +73,7 @@ const NativeSelect = React.forwardRef<HTMLSelectElement, NativeSelectProps>(
         </select>
         <ChevronDown
           aria-hidden
-          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 shrink-0 opacity-50"
+          className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 shrink-0 text-placeholder"
         />
       </div>
     )

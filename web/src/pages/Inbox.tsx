@@ -3,16 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 import {
   AlertCircle,
-  ArrowUpDown,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   FileDown,
-  Filter,
   History,
   Inbox as InboxIcon,
-  Layers,
   Mail,
   MoreHorizontal,
   Pencil,
@@ -53,6 +50,7 @@ import {
 import { listTaxonomy, type TaxonomyRow } from '@/lib/adminApi'
 import { looseEquals, type AnswerValue } from '@/lib/rules'
 import { cn } from '@/lib/utils'
+import { GradientAvatar } from '@/ui/avatar'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import { Checkbox } from '@/ui/checkbox'
@@ -77,7 +75,7 @@ import { NativeSelect } from '@/ui/native-select'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
+import { Tabs, TabsCount, TabsList, TabsTrigger } from '@/ui/tabs'
 import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
 
@@ -103,15 +101,15 @@ const PAGE_SIZES = [10, 25, 50, 100]
 
 const STATUS_META: Record<
   SubmissionStatus,
-  { label: string; variant: 'default' | 'success' | 'warning' | 'destructive' | 'muted' }
+  { label: string; dot: string }
 > = {
-  draft: { label: 'Draft', variant: 'muted' },
-  pending: { label: 'Pending', variant: 'warning' },
-  accept_queue: { label: 'Accept Queue', variant: 'default' },
-  accepted: { label: 'Accepted', variant: 'success' },
-  decline_queue: { label: 'Decline Queue', variant: 'muted' },
-  declined: { label: 'Declined', variant: 'destructive' },
-  withdrawn: { label: 'Withdrawn', variant: 'muted' },
+  draft: { label: 'Draft', dot: 'before:bg-status-neutral' },
+  pending: { label: 'Pending', dot: 'before:bg-warning' },
+  accept_queue: { label: 'Accept Queue', dot: 'before:bg-status-queue' },
+  accepted: { label: 'Accepted', dot: 'before:bg-success' },
+  decline_queue: { label: 'Decline Queue', dot: 'before:bg-status-queue' },
+  declined: { label: 'Declined', dot: 'before:bg-destructive' },
+  withdrawn: { label: 'Withdrawn', dot: 'before:bg-status-neutral' },
 }
 
 /** The decisions an operator can make from the inbox row menu. */
@@ -185,8 +183,8 @@ function statusLabel(status: SubmissionStatus): string {
 }
 
 function StatusBadge({ status }: { status: SubmissionStatus }) {
-  const meta = STATUS_META[status] ?? { label: status, variant: 'muted' as const }
-  return <Badge variant={meta.variant}>{meta.label}</Badge>
+  const meta = STATUS_META[status] ?? { label: status, dot: 'before:bg-status-neutral' }
+  return <Badge variant="dot" className={meta.dot}>{meta.label}</Badge>
 }
 
 function contactName(
@@ -774,19 +772,13 @@ export function Inbox() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <Layers className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Submissions</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Review and triage session submissions{event ? ` for ${event.name}` : ''}.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Submissions</h1>
+          <p className="page-subtitle">
+            Review and triage session submissions{event ? ` for ${event.name}` : ''}.
+          </p>
         </div>
         <Button onClick={() => setAddOpen(true)} disabled={!event}>
-          <Plus />
           Add submission
         </Button>
       </header>
@@ -797,14 +789,9 @@ export function Inbox() {
             {TABS.map(({ key, label }) => (
               <TabsTrigger key={key} value={key}>
                 {label}
-                <span
-                  className={cn(
-                    'rounded px-1.5 py-0.5 text-xs font-medium tabular-nums',
-                    tab === key ? 'bg-primary-subtle text-primary' : 'bg-muted text-muted-foreground'
-                  )}
-                >
+                <TabsCount>
                   {counts(key)}
-                </span>
+                </TabsCount>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -812,7 +799,7 @@ export function Inbox() {
       </div>
 
       {showToolbar && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -823,21 +810,19 @@ export function Inbox() {
               className="pl-9"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <ArrowUpDown className="h-4 w-4" />
-              <span className="sr-only sm:not-sr-only">Sort</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+              <span>Sort</span>
               <NativeSelect
                 aria-label="Sort submissions"
                 value={sortKey}
                 onValueChange={(value) => changeSort(value as SortKey)}
                 options={SORT_OPTIONS}
-                className="h-9 w-[150px]"
+                className="h-[30px] w-auto min-w-[128px] bg-transparent px-0 pr-5 text-foreground hover:bg-transparent"
               />
             </label>
-            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Filter className="h-4 w-4" />
-              <span className="sr-only sm:not-sr-only">Track</span>
+            <label className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+              <span>Track</span>
               <NativeSelect
                 aria-label="Filter by track"
                 value={filterTrack}
@@ -846,11 +831,11 @@ export function Inbox() {
                   { value: 'all', label: 'All tracks' },
                   ...tracks.map((t) => ({ value: t.id, label: t.name })),
                 ]}
-                className="h-9 w-[150px]"
+                className="h-[30px] w-auto min-w-[112px] bg-transparent px-0 pr-5 text-foreground hover:bg-transparent"
               />
             </label>
-            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <span className="sr-only sm:not-sr-only">Status</span>
+            <label className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+              <span>Status</span>
               <NativeSelect
                 aria-label="Filter by status"
                 value={filterStatus}
@@ -862,7 +847,7 @@ export function Inbox() {
                     label: STATUS_META[status].label,
                   })),
                 ]}
-                className="h-9 w-[150px]"
+                className="h-[30px] w-auto min-w-[112px] bg-transparent px-0 pr-5 text-foreground hover:bg-transparent"
               />
             </label>
             {filtersActive && (
@@ -915,7 +900,7 @@ export function Inbox() {
         </div>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <div className="mt-4 bg-card">
         {error ? (
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
@@ -974,14 +959,15 @@ export function Inbox() {
                 <TableHead className="w-[40px] px-0">
                   <span className="sr-only">Edit</span>
                 </TableHead>
-                <TableHead className="w-[110px]">ID</TableHead>
-                <TableHead className="w-[100px]">Source</TableHead>
-                <TableHead className="w-[30%]">Title</TableHead>
+                <TableHead className="w-[96px]">ID</TableHead>
+                <TableHead className="w-[80px]">Source</TableHead>
+                <TableHead className="w-[25%]">Title</TableHead>
                 <TableHead>Submitter</TableHead>
-                <TableHead className="w-[90px]">Score</TableHead>
-                <TableHead className="w-[150px]">Status</TableHead>
-                <TableHead className="w-[140px]">Submitted</TableHead>
-                <TableHead className="w-[60px] text-right sr-only">Actions</TableHead>
+                <TableHead className="w-[100px]">Track</TableHead>
+                <TableHead className="w-[64px]">Score</TableHead>
+                <TableHead className="w-[130px]">Status</TableHead>
+                <TableHead className="w-[120px]">Submitted</TableHead>
+                <TableHead className="w-[96px] text-right sr-only">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1036,12 +1022,24 @@ export function Inbox() {
                     <div className="font-medium text-foreground">{submission.title || 'Untitled'}</div>
                   </TableCell>
                   <TableCell>
-                    <div className="text-sm text-foreground">{submitterName(submission)}</div>
-                    {submission.submitter?.email && (
-                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {submission.submitter.email}
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <GradientAvatar
+                        id={submission.submitter?.id ?? submission.id}
+                        name={submitterName(submission)}
+                        size={24}
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] text-foreground">{submitterName(submission)}</div>
+                        {submission.submitter?.email && (
+                          <div className="truncate text-[11.5px] text-muted-foreground">
+                            {submission.submitter.email}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {trackNameById(submission.track_id) || '—'}
                   </TableCell>
                   <TableCell>
                     <ReviewScoreBadge
@@ -1053,7 +1051,7 @@ export function Inbox() {
                     <StatusBadge status={submission.status} />
                   </TableCell>
                   <TableCell
-                    className="text-sm text-muted-foreground"
+                    className="font-mono text-[10.5px] text-muted-foreground"
                     title={fullDate(submission.submitted_at ?? submission.created_at)}
                   >
                     {relativeDate(submission.submitted_at ?? submission.created_at)}
@@ -1128,7 +1126,7 @@ export function Inbox() {
                     className={cn(
                       'inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-sm tabular-nums transition-colors',
                       item === safePage
-                        ? 'border-primary-strong bg-primary text-primary-foreground'
+                        ? 'border-foreground bg-foreground text-white'
                         : 'border-input bg-card text-foreground hover:bg-accent'
                     )}
                   >
@@ -1259,7 +1257,7 @@ export function Inbox() {
               <div className="min-h-0 flex-1 overflow-y-auto scrollbar-app px-6 py-5">
                 {editing && (
                   <form
-                    className="mb-6 rounded-lg border border-border bg-muted/40 p-4"
+                    className="mb-6 border-y border-border py-4"
                     onSubmit={(formEvent) => {
                       formEvent.preventDefault()
                       if (!editTitle.trim()) return
@@ -1333,7 +1331,7 @@ export function Inbox() {
                 />
                 <section
                   data-testid="content-approval-control"
-                  className="mt-6 rounded-lg border border-border bg-muted/30 p-4"
+                  className="mt-6 border-y border-border py-5"
                 >
                   <label
                     htmlFor="session-content-approval"
@@ -1399,7 +1397,7 @@ export function Inbox() {
 
                 {pendingDecision && pendingDecisionMeta && (
                   <form
-                    className="mt-3 rounded-lg border border-border bg-muted/40 p-4"
+                    className="mt-3 border-t border-border pt-4"
                     onSubmit={(event) => {
                       event.preventDefault()
                       submitDecision.mutate({
@@ -1736,7 +1734,7 @@ function SubmissionDetail({
   const people = dedupeParticipants(detail.participants)
 
   return (
-    <div className="space-y-6">
+    <div className="divide-y divide-border [&>section]:py-5 [&>section:first-child]:pt-0">
       {description && (
         <section>
           <PanelHeading title="Description" />
@@ -1779,12 +1777,12 @@ function SubmissionDetail({
         ) : people.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No participants linked yet.</p>
         ) : (
-          <ul className="mt-2 space-y-2">
+          <ul className="mt-2 divide-y divide-border">
             {people.map((person) => (
               <li
                 key={person.key}
                 data-testid={`participant-${person.key}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5"
+                className="flex flex-wrap items-center justify-between gap-2 py-2.5"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
@@ -1841,12 +1839,12 @@ function SessionHistory({
       ) : revisions.length === 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">No title or abstract edits yet.</p>
       ) : (
-        <ul className="mt-3 space-y-2">
+        <ul className="mt-3 divide-y divide-border">
           {revisions.map((revision) => (
             <li
               key={revision.id}
               data-testid={`session-revision-${revision.id}`}
-              className="rounded-lg border border-border px-3 py-2.5"
+              className="py-2.5"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -1945,7 +1943,7 @@ function ParticipantsEditor({
             <li
               key={person.key}
               data-testid={`edit-participant-${person.key}`}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5"
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2.5"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">
@@ -2033,7 +2031,7 @@ function ParticipantsEditor({
 
 function PanelHeading({ title }: { title: string }) {
   return (
-    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+    <h3 className="section-label">{title}</h3>
   )
 }
 
@@ -2109,17 +2107,15 @@ function ReviewScoreBadge({
   count?: number | null
 }) {
   if (score === null || score === undefined) {
-    return <span className="text-sm text-muted-foreground">—</span>
+    return <span className="font-mono text-[11px] text-muted-foreground">—</span>
   }
   return (
-    <Badge
-      variant="default"
-      className="gap-1 tabular-nums"
+    <span
+      className="font-mono text-[11px] tabular-nums text-foreground"
       title={`${formatScore(score)} average across ${count ?? 0} review${count === 1 ? '' : 's'}`}
     >
-      <Star className="h-3 w-3" />
       {formatScore(score)}
-    </Badge>
+    </span>
   )
 }
 
@@ -2141,7 +2137,7 @@ function ReviewsSection({ reviews }: { reviews: SessionReviewAggregate }) {
         </p>
       ) : (
         <div className="mt-2 space-y-4">
-          <div className="rounded-lg border border-border bg-muted/40 p-4">
+          <div className="border-y border-border py-4">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
                 <span className="text-lg font-semibold tabular-nums">
@@ -2166,7 +2162,7 @@ function ReviewsSection({ reviews }: { reviews: SessionReviewAggregate }) {
                 {scored.map((criterion) => (
                   <div
                     key={criterion.name}
-                    className="rounded-md border border-border bg-card px-2.5 py-1.5"
+                    className="border-l border-border pl-2.5"
                   >
                     <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">
                       {criterion.name}
@@ -2180,11 +2176,11 @@ function ReviewsSection({ reviews }: { reviews: SessionReviewAggregate }) {
             )}
           </div>
 
-          <ul className="space-y-2">
+          <ul className="divide-y divide-border">
             {reviews.reviews.map((verdict, index) => (
               <li
                 key={`${verdict.reviewer}-${index}`}
-                className="rounded-lg border border-border px-3 py-2.5"
+                className="py-2.5"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-sm font-medium text-foreground">{verdict.reviewer}</p>

@@ -1,3 +1,8 @@
-/* Style entry point. Order matters: tokens first, then the Tailwind layers. */
+/* Product typefaces are local npm assets; no remote font request is made. */
+@import '@fontsource-variable/instrument-sans';
+@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource/instrument-serif';
+
+/* Style entry point. Order matters: fonts, tokens, then the Tailwind layers. */
 @import './styles/theme.css';
 @import './styles/base.css';

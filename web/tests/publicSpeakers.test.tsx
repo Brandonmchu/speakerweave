@@ -143,7 +143,7 @@ describe('PublicSpeakers', () => {
     renderAt('/e/ai-builders-summit/speakers')
     expect(await screen.findByText('Alice Alpha')).toBeInTheDocument()
     expect(screen.getByText('Bob Beta')).toBeInTheDocument()
-    expect(screen.getByText('Powered by dais')).toBeInTheDocument()
+    expect(screen.getByText('Powered by SpeakerWeave')).toBeInTheDocument()
   })
 
   it('filters speakers by keyword across name, company and title (EMB-05/12)', async () => {
@@ -326,13 +326,13 @@ describe('PublicSpeakers → count/card consistency (EMB-12)', () => {
       speakerRow({ id: 'c-2', name: 'Priya Raman', company: 'Northwind Labs', title: 'Staff SRE' }),
     ])
     renderAt('/e/ai-builders-summit/speakers')
-    await screen.findByText('Northwind Labs')
+    await screen.findByText(/Northwind Labs/)
 
     // Two different people: two cards, told apart by company on the card itself.
     expect(cards()).toHaveLength(2)
     expect(countOf()).toBe(2)
-    expect(screen.getByText('Latticework Systems')).toBeInTheDocument()
-    expect(screen.getByText('Northwind Labs')).toBeInTheDocument()
+    expect(screen.getByText(/Latticework Systems/)).toBeInTheDocument()
+    expect(screen.getByText(/Northwind Labs/)).toBeInTheDocument()
   })
 
   it('offers a list view distinct from the photo grid, over the same filtered set', async () => {

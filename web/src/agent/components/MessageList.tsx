@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, AtSign, ExternalLink, Sparkles } from 'lucide-react'
+import { ArrowDown, AtSign, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { entityIcon } from '@/agent/components/ContextDropdown'
@@ -26,7 +26,7 @@ function EntityBadge({ item }: { item: ContextItem }) {
       disabled={!route}
       onClick={() => route && navigate(route)}
       title={route ? `Open ${item.display}` : item.display}
-      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-primary/20 bg-primary-subtle px-1.5 py-0.5 align-baseline text-[11px] font-medium leading-5 text-primary transition-colors hover:border-primary/45 hover:bg-primary/10 disabled:cursor-default"
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md bg-foreground/[0.045] px-1.5 py-0.5 align-baseline text-[11px] font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.07] disabled:cursor-default"
     >
       <Icon className="h-3 w-3 shrink-0" />
       <span className="truncate">{item.display}</span>
@@ -37,7 +37,7 @@ function EntityBadge({ item }: { item: ContextItem }) {
 function UserText({ text }: { text: string }) {
   const pieces = text.split(/((?:https?:\/\/|www\.)[^\s<]+)/g)
   return (
-    <span className="whitespace-pre-wrap break-words text-sm leading-6">
+    <span className="whitespace-pre-wrap break-words text-[13px] leading-5">
       {pieces.map((piece, index) =>
         /^(?:https?:\/\/|www\.)/.test(piece) ? (
           <a
@@ -95,13 +95,13 @@ function MessageBody({ message }: { message: AgentMessage }) {
     <>
       {user && stripped.contexts.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1">
-          <AtSign className="h-3 w-3 text-primary-foreground/75" />
+          <AtSign className="h-3 w-3 text-muted-foreground" />
           {stripped.contexts.map((item) => (
             <EntityBadge key={`${item.type}:${item.id}`} item={item} />
           ))}
         </div>
       )}
-      <div className={cn(!user && 'text-sm text-foreground')}>{parts}</div>
+      <div className={cn(!user && 'text-[13px] leading-5 text-foreground')}>{parts}</div>
     </>
   )
 }
@@ -109,13 +109,13 @@ function MessageBody({ message }: { message: AgentMessage }) {
 function HistorySkeleton() {
   return (
     <div className="space-y-5 px-1 pt-3" aria-label="Loading conversation">
-      <div className="ml-auto h-16 w-2/3 animate-pulse rounded-2xl rounded-br-md bg-muted" />
+      <div className="ml-auto h-14 w-2/3 animate-pulse rounded-xl bg-muted" />
       <div className="space-y-2">
         <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
         <div className="h-3 w-full animate-pulse rounded bg-muted" />
         <div className="h-3 w-3/5 animate-pulse rounded bg-muted" />
       </div>
-      <div className="ml-auto h-11 w-1/2 animate-pulse rounded-2xl rounded-br-md bg-muted" />
+      <div className="ml-auto h-10 w-1/2 animate-pulse rounded-xl bg-muted" />
     </div>
   )
 }
@@ -161,39 +161,33 @@ export function MessageList({
           if (distance > 100) setPaused(true)
           else if (distance < 50) setPaused(false)
         }}
-        className="scrollbar-app h-full overflow-y-auto px-4 pb-4 pt-[4.5rem]"
-        style={{
-          maskImage: 'linear-gradient(to bottom, transparent 0, black 54px, black 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 54px, black 100%)',
-        }}
+        className="scrollbar-app h-full overflow-y-auto px-5 pb-4 pt-5"
       >
         {loading ? (
           <HistorySkeleton />
         ) : messages.length === 0 ? (
-          <div className="mx-auto flex min-h-full max-w-[320px] flex-col justify-center py-10">
-            <span className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg border border-primary/20 bg-primary-subtle text-primary shadow-soft">
-              <Sparkles className="h-4 w-4" />
-            </span>
-            <h2 className="text-lg font-semibold tracking-tight text-foreground">Ask about your program</h2>
-            <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+          <div className="flex min-h-full flex-col py-2">
+            <h2 className="text-[13px] font-medium text-foreground">Ask about your program</h2>
+            <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
               Check live workspace data, prepare updates, and move through program work without leaving the page.
             </p>
-            <div className="mt-6 divide-y divide-border border-y border-border">
+            <p className="section-label mt-6">Try</p>
+            <div className="mt-2 space-y-1.5">
               {EXAMPLES.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => onExample(prompt)}
-                  className="group flex w-full items-start gap-2.5 py-3 text-left text-sm leading-5 text-foreground transition-colors hover:text-primary active:translate-y-px"
+                  className="group flex min-h-[36px] w-full items-center gap-2.5 rounded-lg bg-foreground/[0.028] px-3 py-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground active:translate-y-px"
                 >
-                  <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/55 transition-transform group-hover:scale-125" />
+                  <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-warning transition-transform group-hover:scale-125" />
                   {prompt}
                 </button>
               ))}
             </div>
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-4">
             {messages
               .filter((message) => message.sender_type !== 'system')
               .map((message) => {
@@ -208,15 +202,12 @@ export function MessageList({
                   >
                     <div className={cn(user ? 'max-w-[88%]' : 'w-full')}>
                       {user ? (
-                        <div className="rounded-2xl rounded-br-md bg-primary px-3.5 py-2.5 text-primary-foreground shadow-soft">
+                        <div className="rounded-xl bg-primary-subtle px-3.5 py-2.5 text-foreground">
                           <MessageBody message={message} />
                         </div>
                       ) : (
-                        <div className="flex gap-2.5">
-                          <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary-subtle text-primary">
-                            <Sparkles className="h-3.5 w-3.5" />
-                          </span>
-                          <div className="min-w-0 flex-1 pt-0.5">
+                        <div>
+                          <div className="min-w-0">
                             <MessageBody message={message} />
                             {message.response_type === 'error' && (
                               <p className="mt-2 text-xs font-medium text-destructive">This turn did not finish.</p>
@@ -237,7 +228,7 @@ export function MessageList({
         <button
           type="button"
           onClick={jumpToLatest}
-          className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-raised hover:bg-accent active:scale-[0.98]"
+          className="absolute bottom-3 left-1/2 inline-flex h-[27px] -translate-x-1/2 items-center gap-1.5 rounded-lg bg-card px-3 text-xs font-medium text-foreground shadow-raised hover:bg-accent active:translate-y-px"
         >
           <ArrowDown className="h-3.5 w-3.5" />
           Jump to latest
@@ -246,4 +237,3 @@ export function MessageList({
     </div>
   )
 }
-

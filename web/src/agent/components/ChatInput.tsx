@@ -195,7 +195,7 @@ export function ChatInput({
   }
 
   return (
-    <div className="shrink-0 border-t border-border bg-card px-3 pb-3 pt-2.5">
+    <div className="shrink-0 border-t border-border bg-card px-4 pb-3 pt-3">
       {contexts.length > 0 && (
         <div className="scrollbar-hide mb-2 flex items-center gap-1.5 overflow-x-auto px-1">
           <AtSign className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -207,7 +207,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => removeContext(item)}
                 title={`Remove ${item.display}`}
-                className="inline-flex max-w-[180px] shrink-0 items-center gap-1 rounded-md border border-primary/20 bg-primary-subtle px-1.5 py-0.5 text-[11px] font-medium text-primary hover:border-primary/40"
+                className="inline-flex max-w-[180px] shrink-0 items-center gap-1 rounded-md bg-primary-subtle px-1.5 py-0.5 text-[11px] font-medium text-foreground hover:bg-primary/10"
               >
                 <Icon className="h-3 w-3" />
                 <span className="truncate">{item.display}</span>
@@ -217,7 +217,7 @@ export function ChatInput({
           })}
         </div>
       )}
-      <div className="relative rounded-xl border border-input bg-background p-2 shadow-soft transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/25">
+      <div className="relative rounded-xl bg-foreground/[0.035] p-2 transition-[background-color,box-shadow] focus-within:bg-foreground/[0.045] focus-within:ring-1 focus-within:ring-primary/20">
         <ContextDropdown
           open={atMode}
           query={contextQuery}
@@ -239,20 +239,20 @@ export function ChatInput({
           onKeyDown={handleKeyDown}
           onPaste={() => closeAtMode()}
           className={cn(
-            'scrollbar-app block min-h-9 max-h-32 w-full overflow-y-auto border-0 bg-transparent px-1.5 py-1 text-sm leading-6 text-foreground outline-none',
+            'scrollbar-app block min-h-9 max-h-32 w-full overflow-y-auto border-0 bg-transparent px-1.5 py-1 text-[13px] leading-5 text-foreground outline-none',
             '[&:empty:before]:pointer-events-none [&:empty:before]:text-placeholder [&:empty:before]:content-[attr(data-placeholder)]',
           )}
           style={{ height: 36 }}
         />
         <div className="mt-1 flex items-center justify-between gap-2 pl-1.5">
-          <span className="text-[10px] text-muted-foreground">@ for context · Shift + Enter for newline</span>
+          <span className="font-mono text-[9.5px] text-placeholder">@ for context · shift + enter for newline</span>
           {streaming ? (
             <button
               type="button"
               onClick={onCancel}
               title="Stop response"
               aria-label="Stop response"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-foreground text-background transition-transform hover:opacity-90 active:scale-[0.96]"
+              className="inline-flex h-[27px] w-[27px] items-center justify-center rounded-lg bg-foreground text-background transition-transform hover:opacity-90 active:translate-y-px"
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
@@ -262,7 +262,7 @@ export function ChatInput({
               onClick={submit}
               disabled={!canSend}
               aria-label="Send message"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-[background-color,transform] hover:bg-primary-strong active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-[27px] items-center gap-1.5 rounded-lg bg-transparent px-2 text-xs font-medium text-primary transition-[background-color,transform] hover:bg-primary-subtle active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Send className="h-3.5 w-3.5" />
               Send
@@ -270,10 +270,9 @@ export function ChatInput({
           )}
         </div>
       </div>
-      <p className="mt-2 text-center text-[10px] leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-center text-[10px] leading-relaxed text-placeholder">
         Review decisions and outbound messages before approving them.
       </p>
     </div>
   )
 }
-

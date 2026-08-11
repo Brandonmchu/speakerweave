@@ -788,7 +788,7 @@ export function PublicForm() {
 
 function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: string }) {
   return (
-    <div className="min-h-screen bg-[#FBFBFB]">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-[920px] px-5 py-10 sm:py-16">
         <div className="mb-6 flex items-center gap-2">
           <BrandMark className="h-7 w-7" />
@@ -800,7 +800,7 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
             </>
           )}
         </div>
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-[0_10px_30px_rgba(15,23,42,0.08)] sm:p-10">
+        <div className="rounded-2xl bg-card p-6 shadow-raised sm:p-10">
           {children}
         </div>
         <p className="mt-6 text-center text-xs text-muted-foreground">

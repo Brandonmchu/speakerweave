@@ -320,8 +320,8 @@ export function Comms() {
             <Mail className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Communications</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <h1 className="page-title">Communications</h1>
+            <p className="page-subtitle">
               Manage speaker email and track every send{event ? ` for ${event.name}` : ''}.
             </p>
           </div>
@@ -340,7 +340,7 @@ export function Comms() {
         </TabsList>
 
         {eventError ? (
-          <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          <div className="mt-4 overflow-hidden bg-card">
             <EmptyState
               icon={<AlertCircle className="h-6 w-6 text-destructive" />}
               title="Couldn't load communications"
@@ -355,7 +355,7 @@ export function Comms() {
             <Skeleton className="h-24 w-full" />
           </div>
         ) : !event ? (
-          <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          <div className="mt-4 overflow-hidden bg-card">
             <EmptyState
               icon={<Mail className="h-6 w-6 text-muted-foreground" />}
               title="No event to message"
@@ -372,7 +372,7 @@ export function Comms() {
                 </div>
                 <Button size="sm" onClick={openNewTemplate}><Plus />New template</Button>
               </div>
-              <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
                 {templatesQuery.error ? (
                   <EmptyState
                     icon={<AlertCircle className="h-6 w-6 text-destructive" />}
@@ -676,7 +676,7 @@ export function Comms() {
                 <h2 className="text-base font-semibold text-foreground">Send log</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">One row per recipient, newest first.</p>
               </div>
-              <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
                 {logQuery.error ? (
                   <EmptyState
                     icon={<AlertCircle className="h-6 w-6 text-destructive" />}

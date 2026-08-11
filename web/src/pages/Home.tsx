@@ -287,7 +287,7 @@ export function Home() {
                   size="lg"
                   onClick={enterDemo}
                   disabled={loading}
-                  className="h-12 px-6 shadow-[0_10px_28px_-10px_hsl(var(--primary)/0.65)]"
+                  className="h-12 px-6 shadow-raised"
                 >
                   {loading ? 'Starting the demo…' : 'Enter the demo workspace'}
                   {!loading && <ArrowRight className="h-4 w-4" />}
@@ -311,7 +311,7 @@ export function Home() {
                 aria-hidden="true"
                 className="absolute -inset-4 rounded-[2rem] bg-primary/10 blur-2xl"
               />
-              <div className="relative overflow-hidden rounded-[1.15rem] border border-border/90 bg-card p-1.5 shadow-lifted lg:[transform:perspective(1200px)_rotateY(-1.5deg)_rotateX(0.5deg)]">
+              <div className="relative overflow-hidden rounded-[1.15rem] bg-card p-1.5 shadow-lifted lg:[transform:perspective(1200px)_rotateY(-1.5deg)_rotateX(0.5deg)]">
                 <div className="overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex h-10 items-center gap-3 border-b border-border bg-muted/70 px-3">
                     <div className="flex gap-1.5" aria-hidden="true">
@@ -319,7 +319,7 @@ export function Home() {
                       <span className="h-2.5 w-2.5 rounded-full bg-warning/80" />
                       <span className="h-2.5 w-2.5 rounded-full bg-success/75" />
                     </div>
-                    <div className="mx-auto flex h-6 w-[55%] items-center justify-center rounded-md border border-border bg-background/80 px-3 font-mono text-[10px] text-muted-foreground shadow-soft">
+                    <div className="mx-auto flex h-6 w-[55%] items-center justify-center rounded-md border border-border bg-background/80 px-3 font-mono text-[10px] text-muted-foreground">
                       speakerweave.com
                     </div>
                     <div className="w-12" aria-hidden="true" />
@@ -382,7 +382,7 @@ export function Home() {
             {CAPABILITIES.map(({ icon: Icon, title, body, span }) => (
               <article
                 key={title}
-                className={`group rounded-xl border border-border bg-card p-5 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-raised ${span}`}
+                className={`group rounded-xl border border-border bg-card p-5 transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/35 ${span}`}
               >
                 <div className="flex items-center gap-3">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-subtle text-primary">
@@ -432,7 +432,7 @@ export function Home() {
           />
           <div className="relative mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28">
             <div className="mx-auto max-w-3xl text-center">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary-subtle text-primary shadow-soft">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-primary/20 bg-primary-subtle text-primary">
                 <Workflow className="h-5 w-5" strokeWidth={1.8} />
               </div>
               <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
@@ -538,7 +538,7 @@ export function Home() {
         <div className="mx-auto grid max-w-7xl gap-6 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-[0.9fr_1.1fr]">
           <section
             data-testid="open-source-section"
-            className="rounded-2xl border border-border bg-card p-7 shadow-soft sm:p-9"
+            className="rounded-2xl border border-border bg-card p-7 sm:p-9"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
               Community built
@@ -565,7 +565,7 @@ export function Home() {
 
           <section
             data-testid="stack-section"
-            className="rounded-2xl border border-border bg-card p-7 shadow-soft sm:p-9"
+            className="rounded-2xl border border-border bg-card p-7 sm:p-9"
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>

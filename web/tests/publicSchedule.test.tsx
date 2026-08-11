@@ -154,7 +154,7 @@ describe('PublicSchedule', () => {
     expect(screen.getByText('Vector Databases')).toBeInTheDocument()
     // Track filter + public chrome are present.
     expect(screen.getByText('All tracks')).toBeInTheDocument()
-    expect(screen.getByText('Powered by dais')).toBeInTheDocument()
+    expect(screen.getByText('Powered by SpeakerWeave')).toBeInTheDocument()
     expect(screen.getByText('San Francisco, CA')).toBeInTheDocument()
   })
 
@@ -438,7 +438,7 @@ describe('PublicSchedule', () => {
 
     expect(await screen.findByText('Vector Databases')).toBeInTheDocument()
     expect(screen.queryByText('Opening Keynote')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Research' })).toHaveClass('border-primary')
+    expect(screen.getByRole('button', { name: 'Research' })).toHaveClass('bg-foreground')
   })
 
   it('scopes a validated accent query parameter to the public page', async () => {
@@ -454,7 +454,7 @@ describe('PublicSchedule', () => {
 
     expect(screen.queryByTestId('program-header')).not.toBeInTheDocument()
     expect(screen.getByTestId('public-program-page')).toHaveAttribute('data-compact', 'true')
-    expect(cardFor('Opening Keynote')).toHaveClass('p-3')
+    expect(cardFor('Opening Keynote')).toHaveClass('py-3')
   })
 
   it('in embed mode drops the chrome and posts its height to the parent', async () => {
@@ -468,7 +468,7 @@ describe('PublicSchedule', () => {
     await screen.findByText('Opening Keynote')
 
     // Chrome-less: no site footer/brand.
-    expect(screen.queryByText('Powered by dais')).not.toBeInTheDocument()
+    expect(screen.queryByText('Powered by SpeakerWeave')).not.toBeInTheDocument()
     await waitFor(() =>
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'dais-embed-height' }),

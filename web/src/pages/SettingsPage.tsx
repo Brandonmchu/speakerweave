@@ -159,15 +159,15 @@ export function SettingsPage() {
           <Settings className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <h1 className="page-title">Settings</h1>
+          <p className="page-subtitle">
             Event details and the vocabulary your program is built from.
           </p>
         </div>
       </header>
 
       {eventsQuery.error ? (
-        <div className="mt-6 rounded-lg border border-border bg-card shadow-soft">
+        <div className="mt-6 rounded-lg border border-border bg-card">
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
             title="Couldn't load your event"
@@ -341,7 +341,7 @@ function MCPConnectorsCard() {
 
   return (
     <>
-      <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="mcp-connectors-card">
+      <section className="rounded-lg border border-border bg-card" data-testid="mcp-connectors-card">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
@@ -586,7 +586,7 @@ function AirtableSyncCard() {
   const syncError = sync.error instanceof Error ? sync.error.message : null
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="airtable-card">
+    <section className="rounded-lg border border-border bg-card" data-testid="airtable-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -722,7 +722,7 @@ function SlackBotCard() {
   const configured = Boolean(status.data?.configured)
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft" data-testid="slack-card">
+    <section className="rounded-lg border border-border bg-card" data-testid="slack-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -903,7 +903,7 @@ function EmbedSection({ event }: { event: EventSummary }) {
   const iframeSnippet = embedIframeSnippet(event.slug, widget, options)
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft">
+    <section className="rounded-lg border border-border bg-card">
       <div className="flex items-start gap-3 border-b border-border px-5 py-4">
         <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
           <Code2 className="h-4 w-4" />
@@ -1125,7 +1125,7 @@ function ApiTokensSection() {
   const tokens = query.data ?? []
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft">
+    <section className="rounded-lg border border-border bg-card">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
@@ -1295,7 +1295,7 @@ function EventCard({ event }: { event: EventSummary }) {
   const set = (patch: Partial<EventDraft>) => setDraft({ ...draft, ...patch })
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft">
+    <section className="rounded-lg border border-border bg-card">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-foreground">Event</h2>
@@ -1421,7 +1421,7 @@ function EventCard({ event }: { event: EventSummary }) {
 
 type ExtraKind = 'color' | 'capacity' | 'duration'
 
-const DEFAULT_COLOR = '#6366F1'
+const DEFAULT_COLOR = '#A85E3E'
 
 interface RowDraft {
   name: string
@@ -1521,7 +1521,7 @@ function TaxonomySection({
   const rows = query.data ?? []
 
   return (
-    <section className="rounded-lg border border-border bg-card shadow-soft">
+    <section className="rounded-lg border border-border bg-card">
       <div className="border-b border-border px-5 py-4">
         <h2 className="text-base font-semibold text-foreground">{title}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>

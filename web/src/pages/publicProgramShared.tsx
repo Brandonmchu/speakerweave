@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom'
 
 import { initialsOf, sanitizeAccent } from '@/lib/programApi'
 import { cn } from '@/lib/utils'
+import { avatarGradient } from '@/ui/avatar'
 
 /**
  * When embedded, measure the page and post its height to the parent so the
@@ -36,10 +37,12 @@ export function useEmbedHeight(enabled: boolean): void {
 }
 
 export function Avatar({
+  id,
   name,
   photoUrl,
   className,
 }: {
+  id?: string | null
   name: string
   photoUrl: string | null
   className?: string
@@ -54,13 +57,15 @@ export function Avatar({
       />
     )
   }
+  const [start, end] = avatarGradient(id || name)
   return (
     <div
       aria-hidden
       className={cn(
-        'flex h-full w-full items-center justify-center bg-primary/10 text-sm font-semibold text-primary',
+        'flex h-full w-full items-center justify-center text-sm font-semibold text-white',
         className
       )}
+      style={{ backgroundImage: `linear-gradient(145deg, ${start}, ${end})` }}
     >
       {initialsOf(name)}
     </div>
@@ -122,39 +127,39 @@ export function ProgramShell({
     <div
       data-testid="public-program-page"
       data-compact={compact ? 'true' : undefined}
-      className="min-h-screen bg-[#FBFBFB]"
+      className="min-h-screen bg-card"
       style={programAccentStyle(accent ?? null)}
     >
       {!compact && <header
         data-testid="program-header"
-        className="sticky top-0 z-10 border-b border-border bg-card/90 backdrop-blur"
+        className="border-b border-border bg-card"
       >
-        <div className="mx-auto flex w-full max-w-[1040px] items-center gap-3 px-5 py-3.5">
-          <BrandMark className="h-7 w-7" />
-          <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
+        <div className="mx-auto flex w-full max-w-[1280px] items-center gap-3 px-5 py-4 sm:px-14">
+          <BrandMark className="h-5 w-5" />
+          <span className="text-[13px] font-medium tracking-tight text-foreground">SpeakerWeave</span>
           {eventName && (
             <>
               <span className="text-border">/</span>
-              <span className="truncate text-sm text-muted-foreground">{eventName}</span>
+              <span className="truncate text-[13px] text-muted-foreground">{eventName}</span>
             </>
           )}
         </div>
-        <div className="mx-auto flex w-full max-w-[1040px] gap-1 px-5">
+        <div className="mx-auto flex w-full max-w-[1280px] gap-5 px-5 sm:px-14">
           <ShellTab to={`/e/${slug}/schedule`} label="Schedule" active={active === 'schedule'} />
           <ShellTab to={`/e/${slug}/speakers`} label="Speakers" active={active === 'speakers'} />
         </div>
       </header>}
       <main
         className={cn(
-          'mx-auto w-full max-w-[1040px] px-5',
-          compact ? 'py-3' : 'py-8 sm:py-10'
+          'mx-auto w-full max-w-[1280px] px-5 sm:px-14',
+          compact ? 'py-3' : 'py-10 sm:py-11'
         )}
       >
         {children}
       </main>
-      <footer className="mx-auto w-full max-w-[1040px] px-5 pb-12">
+      <footer className="mx-auto w-full max-w-[1280px] px-5 pb-12 sm:px-14">
         <EmbedSnippet slug={slug} widget={active} />
-        <p className="mt-6 text-center text-xs text-muted-foreground">Powered by dais</p>
+        <p className="mt-5 border-t border-border pt-4 text-[11px] text-placeholder">Powered by SpeakerWeave</p>
       </footer>
     </div>
   )
@@ -165,7 +170,7 @@ function ShellTab({ to, label, active }: { to: string; label: string; active: bo
     <Link
       to={to}
       className={cn(
-        'border-b-2 px-1 py-2.5 text-sm font-medium transition-colors',
+        'border-b px-0 py-2.5 text-[12.5px] font-normal transition-colors',
         active
           ? 'border-primary text-foreground'
           : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -181,7 +186,7 @@ export function EmbedSnippet({ slug, widget }: { slug: string; widget: 'schedule
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const snippet = `<script src="${origin}/public/program/${slug}/embed.js" data-dais-event="${slug}" data-dais-widget="${widget}"></script>`
   return (
-    <details className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
+    <details className="text-[12.5px] text-muted-foreground">
       <summary className="cursor-pointer font-medium text-foreground">
         Embed this {widget} on your site
       </summary>

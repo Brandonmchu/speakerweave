@@ -41,7 +41,7 @@ export function PermissionPrompt({
 
   return (
     <div className="shrink-0 border-t border-border bg-card p-3">
-      <div className="rounded-xl border border-warning/35 bg-warning/5 p-3.5 shadow-soft">
+      <div className="rounded-xl bg-foreground/[0.028] p-3.5">
         <div className="flex items-start gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning-strong">
             <AlertTriangle className="h-4 w-4" />
@@ -63,7 +63,7 @@ export function PermissionPrompt({
               type="button"
               disabled={responding}
               onClick={() => onRespond(false)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-xs font-semibold text-foreground hover:bg-accent active:scale-[0.98] disabled:opacity-50"
+              className="inline-flex h-[27px] items-center gap-1.5 rounded-lg bg-foreground/[0.045] px-3 text-xs font-medium text-muted-foreground hover:bg-foreground/[0.07] active:translate-y-px disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" />
               Deny
@@ -72,7 +72,7 @@ export function PermissionPrompt({
               type="button"
               disabled={responding || remaining === 0}
               onClick={() => onRespond(true)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary-strong active:scale-[0.98] disabled:opacity-50"
+              className="inline-flex h-[27px] items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary-strong active:translate-y-px disabled:opacity-50"
             >
               {responding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
               Approve
@@ -83,4 +83,3 @@ export function PermissionPrompt({
     </div>
   )
 }
-

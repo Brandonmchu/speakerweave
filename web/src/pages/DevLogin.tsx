@@ -55,7 +55,7 @@ export function DevLogin() {
           <span className="text-lg font-semibold tracking-tight text-foreground">speakerweave</span>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-6 shadow-soft">
+        <div className="rounded-lg bg-card p-6 shadow-soft">
           <div className="mb-5">
             <h1 className="text-lg font-semibold tracking-tight text-foreground">
               Enter the demo workspace

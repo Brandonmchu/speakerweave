@@ -12,7 +12,7 @@
 
   html,
   body {
-    @apply bg-background text-foreground text-base antialiased;
+    @apply bg-background font-sans text-foreground text-base antialiased;
     font-feature-settings: 'cv11', 'ss01';
     line-height: var(--line-height-base);
   }
@@ -31,7 +31,7 @@
     border: none;
   }
 
-  /* Display sizes run loose in the Inter/Geist stack — tighten systematically. */
+  /* Larger product text gets the same deliberate tracking as the page scale. */
   #root .text-xl,
   #root .text-2xl,
   #root .text-3xl,
@@ -42,7 +42,7 @@
   /* The admin shell owns the viewport; public pages keep natural document flow. */
   html.app-shell-active,
   body.app-shell-active {
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
@@ -64,6 +64,18 @@
 }
 
 @layer components {
+  .page-title {
+    @apply text-[21px] font-medium leading-[1.25] tracking-[-0.025em] text-foreground;
+  }
+
+  .page-subtitle {
+    @apply mt-0.5 text-[12.5px] leading-5 text-muted-foreground;
+  }
+
+  .section-label {
+    @apply text-[10px] font-medium uppercase leading-4 tracking-[0.1em] text-placeholder;
+  }
+
   /* Consumed by <Label required>. */
   .form-required-asterisk {
     @apply text-destructive font-normal leading-none;

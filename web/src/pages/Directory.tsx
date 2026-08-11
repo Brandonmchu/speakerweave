@@ -22,7 +22,6 @@ import { useDeferredValue, useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
-  Building2,
   CalendarPlus,
   Copy,
   Filter,
@@ -51,6 +50,7 @@ import {
   type OutreachResult,
 } from '@/lib/crmApi'
 import { deliveryStatusLabel } from '@/lib/deliveryStatus'
+import { GradientAvatar } from '@/ui/avatar'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
 import {
@@ -90,12 +90,19 @@ function activeCriteria(filters: DirectoryFilters): { key: keyof DirectoryFilter
 
 function StatCard({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+    <div className="border-b border-border px-5 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <p className="font-mono text-[21px] font-medium tabular-nums leading-6 text-foreground">{value}</p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">{label}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-placeholder">{hint}</p>}
     </div>
   )
+}
+
+function stageDot(stage: string): string {
+  if (stage === 'confirmed') return 'bg-success'
+  if (stage === 'declined') return 'bg-destructive'
+  if (stage === 'identified') return 'bg-status-neutral'
+  return 'bg-status-queue'
 }
 
 export function Directory() {
@@ -188,16 +195,11 @@ export function Directory() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Speaker Directory</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Every contact your organization has worked with — across all events.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Speaker Directory</h1>
+          <p className="page-subtitle">
+            Every contact your organization has worked with — across all events.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowLog(true)}>
@@ -217,7 +219,7 @@ export function Directory() {
 
       {/* CRM dashboard — org-wide KPIs and analytics (CRM-12). */}
       <section className="mt-6" aria-label="CRM overview">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid border-y border-border bg-card sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Total contacts" value={overview?.totals.contacts ?? 0} hint="Across every event" />
           <StatCard label="Events" value={overview?.totals.events ?? 0} />
           <StatCard
@@ -228,12 +230,9 @@ export function Directory() {
           <StatCard label="In pipeline" value={overview?.totals.in_pipeline ?? 0} />
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              Top companies
-            </h2>
+        <div className="mt-6 grid gap-8 lg:grid-cols-3">
+          <div>
+            <h2 className="section-label">Top companies</h2>
             <ul className="mt-3 space-y-1.5">
               {(overview?.top_companies ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No company data yet.</li>
@@ -246,15 +245,15 @@ export function Directory() {
                     className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-sm text-foreground hover:bg-accent"
                   >
                     <span className="truncate">{row.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{row.count}</span>
+                    <span className="font-mono text-[10.5px] tabular-nums text-placeholder">{row.count}</span>
                   </button>
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
-            <h2 className="text-sm font-semibold text-foreground">Areas of focus (tags)</h2>
+          <div>
+            <h2 className="section-label">Areas of focus</h2>
             <ul className="mt-3 space-y-1.5">
               {(overview?.top_tags ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No tags applied yet.</li>
@@ -267,15 +266,15 @@ export function Directory() {
                     className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-sm text-foreground hover:bg-accent"
                   >
                     <span className="truncate">{row.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{row.count}</span>
+                    <span className="font-mono text-[10.5px] tabular-nums text-placeholder">{row.count}</span>
                   </button>
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
-            <h2 className="text-sm font-semibold text-foreground">Contacts by event</h2>
+          <div>
+            <h2 className="section-label">Contacts by event</h2>
             <ul className="mt-3 space-y-1.5">
               {(overview?.by_event ?? []).length === 0 && (
                 <li className="text-sm text-muted-foreground">No events yet.</li>
@@ -288,7 +287,7 @@ export function Directory() {
                     className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-sm text-foreground hover:bg-accent"
                   >
                     <span className="truncate">{row.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{row.count}</span>
+                    <span className="font-mono text-[10.5px] tabular-nums text-placeholder">{row.count}</span>
                   </button>
                 </li>
               ))}
@@ -316,7 +315,7 @@ export function Directory() {
       )}
 
       {/* Search + filters (CRM-01, CRM-02) */}
-      <section className="mt-6 rounded-lg border border-border bg-card p-4 shadow-soft">
+      <section className="mt-6">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex min-w-[16rem] flex-1 items-center">
             <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
@@ -347,44 +346,51 @@ export function Directory() {
           <Button variant="ghost" size="sm" onClick={clearAll}>
             Clear filters
           </Button>
+          <span className="ml-auto font-mono text-[10.5px] tabular-nums text-placeholder">
+            {data?.total ?? 0} of {data?.total_all ?? 0}
+          </span>
         </div>
 
         {showFilters && (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="space-y-1.5">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="crm-filter-company">Company</Label>
               <NativeSelect
                 id="crm-filter-company"
+                className="w-auto min-w-[110px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.company ?? ''}
                 placeholder="Any company"
                 onValueChange={(value) => setFilter('company', value)}
                 options={(facets?.companies ?? []).map((name) => ({ value: name }))}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="crm-filter-title">Job title</Label>
               <NativeSelect
                 id="crm-filter-title"
+                className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.title ?? ''}
                 placeholder="Any title"
                 onValueChange={(value) => setFilter('title', value)}
                 options={(facets?.titles ?? []).map((name) => ({ value: name }))}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="crm-filter-tag">Tag</Label>
               <NativeSelect
                 id="crm-filter-tag"
+                className="w-auto min-w-[90px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.tag ?? ''}
                 placeholder="Any tag"
                 onValueChange={(value) => setFilter('tag', value)}
                 options={(facets?.tags ?? []).map((name) => ({ value: name }))}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="crm-filter-stage">Pipeline stage</Label>
               <NativeSelect
                 id="crm-filter-stage"
+                className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.stage ?? ''}
                 placeholder="Any stage"
                 onValueChange={(value) => setFilter('stage', value)}
@@ -394,10 +400,11 @@ export function Directory() {
                 }))}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="crm-filter-event">Event</Label>
               <NativeSelect
                 id="crm-filter-event"
+                className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.event_id ?? ''}
                 placeholder="Any event"
                 onValueChange={(value) => setFilter('event_id', value)}
@@ -443,7 +450,7 @@ export function Directory() {
       {/* Saved segments (CRM-09) */}
       <section className="mt-4" aria-label="Saved segments">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold text-foreground">Segments</h2>
+            <h2 className="section-label mr-1">Segments</h2>
           {segments.length === 0 && (
             <span className="text-sm text-muted-foreground">
               None yet — filter the list and choose “Save segment”.
@@ -460,12 +467,12 @@ export function Directory() {
               }}
               className={
                 segment.id === segmentId
-                  ? 'rounded-md border border-primary bg-primary-subtle px-2.5 py-1 text-sm font-medium text-primary'
-                  : 'rounded-md border border-border bg-card px-2.5 py-1 text-sm text-foreground hover:bg-accent'
+                  ? 'rounded-md bg-primary-subtle px-2.5 py-1 text-[12.5px] font-medium text-primary'
+                  : 'rounded-md bg-foreground/[0.045] px-2.5 py-1 text-[12.5px] text-muted-foreground hover:bg-foreground/[0.07]'
               }
             >
               {segment.name}
-              <span className="ml-1.5 text-xs text-muted-foreground">
+              <span className="ml-1.5 font-mono text-[10.5px] text-muted-foreground">
                 {segment.member_count ?? segment.member_ids.length}
               </span>
             </button>
@@ -511,15 +518,8 @@ export function Directory() {
       {/* The roster */}
       <section
         aria-busy={directoryQuery.isFetching}
-        className="mt-4 overflow-hidden rounded-lg border border-border bg-card shadow-soft"
+        className="mt-4 bg-card"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <p className="text-sm text-muted-foreground">
-            Showing <strong className="text-foreground">{data?.total ?? 0}</strong> of{' '}
-            {data?.total_all ?? 0} contacts
-          </p>
-        </div>
-
         {directoryQuery.isPending ? (
           <div className="px-4 py-10 text-sm text-muted-foreground">Loading directory…</div>
         ) : directoryQuery.error ? (
@@ -541,10 +541,10 @@ export function Directory() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-[13px]">
               <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="w-10 px-4 py-2.5">
+                <tr className="border-b border-border text-left text-[10px] uppercase tracking-[0.1em] text-placeholder">
+                  <th className="w-10 px-3 py-2">
                     <input
                       type="checkbox"
                       aria-label="Select all contacts"
@@ -555,22 +555,22 @@ export function Directory() {
                       }
                     />
                   </th>
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Email</th>
-                  <th className="px-4 py-2.5 font-medium">Company</th>
-                  <th className="px-4 py-2.5 font-medium">Job title</th>
-                  <th className="px-4 py-2.5 font-medium">Tags</th>
-                  <th className="px-4 py-2.5 font-medium">Events</th>
-                  <th className="px-4 py-2.5 font-medium">Stage</th>
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Email</th>
+                  <th className="px-3 py-2 font-medium">Company</th>
+                  <th className="px-3 py-2 font-medium">Job title</th>
+                  <th className="px-3 py-2 font-medium">Tags</th>
+                  <th className="px-3 py-2 font-medium">Events</th>
+                  <th className="px-3 py-2 font-medium">Stage</th>
                 </tr>
               </thead>
               <tbody>
                 {people.map((person) => (
                   <tr
                     key={person.id}
-                    className="border-b border-border/60 last:border-0 hover:bg-accent/50"
+                    className="border-b border-border hover:bg-hover"
                   >
-                    <td className="px-4 py-2.5">
+                    <td className="px-3 py-2">
                       <input
                         type="checkbox"
                         aria-label={`Select ${person.name}`}
@@ -579,35 +579,34 @@ export function Directory() {
                         onChange={() => toggle(person.id)}
                       />
                     </td>
-                    <td className="px-4 py-2.5">
-                      <button
-                        type="button"
-                        className="text-left font-medium text-foreground hover:text-primary hover:underline"
-                        onClick={() => setOpenPerson(person.id)}
-                      >
-                        {person.name}
-                      </button>
-                      {person.is_duplicate && (
-                        <Badge variant="warning" className="ml-2 align-middle">
-                          Possible duplicate
-                        </Badge>
-                      )}
+                    <td className="truncate whitespace-nowrap px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <GradientAvatar id={person.id} name={person.name} size={24} />
+                        <button
+                          type="button"
+                          className="min-w-0 truncate text-left font-medium text-foreground hover:text-primary hover:underline"
+                          onClick={() => setOpenPerson(person.id)}
+                        >
+                          {person.name}
+                        </button>
+                        {person.is_duplicate && <Badge variant="muted">Possible duplicate</Badge>}
+                      </div>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{person.email}</td>
-                    <td className="px-4 py-2.5 text-foreground">{person.company_name ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-foreground">{person.title ?? '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex flex-wrap gap-1">
+                    <td className="truncate whitespace-nowrap px-3 py-2 text-muted-foreground">{person.email}</td>
+                    <td className="truncate whitespace-nowrap px-3 py-2 text-foreground">{person.company_name ?? '—'}</td>
+                    <td className="truncate whitespace-nowrap px-3 py-2 text-foreground">{person.title ?? '—'}</td>
+                    <td className="truncate whitespace-nowrap px-3 py-2">
+                      <div className="flex gap-1 overflow-hidden">
                         {person.tags.length === 0 && <span className="text-muted-foreground">—</span>}
                         {person.tags.map((tag) => (
-                          <Badge key={tag} variant="default">
+                          <Badge key={tag} variant="muted">
                             {tag}
                           </Badge>
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex flex-wrap gap-1">
+                    <td className="truncate whitespace-nowrap px-3 py-2">
+                      <div className="flex gap-1 overflow-hidden">
                         {person.events.length === 0 && <span className="text-muted-foreground">—</span>}
                         {person.events.map((event) => (
                           <Badge key={event.id} variant="muted">
@@ -616,10 +615,11 @@ export function Directory() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <Badge variant="outline">
+                    <td className="truncate whitespace-nowrap px-3 py-2">
+                      <span className="inline-flex items-center gap-2 text-[12.5px] text-foreground">
+                        <span className={`h-[5px] w-[5px] shrink-0 rounded-full ${stageDot(person.pipeline_stage)}`} />
                         {STAGE_LABELS[person.pipeline_stage] ?? person.pipeline_stage}
-                      </Badge>
+                      </span>
                     </td>
                   </tr>
                 ))}

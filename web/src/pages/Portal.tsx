@@ -47,7 +47,7 @@ import { Skeleton } from '@/ui/skeleton'
 import { Textarea } from '@/ui/textarea'
 import { toast } from '@/ui/use-toast'
 
-const DEFAULT_ACCENT = '#4962E2'
+const DEFAULT_ACCENT = '#A85E3E'
 
 // Upload constraints, mirrored from the backend allowlist + size caps
 // (api/security/upload_validation.py). The `accept` attribute filters the OS
@@ -178,7 +178,7 @@ export function Portal() {
 function PortalHeader({ me, accent }: { me: PortalMe; accent: string }) {
   const name = [me.contact.first_name, me.contact.last_name].filter(Boolean).join(' ').trim()
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+    <div className="overflow-hidden rounded-2xl bg-card shadow-raised">
       <div className="h-2 w-full" style={{ backgroundColor: accent }} />
       <div className="p-6 sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: accent }}>
@@ -846,7 +846,7 @@ function PortalShell({
   logoUrl?: string | null
 }) {
   return (
-    <div className="min-h-screen bg-[#FBFBFB]">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-[860px] px-4 py-8 sm:py-12">
         <div className="mb-6 flex items-center gap-2">
           {logoUrl ? (
@@ -885,7 +885,7 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-2xl border border-border bg-card p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-8">
+    <section className="rounded-2xl border border-border bg-card p-6 sm:p-8">
       <div className="mb-5">
         <h2 className="text-lg font-semibold tracking-tight text-foreground">{title}</h2>
         {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
@@ -906,7 +906,7 @@ function FieldWrap({ id, label, children }: { id: string; label: string; childre
 
 function Notice({ title, description }: { title: string; description?: string }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+    <div className="rounded-2xl bg-card p-8 text-center shadow-raised">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
         <AlertCircle className="h-6 w-6 text-destructive" />
       </div>

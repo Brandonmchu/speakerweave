@@ -8,6 +8,8 @@ import {
   SignIn,
   SignUp,
   useAuth,
+  useOrganization,
+  useUser,
 } from '@clerk/clerk-react'
 
 import { registerClerkTokenGetter } from '@/lib/api'
@@ -16,6 +18,28 @@ const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | u
 
 /** Clerk is opt-in by env — absent key means the dev-token flow stays active. */
 export const CLERK_ENABLED = Boolean(PUBLISHABLE_KEY)
+
+export interface AuthUserIdentity {
+  id: string
+  name: string
+  workspace: string
+}
+
+/** Reads the active Clerk user and organization without adding a shell query. */
+export function ClerkUserIdentity({
+  children,
+}: {
+  children: (identity: AuthUserIdentity) => ReactNode
+}) {
+  const { user } = useUser()
+  const { organization } = useOrganization()
+  const email = user?.primaryEmailAddress?.emailAddress
+  return children({
+    id: user?.id ?? 'organizer',
+    name: user?.fullName || user?.firstName || email?.split('@')[0] || 'Organizer',
+    workspace: organization?.name || 'Workspace',
+  })
+}
 
 /**
  * Registers Clerk's token minting into the API client. The `supabase` JWT

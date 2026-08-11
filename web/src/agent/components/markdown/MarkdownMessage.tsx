@@ -38,7 +38,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
   const source = textContent(children).replace(/\n$/, '')
   return (
-    <div className="my-3 overflow-hidden rounded-lg border border-border bg-foreground/[0.035]">
+    <div className="my-3 overflow-hidden rounded-lg bg-foreground/[0.028]">
       <div className="flex h-8 items-center justify-between border-b border-border px-3">
         <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Code</span>
         <button
@@ -116,7 +116,7 @@ export function MarkdownMessage({
         )
       },
       table: ({ children }) => (
-        <div className="scrollbar-app my-3 overflow-x-auto rounded-lg border border-border">
+        <div className="scrollbar-app my-3 overflow-x-auto rounded-lg bg-foreground/[0.028]">
           <table className="w-full min-w-[360px] border-collapse text-xs">{children}</table>
         </div>
       ),
@@ -145,4 +145,3 @@ export function MarkdownMessage({
     </ReactMarkdown>
   )
 }
-

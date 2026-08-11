@@ -193,14 +193,14 @@ export function CrmPersonDrawer({
         className="flex-1 bg-foreground/20"
         onClick={onClose}
       />
-      <aside className="flex h-full w-full max-w-2xl flex-col overflow-y-auto border-l border-border bg-card shadow-xl scrollbar-app">
+      <aside className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-card shadow-lifted scrollbar-app">
         {isLoading || !person ? (
           <div className="p-6 text-sm text-muted-foreground">Loading contact…</div>
         ) : (
           <>
             {/* Identity */}
             <header className="flex items-start gap-4 border-b border-border p-6">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-foreground/[0.07] font-mono text-lg font-semibold text-foreground">
                 {initials(person.name)}
               </div>
               <div className="min-w-0 flex-1">

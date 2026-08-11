@@ -15,7 +15,7 @@
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, GripVertical, KanbanSquare, Plus } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
 import {
   STAGE_LABELS,
@@ -41,12 +41,7 @@ import { NativeSelect } from '@/ui/native-select'
 import { Textarea } from '@/ui/textarea'
 import { useToast } from '@/ui/use-toast'
 import { CrmPersonDrawer } from '@/pages/CrmPersonDrawer'
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return '?'
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
-}
+import { GradientAvatar } from '@/ui/avatar'
 
 export function Pipeline() {
   const { toast } = useToast()
@@ -81,25 +76,19 @@ export function Pipeline() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <KanbanSquare className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Speaker Pipeline</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Track prospects from research through confirmed or declined.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Speaker Pipeline</h1>
+          <p className="page-subtitle">
+            Track prospects from research through confirmed or declined.
+          </p>
         </div>
         <Button size="sm" onClick={() => setShowEnroll(true)}>
-          <Plus className="h-4 w-4" />
           Enroll contact
         </Button>
       </header>
 
       {boardQuery.error ? (
-        <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+        <div className="mt-6 bg-card">
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
             title="Couldn't load the pipeline"
@@ -115,12 +104,12 @@ export function Pipeline() {
         <p className="mt-6 text-sm text-muted-foreground">Loading pipeline…</p>
       ) : (
         <>
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="mt-4 text-[12.5px] text-muted-foreground">
             {board?.total ?? 0} prospect{(board?.total ?? 0) === 1 ? '' : 's'} on the board ·{' '}
             {board?.candidates.length ?? 0} more in the directory.
           </p>
 
-          <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-app">
+          <div className="mt-5 flex gap-4 overflow-x-auto pb-4 scrollbar-app">
             {(board?.columns ?? []).map((column) => (
               <Column
                 key={column.stage}
@@ -179,8 +168,8 @@ function Column({
     <section
       aria-label={`${column.label} column`}
       className={
-        'flex w-72 shrink-0 flex-col rounded-lg border bg-muted/30 ' +
-        (over && dragging ? 'border-primary bg-primary-subtle' : 'border-border')
+        'flex w-72 min-w-[236px] shrink flex-col rounded-[11px] transition-colors ' +
+        (over && dragging ? 'bg-primary/[0.05]' : 'bg-transparent')
       }
       onDragOver={(event) => {
         event.preventDefault()
@@ -194,20 +183,17 @@ function Column({
         if (personId) onDrop(personId)
       }}
     >
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-        <h2 className="text-sm font-semibold text-foreground">{column.label}</h2>
+      <header className="flex items-center justify-between gap-2 px-1 pb-2">
+        <h2 className="section-label text-foreground">{column.label}</h2>
         <div className="flex items-center gap-1.5">
-          {column.terminal && <Badge variant="muted">Terminal</Badge>}
-          <span className="rounded-md bg-card px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+          {column.terminal && <span className="text-[10.5px] text-placeholder">Terminal</span>}
+          <span className="font-mono text-[10.5px] tabular-nums text-placeholder">
             {column.count}
           </span>
         </div>
       </header>
 
-      <div className="flex-1 space-y-2 p-2">
-        {column.cards.length === 0 && (
-          <p className="px-1 py-4 text-center text-xs text-muted-foreground">No prospects here.</p>
-        )}
+      <div className="flex-1 space-y-2">
         {column.cards.map((person) => (
           <article
             key={person.id}
@@ -217,31 +203,28 @@ function Column({
               onDragStart(person.id)
             }}
             onDragEnd={onDragEnd}
-            className="rounded-lg border border-border bg-card p-3 shadow-soft"
+            className="rounded-[11px] bg-card p-3 shadow-raised"
           >
             <div className="flex items-start gap-2">
-              <GripVertical className="mt-0.5 h-4 w-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden />
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                {initials(person.name)}
-              </div>
+              <GradientAvatar id={person.id} name={person.name} size={24} />
               <div className="min-w-0 flex-1">
                 <button
                   type="button"
-                  className="block w-full truncate text-left text-sm font-medium text-foreground hover:text-primary hover:underline"
+                  className="block w-full truncate text-left text-[13px] font-medium text-foreground hover:text-primary hover:underline"
                   onClick={() => onOpen(person.id)}
                 >
                   {person.name}
                 </button>
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-[11.5px] text-muted-foreground">
                   {[person.title, person.company_name].filter(Boolean).join(' · ') || person.email}
                 </p>
               </div>
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {person.score != null && <Badge variant="muted">Score {person.score}</Badge>}
+              {person.score != null && <Badge variant="muted" className="font-mono text-[10.5px]">Score {person.score}</Badge>}
               {person.events.slice(0, 2).map((event) => (
-                <Badge key={event.id} variant="outline">
+                <Badge key={event.id} variant="muted">
                   {event.name}
                 </Badge>
               ))}
@@ -250,7 +233,7 @@ function Column({
             <div className="mt-2">
               <NativeSelect
                 aria-label={`Move ${person.name} to stage`}
-                className="h-8 text-xs"
+                className="h-7 bg-foreground/[0.045] text-[11px]"
                 value={person.pipeline_stage}
                 onValueChange={(value) => {
                   if (value !== person.pipeline_stage) onMove(person.id, value)
@@ -260,6 +243,9 @@ function Column({
             </div>
           </article>
         ))}
+        <div className="flex min-h-[74px] items-center justify-center rounded-[11px] border border-dashed border-input text-[12.5px] text-placeholder">
+          {column.cards.length === 0 ? 'Nothing yet' : 'Drop here'}
+        </div>
       </div>
     </section>
   )

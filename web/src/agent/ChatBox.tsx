@@ -69,7 +69,7 @@ export function ChatBox({ onRequestClose }: { onRequestClose: () => void }) {
           {visibleQueue.map((item, index) => (
             <div
               key={item.id}
-              className="flex items-center gap-2 rounded-lg border border-dashed border-primary/25 bg-primary-subtle/45 px-2.5 py-2 text-xs text-foreground"
+              className="flex items-center gap-2 rounded-lg bg-foreground/[0.028] px-2.5 py-2 text-xs text-foreground"
             >
               <span className="shrink-0 font-mono text-[10px] text-primary">{index + 1}</span>
               <span className="min-w-0 flex-1 truncate">{queuedPreview(item.message)}</span>
@@ -77,7 +77,7 @@ export function ChatBox({ onRequestClose }: { onRequestClose: () => void }) {
                 type="button"
                 onClick={() => removeQueuedMessage(item.id)}
                 aria-label="Remove queued message"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-card hover:text-foreground"
+                className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-card hover:text-foreground"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -109,4 +109,3 @@ export function ChatBox({ onRequestClose }: { onRequestClose: () => void }) {
     </div>
   )
 }
-

@@ -249,10 +249,11 @@ describe('Speakers CRM', () => {
     expect(screen.getByTestId(`speaker-row-${BEN}`)).toBeInTheDocument()
   })
 
-  it('shows title and company inline and expands task-level progress', async () => {
+  it('shows title and company in the roster and expands task-level progress', async () => {
     renderSpeakers()
     const row = await screen.findByTestId(`speaker-row-${ADA}`)
-    expect(within(row).getByText('Mathematician · Analytical Engines')).toBeInTheDocument()
+    expect(within(row).getByText('Mathematician')).toBeInTheDocument()
+    expect(within(row).getByText('Analytical Engines')).toBeInTheDocument()
 
     fireEvent.click(within(row).getByRole('button', { name: 'Show tasks for Ada Lovelace' }))
     const tasks = await screen.findByTestId(`speaker-tasks-${ADA}`)

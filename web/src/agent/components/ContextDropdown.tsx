@@ -157,7 +157,7 @@ export function ContextDropdown({
       ref={rootRef}
       role="listbox"
       aria-label="Add context"
-      className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-64 overflow-hidden rounded-xl border border-border bg-popover shadow-lifted animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2"
+      className="absolute bottom-full left-0 right-0 z-50 mb-2 max-h-64 overflow-hidden rounded-xl bg-popover shadow-lifted animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2"
     >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         {selectedType && (
@@ -261,4 +261,3 @@ export function ContextDropdown({
     </div>
   )
 }
-

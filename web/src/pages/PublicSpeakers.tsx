@@ -11,6 +11,7 @@ import {
   type ProgramSpeaker,
 } from '@/lib/programApi'
 import { cn } from '@/lib/utils'
+import { avatarGradient } from '@/ui/avatar'
 import { Input } from '@/ui/input'
 import { Skeleton } from '@/ui/skeleton'
 import {
@@ -37,7 +38,7 @@ export function PublicSpeakers() {
   const embed = searchParams.get('embed') === '1'
   const compact = searchParams.get('compact') === '1'
   const accent = searchParams.get('accent')
-  const track = searchParams.get('track')?.trim() ?? ''
+  const requestedTrack = searchParams.get('track')?.trim() ?? ''
 
   const query = useQuery({
     queryKey: ['program-speakers', slug],
@@ -57,6 +58,7 @@ export function PublicSpeakers() {
   const [selected, setSelected] = useState<ProgramSpeaker | null>(null)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [track, setTrack] = useState(requestedTrack)
   // ?view=list deep-links the directory rendering (the embeddable "list of
   // speakers"); the photo grid is the default.
   const [view, setView] = useState<SpeakerView>(
@@ -66,6 +68,11 @@ export function PublicSpeakers() {
   // The personal schedule is shared with the schedule page (same localStorage),
   // so a session starred from a speaker's dialog also lights up on the agenda.
   const { starred, toggle } = useMySchedule(slug)
+
+  const trackNames = useMemo(
+    () => [...new Set(speakers.flatMap((speaker) => speaker.sessions.map((session) => session.track?.name).filter(Boolean) as string[]))].sort(),
+    [speakers]
+  )
 
   // Client-side keyword filter over name, company and title (EMB-05/12).
   const filtered = useMemo(() => {
@@ -80,6 +87,12 @@ export function PublicSpeakers() {
       [s.name, s.company ?? '', s.title ?? ''].join(' ').toLowerCase().includes(q)
     )
   }, [speakers, search, track])
+
+  const resultLabel = search.trim()
+    ? filtered.length === 1
+      ? '1 speaker matches'
+      : `${filtered.length} speakers match`
+    : `${filtered.length} speaker${filtered.length === 1 ? '' : 's'} across ${filtered.reduce((sum, speaker) => sum + speaker.sessions.length, 0)} sessions`
 
   useEmbedHeight(embed)
 
@@ -116,8 +129,24 @@ export function PublicSpeakers() {
   } else {
     body = (
       <div className={compact ? 'space-y-3' : 'space-y-5'}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="w-full sm:max-w-xs">
+        {embed && (
+          <p
+            role="status"
+            data-testid="speaker-result-count"
+            className="font-mono text-[11px] text-muted-foreground"
+          >
+            {resultLabel}
+          </p>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <SpeakerTrackChip label="All" active={!track} onClick={() => setTrack('')} />
+            {trackNames.map((name) => (
+              <SpeakerTrackChip key={name} label={name} active={track === name} onClick={() => setTrack(name)} />
+            ))}
+          </div>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="relative w-full sm:w-[220px]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -128,19 +157,9 @@ export function PublicSpeakers() {
                 aria-label="Search speakers"
               />
             </div>
-            <p
-              role="status"
-              data-testid="speaker-result-count"
-              className="mt-1.5 text-xs font-medium text-muted-foreground"
-            >
-              {search.trim()
-                ? filtered.length === 1
-                  ? '1 speaker matches'
-                  : `${filtered.length} speakers match`
-                : `${filtered.length} speaker${filtered.length === 1 ? '' : 's'}`}
-            </p>
           </div>
           <ViewToggle view={view} onChange={setView} />
+          </div>
         </div>
         {filtered.length === 0 ? (
           <EmptyState
@@ -219,6 +238,18 @@ export function PublicSpeakers() {
       accent={accent}
       compact={compact}
     >
+      {!compact && query.data && (
+        <header className="mb-7">
+          <h1 className="font-serif text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">Speakers</h1>
+          <p
+            role="status"
+            data-testid="speaker-result-count"
+            className="mt-3 text-[13px] text-muted-foreground"
+          >
+            {resultLabel}
+          </p>
+        </header>
+      )}
       {content}
     </ProgramShell>
   )
@@ -243,7 +274,7 @@ function ViewToggle({
     <div
       role="group"
       aria-label="Speaker layout"
-      className="inline-flex shrink-0 rounded-lg border border-border bg-card p-0.5"
+      className="inline-flex shrink-0 rounded-lg bg-foreground/[0.045] p-0.5"
     >
       {options.map((option) => (
         <button
@@ -255,7 +286,7 @@ function ViewToggle({
           className={cn(
             'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
             view === option.value
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-card text-foreground shadow-soft'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -285,11 +316,11 @@ function SpeakerRow({
       data-testid="speaker-card"
       onClick={onClick}
       className={cn(
-        'flex w-full items-start rounded-xl border border-border bg-card text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'flex w-full items-start border-b border-border bg-card text-left transition-colors hover:bg-foreground/[0.028] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         compact ? 'gap-3 px-3 py-2.5' : 'gap-4 px-4 py-3.5'
       )}
     >
-      <span className="h-14 w-14 shrink-0 overflow-hidden rounded-full ring-1 ring-border">
+      <span className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
         <Avatar name={speaker.name} photoUrl={speaker.photo_url} />
       </span>
       <span className="min-w-0 flex-1">
@@ -321,23 +352,53 @@ function SpeakerRow({
 }
 
 function SpeakerCard({ speaker, onClick }: { speaker: ProgramSpeaker; onClick: () => void }) {
+  const [start, end] = avatarGradient(speaker.id || speakerKey(speaker))
   return (
     <button
       type="button"
       data-testid="speaker-card"
       onClick={onClick}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card text-left shadow-soft transition-shadow hover:shadow-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex flex-col text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div className="aspect-square w-full overflow-hidden bg-muted">
-        <Avatar name={speaker.name} photoUrl={speaker.photo_url} className="transition-transform duration-200 group-hover:scale-[1.03]" />
-      </div>
-      <div className="flex flex-1 flex-col px-3.5 py-3">
-        <h3 className="text-sm font-semibold tracking-tight text-foreground">{speaker.name}</h3>
-        {speaker.title && <p className="mt-0.5 text-xs text-muted-foreground">{speaker.title}</p>}
-        {speaker.company && (
-          <p className="text-xs font-medium text-primary">{speaker.company}</p>
+      <div
+        className="relative aspect-square w-full overflow-hidden rounded-[14px] bg-muted"
+        style={!speaker.photo_url ? { backgroundImage: `linear-gradient(145deg, ${start}, ${end})` } : undefined}
+      >
+        {speaker.photo_url ? (
+          <img
+            src={speaker.photo_url}
+            alt={speaker.name}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+          />
+        ) : (
+          <span className="absolute bottom-3 left-3 font-mono text-[9px] text-white/90">headshot</span>
         )}
       </div>
+      <div className="flex flex-1 flex-col pt-3">
+        <h3 className="text-[15px] font-medium tracking-[-0.01em] text-foreground">{speaker.name}</h3>
+        {(speaker.title || speaker.company) && (
+          <p className="mt-0.5 text-[12.5px] leading-4 text-muted-foreground">
+            {[speaker.title, speaker.company].filter(Boolean).join(' · ')}
+          </p>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function SpeakerTrackChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'rounded-full px-3 py-1 text-xs transition-colors',
+        active ? 'bg-foreground text-white' : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07]'
+      )}
+    >
+      {label}
     </button>
   )
 }

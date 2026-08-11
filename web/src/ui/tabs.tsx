@@ -59,12 +59,12 @@ const TabsList = React.forwardRef<
         ref={setRefs}
         className={cn(
           variant === 'default' &&
-            'inline-flex h-auto items-center justify-start gap-1 rounded-lg bg-muted p-1 text-muted-foreground w-full md:w-fit max-w-full overflow-x-auto scrollbar-hide flex-nowrap',
+            'relative inline-flex h-auto w-full max-w-full flex-nowrap items-center justify-start gap-0 overflow-x-auto border-b border-border bg-transparent p-0 text-muted-foreground scrollbar-hide md:w-fit',
           // max-w-full is what makes overflow-x-auto engage: without a width cap
           // this inline-flex grows to its content width and overflows the
           // parent, so off-screen tabs become unreachable on narrow viewports.
           variant === 'underline' &&
-            'relative inline-flex items-center gap-0 bg-transparent p-0 rounded-none border-b border-border w-full max-w-full overflow-x-auto scrollbar-hide flex-nowrap',
+            'relative inline-flex w-full max-w-full flex-nowrap items-center gap-0 overflow-x-auto border-b border-border bg-transparent p-0 scrollbar-hide',
           className
         )}
         {...props}
@@ -73,7 +73,7 @@ const TabsList = React.forwardRef<
         {variant === 'underline' && indicator && (
           <span
             aria-hidden
-            className="absolute bottom-0 h-0.5 bg-primary transition-[left,width] duration-200 ease-out motion-reduce:transition-none pointer-events-none"
+            className="pointer-events-none absolute bottom-0 h-px bg-foreground transition-[left,width] duration-200 ease-out motion-reduce:transition-none"
             style={{ left: indicator.left, width: indicator.width }}
           />
         )}
@@ -93,16 +93,14 @@ const TabsTrigger = React.forwardRef<
     <TabsPrimitive.Trigger
       ref={ref}
       className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap text-sm font-medium gap-2 transition-colors disabled:pointer-events-none disabled:opacity-50 outline-none [&_svg]:pointer-events-none [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0',
+        'group inline-flex items-center justify-center gap-2 whitespace-nowrap text-[13px] font-normal outline-none transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:hidden',
         variant === 'default' && [
-          'rounded-md px-3 py-1.5 cursor-pointer',
-          'border border-transparent text-muted-foreground',
+          'cursor-pointer rounded-none border-0 px-3 py-2 text-muted-foreground',
           'hover:text-foreground',
-          'data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:border-border data-[state=active]:shadow-soft',
+          'data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-[inset_0_-1px_0_hsl(var(--foreground))]',
         ],
         variant === 'underline' && [
-          'rounded-none px-4 py-2.5 cursor-pointer',
-          'bg-transparent border-0 border-b-2 border-transparent text-muted-foreground',
+          'cursor-pointer rounded-none border-0 bg-transparent px-3 py-2 text-muted-foreground',
           'hover:text-foreground',
           // The colored underline is the sliding indicator in TabsList, not a
           // per-trigger border.
@@ -124,4 +122,15 @@ const TabsContent = React.forwardRef<
 ))
 TabsContent.displayName = TabsPrimitive.Content.displayName
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+const TabsCount = React.forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement>>(
+  ({ className, ...props }, ref) => (
+    <span
+      ref={ref}
+      className={cn('font-mono text-[10.5px] font-normal tabular-nums text-placeholder group-data-[state=active]:text-foreground', className)}
+      {...props}
+    />
+  ),
+)
+TabsCount.displayName = 'TabsCount'
+
+export { Tabs, TabsList, TabsTrigger, TabsContent, TabsCount }

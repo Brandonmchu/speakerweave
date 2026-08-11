@@ -1,38 +1,24 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { BrandMark } from '@/ui/brand'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Bell,
-  CalendarDays,
   Check,
   ChevronsUpDown,
-  ClipboardList,
-  Contact,
-  ExternalLink,
-  FileArchive,
-  FileText,
-  HelpCircle,
-  KanbanSquare,
-  LayoutDashboard,
   LogOut,
-  Mail,
   Plus,
-  Search,
-  Settings,
   Sparkles,
-  Star,
-  Users,
 } from 'lucide-react'
 
 import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
-import { apiGet, clearToken, unwrapList, type EventSummary } from '@/lib/api'
+import { CLERK_ENABLED, ClerkUserIdentity, type AuthUserIdentity } from '@/auth/clerk'
+import { apiGet, clearToken, peekToken, unwrapList, type EventSummary } from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
 import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
 import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
 import { preloadOrganizerRoute } from '@/lib/routeLoaders'
 import { cn } from '@/lib/utils'
-import { Badge } from '@/ui/badge'
+import { GradientAvatar } from '@/ui/avatar'
 import { Button } from '@/ui/button'
 import {
   DropdownMenu,
@@ -62,7 +48,6 @@ const LazyAgentFeature = lazy(loadAgentFeature)
 interface NavItem {
   label: string
   to: string
-  icon: typeof LayoutDashboard
 }
 
 interface NavSection {
@@ -71,22 +56,22 @@ interface NavSection {
 }
 
 const NAV: NavSection[] = [
-  { items: [{ label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard }] },
+  { items: [{ label: 'Today', to: '/dashboard' }] },
   {
     label: 'Program',
     items: [
-      { label: 'Submissions', to: '/submissions', icon: ClipboardList },
-      { label: 'Forms', to: '/forms', icon: FileText },
-      { label: 'Evaluation', to: '/evaluation', icon: Star },
-      { label: 'Agenda', to: '/agenda', icon: CalendarDays },
+      { label: 'Submissions', to: '/submissions' },
+      { label: 'Forms', to: '/forms' },
+      { label: 'Evaluation', to: '/evaluation' },
+      { label: 'Agenda', to: '/agenda' },
     ],
   },
   {
     label: 'People',
     items: [
-      { label: 'Speakers', to: '/speakers', icon: Users },
-      { label: 'Content', to: '/content', icon: FileArchive },
-      { label: 'Comms', to: '/comms', icon: Mail },
+      { label: 'Speakers', to: '/speakers' },
+      { label: 'Content', to: '/content' },
+      { label: 'Comms', to: '/comms' },
     ],
   },
   // Above the event switcher's scope on purpose: the CRM spans every event the
@@ -94,11 +79,11 @@ const NAV: NavSection[] = [
   {
     label: 'CRM',
     items: [
-      { label: 'Directory', to: '/directory', icon: Contact },
-      { label: 'Pipeline', to: '/pipeline', icon: KanbanSquare },
+      { label: 'Directory', to: '/directory' },
+      { label: 'Pipeline', to: '/pipeline' },
     ],
   },
-  { label: 'Configure', items: [{ label: 'Settings', to: '/settings', icon: Settings }] },
+  { label: 'Configure', items: [{ label: 'Settings', to: '/settings' }] },
 ]
 
 const ACTIVE_EVENT_KEY = 'dais.active-event-id'
@@ -135,22 +120,98 @@ function initialOf(name?: string | null): string {
   return (name?.trim().charAt(0) || 'd').toUpperCase()
 }
 
-/**
- * True when the current session is the shared demo token (org_id === 'org_dev').
- * Decodes the JWT payload segment inline — no dependency, best-effort: any
- * malformed token simply reads as "not a demo session".
- */
-function isDemoSession(): boolean {
+function eventCountdown(event?: EventSummary): string | null {
+  if (!event?.starts_at) return null
+  const start = Date.parse(event.starts_at)
+  if (!Number.isFinite(start)) return null
+  const days = Math.ceil((start - Date.now()) / 86_400_000)
+  if (days > 1) return `${days} days out`
+  if (days === 1) return '1 day out'
+  if (days === 0) return 'starts today'
+  return 'event underway'
+}
+
+interface SessionClaims {
+  sub?: string
+  org_id?: string
+  name?: string
+  email?: string
+  org_name?: string
+}
+
+function readSessionClaims(): SessionClaims {
   try {
     const token = window.localStorage.getItem('dais.token')
     const payload = token?.split('.')[1]
-    if (!payload) return false
+    if (!payload) return {}
     const b64 = payload.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
-    return (JSON.parse(atob(padded)) as { org_id?: string }).org_id === 'org_dev'
+    return JSON.parse(atob(padded)) as SessionClaims
   } catch {
-    return false
+    return {}
   }
+}
+
+function humanizeIdentifier(value: string): string {
+  return value
+    .replace(/^(org|user)_/, '')
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+}
+
+function sessionIdentity(claims: SessionClaims): AuthUserIdentity {
+  const id = claims.sub || 'organizer'
+  const name = claims.name || (claims.email ? claims.email.split('@')[0] : null) || humanizeIdentifier(id) || 'Organizer'
+  const workspace =
+    claims.org_name ||
+    (claims.org_id === 'org_dev'
+      ? 'Demo workspace'
+      : claims.org_id
+        ? humanizeIdentifier(claims.org_id)
+        : 'Workspace')
+  return { id, name, workspace }
+}
+
+function RailAccount({
+  identity,
+  onSignOut,
+}: {
+  identity: AuthUserIdentity
+  onSignOut: () => void
+}) {
+  return (
+    <div className="shrink-0 px-3 pb-4">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Account menu"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-navigation-accent"
+          >
+            <GradientAvatar id={identity.id} name={identity.name} size={28} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-medium leading-4 text-foreground">{identity.name}</span>
+              <span className="block truncate text-[11px] leading-4 text-placeholder">{identity.workspace}</span>
+            </span>
+            <ChevronsUpDown className="h-3 w-3 shrink-0 text-placeholder" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="top" sideOffset={6} className="w-48">
+          <DropdownMenuLabel>
+            <span className="block truncate text-foreground">{identity.name}</span>
+            <span className="block truncate text-[10px] font-normal text-muted-foreground">{identity.workspace}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onSignOut} className="gap-2">
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
 }
 
 function CreateEventDialog({
@@ -333,8 +394,10 @@ export function AppShell() {
   })
   const events = data ?? []
   const event = events.find((candidate) => candidate.id === activeEventId) ?? events[0]
-  const eventInitial = initialOf(event?.name)
-  const isDemo = isDemoSession()
+  const claims = readSessionClaims()
+  const isDemo = claims.org_id === 'org_dev'
+  const currentUser = sessionIdentity(claims)
+  const countdown = eventCountdown(event)
 
   const switchEvent = (eventId: string) => {
     setActiveEventId(eventId)
@@ -374,11 +437,18 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-navigation-border bg-navigation md:flex">
-        <div className="flex h-14 items-center gap-2 px-5">
-          <BrandMark className="h-7 w-7" />
-          <span className="text-[15px] font-semibold tracking-tight text-foreground">speakerweave</span>
+    <div
+      className={cn(
+        'grid h-[100dvh] w-full grid-cols-[minmax(0,1fr)] overflow-hidden bg-background',
+        agentEnabled && assistantOpen
+          ? 'md:grid-cols-[220px_minmax(0,1fr)_420px]'
+          : 'md:grid-cols-[220px_minmax(0,1fr)]',
+      )}
+    >
+      <aside className="hidden min-h-0 flex-col bg-navigation md:flex">
+        <div className="flex h-[50px] shrink-0 items-center gap-2.5 px-5">
+          <BrandMark className="h-5 w-5 rounded-md" />
+          <span className="text-[14px] font-semibold tracking-[-0.02em] text-foreground">SpeakerWeave</span>
         </div>
 
         {/* Event switcher — a static single-event dropdown today, but the chevron
@@ -388,18 +458,18 @@ export function AppShell() {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                className="flex w-full items-center gap-2 rounded-[10px] bg-foreground/[0.045] px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20"
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-                  {eventInitial}
-                </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">
+                  <div className="truncate text-[13px] font-medium leading-5 text-foreground">
                     {event?.name ?? 'No event yet'}
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">{formatEventDates(event)}</div>
+                  <div className="truncate text-[11px] leading-4 text-placeholder">
+                    <span>{formatEventDates(event)}</span>
+                    {countdown && <span> · {countdown}</span>}
+                  </div>
                 </div>
-                <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-placeholder" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={6} className="w-[13.5rem]">
@@ -410,7 +480,7 @@ export function AppShell() {
                   className="gap-2.5"
                   onSelect={() => switchEvent(candidate.id)}
                 >
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-primary text-[10px] font-semibold text-primary-foreground">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-foreground/[0.07] font-mono text-[10px] font-semibold text-foreground">
                     {initialOf(candidate.name)}
                   </div>
                   <span className="min-w-0 flex-1 truncate">{candidate.name}</span>
@@ -426,16 +496,16 @@ export function AppShell() {
           </DropdownMenu>
         </div>
 
-        <nav className="mt-3 flex-1 space-y-5 overflow-y-auto px-3 pb-6 scrollbar-app">
+        <nav className="mt-3 flex-1 space-y-4 overflow-y-auto px-3 pb-5 scrollbar-app">
           {NAV.map((section, i) => (
             <div key={section.label ?? `section-${i}`}>
               {section.label && (
-                <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="section-label px-2 pb-1.5">
                   {section.label}
                 </div>
               )}
               <div className="space-y-0.5">
-                {section.items.map(({ label, to, icon: Icon }) => (
+                {section.items.map(({ label, to }) => (
                   <NavLink
                     key={to}
                     to={to}
@@ -443,14 +513,13 @@ export function AppShell() {
                     onFocus={() => preloadOrganizerRoute(to)}
                     className={({ isActive }) =>
                       cn(
-                        'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
+                        'flex min-h-[30px] items-center rounded-lg px-2.5 py-1.5 text-[13px] font-normal transition-[background-color,color,box-shadow]',
                         isActive
-                          ? 'bg-primary-subtle text-primary'
+                          ? 'bg-card text-foreground shadow-soft'
                           : 'text-navigation-foreground hover:bg-navigation-accent hover:text-navigation-accent-foreground'
                       )
                     }
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
                     {label}
                   </NavLink>
                 ))}
@@ -458,71 +527,34 @@ export function AppShell() {
             </div>
           ))}
         </nav>
+
+        {CLERK_ENABLED && !peekToken() ? (
+          <ClerkUserIdentity>
+            {(identity) => <RailAccount identity={identity} onSignOut={signOut} />}
+          </ClerkUserIdentity>
+        ) : (
+          <RailAccount identity={currentUser} onSignOut={signOut} />
+        )}
       </aside>
 
-      <div
-        className="flex min-w-0 flex-1 flex-col transition-[margin-right] duration-300 ease-in-out md:mr-[var(--chat-content-margin)]"
-        style={
-          {
-            '--chat-content-margin':
-              agentEnabled && assistantOpen
-                ? 'var(--chat-sheet-width, clamp(420px, 29vw, 500px))'
-                : '0px',
-          } as CSSProperties
-        }
-      >
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6">
-          <div className="relative flex max-w-2xl flex-1 items-center">
-            <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
+      <div className="flex min-w-0 flex-col bg-card">
+        <header className="flex h-[50px] shrink-0 items-center gap-3 bg-transparent px-4 md:px-7">
+          <div className="relative flex w-full max-w-[300px] items-center">
             <input
               disabled
-              placeholder="Find or ask…"
-              className="h-9 w-full rounded-md border border-border bg-background pl-9 pr-16 text-sm text-foreground placeholder:text-placeholder disabled:cursor-not-allowed"
+              placeholder="Find or ask"
+              className="h-[30px] w-full rounded-lg border-0 bg-foreground/[0.04] pl-3 pr-12 text-[12.5px] text-foreground outline-none placeholder:text-placeholder disabled:cursor-not-allowed"
             />
-            <kbd className="pointer-events-none absolute right-2.5 hidden select-none items-center gap-0.5 rounded border border-border bg-muted px-1.5 py-0.5 font-sans text-[11px] font-medium text-muted-foreground sm:flex">
+            <kbd className="pointer-events-none absolute right-2.5 hidden select-none font-mono text-[10px] text-placeholder sm:block">
               ⌘K
             </kbd>
           </div>
 
-          <span id="speakerweave-agent-toggle" className="contents">
-            {agentEnabled && (
-              <button
-                type="button"
-                data-testid="ask-agent"
-                data-chat-toggle="true"
-                title="Ask SpeakerWeave (⌘J)"
-                aria-label="Ask SpeakerWeave"
-                aria-pressed={assistantOpen}
-                onClick={() => setAgentOpen(!assistantOpen)}
-                className={cn(
-                  'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition-[background-color,border-color,transform] active:scale-[0.98] sm:px-3',
-                  assistantOpen
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-primary/25 bg-primary-subtle text-primary hover:border-primary/40 hover:bg-primary/10',
-                )}
-              >
-                <Sparkles className="h-4 w-4" />
-                <span className="hidden sm:inline">Ask</span>
-              </button>
-            )}
-          </span>
-
-          <div className="ml-auto flex items-center gap-1.5 md:gap-2">
-            {isDemo && (
-              <Badge
-                variant="default"
-                title="You're exploring the shared demo workspace"
-                className="hidden sm:inline-flex"
-              >
-                Demo workspace
-              </Badge>
-            )}
-
-            <Button
-              variant="outline"
-              size="sm"
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
               title="Open the public schedule in a new tab"
-              className="hidden md:inline-flex"
+              className="hidden h-[30px] items-center rounded-lg px-2.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground md:inline-flex"
               onClick={() =>
                 window.open(
                   `/e/${event?.slug ?? FEATURED_EVENT_SLUG}/schedule`,
@@ -531,55 +563,39 @@ export function AppShell() {
                 )
               }
             >
-              <ExternalLink className="h-4 w-4" />
               View public page
-            </Button>
-
-            <button
-              type="button"
-              title="Notifications"
-              aria-label="Notifications"
-              className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Bell className="h-[18px] w-[18px]" />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-card bg-destructive" />
             </button>
 
-            <button
-              type="button"
-              title="Help"
-              aria-label="Help"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <HelpCircle className="h-[18px] w-[18px]" />
-            </button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <span id="speakerweave-agent-toggle" className="contents">
+              {agentEnabled && (
                 <button
                   type="button"
-                  aria-label="Account menu"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                  data-testid="ask-agent"
+                  data-chat-toggle="true"
+                  title="Ask SpeakerWeave (⌘J)"
+                  aria-label="Ask SpeakerWeave"
+                  aria-pressed={assistantOpen}
+                  onClick={() => setAgentOpen(!assistantOpen)}
+                  className={cn(
+                    'inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg bg-card px-2.5 text-[12.5px] font-medium text-foreground shadow-soft transition-[background-color,transform] active:translate-y-px',
+                    assistantOpen ? 'bg-foreground/[0.07]' : 'hover:bg-foreground/[0.028]',
+                  )}
                 >
-                  {eventInitial}
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <span>Ask</span>
+                  <kbd className="ml-0.5 hidden font-mono text-[9.5px] font-normal text-placeholder sm:inline">⌘K</kbd>
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={8} className="w-52">
-                <DropdownMenuLabel className="text-foreground">{event?.name ?? 'dais'}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={signOut} className="gap-2">
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              )}
+            </span>
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto scrollbar-app">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-card scrollbar-app">
           <Outlet />
         </main>
       </div>
+
+      {agentEnabled && assistantOpen && <div className="hidden bg-card md:block" aria-hidden="true" />}
 
       <CreateEventDialog
         open={newEventOpen}
@@ -599,7 +615,7 @@ export function AppShell() {
             <aside
               role="status"
               aria-label="Loading Ask SpeakerWeave"
-              className="fixed bottom-0 right-0 top-0 z-40 w-full animate-pulse border-l border-border bg-card shadow-lifted sm:w-[var(--chat-sheet-width)]"
+              className="fixed bottom-0 right-0 top-0 z-40 w-full animate-pulse border-l border-border bg-card sm:w-[420px]"
             />
           }
         >

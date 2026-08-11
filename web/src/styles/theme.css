@@ -1,127 +1,116 @@
-/* dais design tokens.
- *
- * Adapted from every-react/packages/ui/styles/theme.css (same HSL-token
- * approach, same token names so the shadcn-style components port unchanged),
- * retinted for the Sessionboard-like target: indigo primary, white surfaces,
- * slate text, light-slate canvas.
- *
- * Components consume semantic tokens only; `.dark` swaps the palette without
- * requiring component-level color overrides.
- */
+/* SpeakerWeave design tokens. Components consume semantic tokens only;
+ * `.dark` swaps the palette without component-level color overrides. */
 @layer base {
   :root {
     color-scheme: light;
     /* --- canvas & ink ------------------------------------------------- */
-    --background: 210 40% 98%; /* slate-50 — the page canvas */
-    --foreground: 222 47% 11%; /* slate-900 — primary text */
-    --card: 0 0% 100%; /* white — every elevated surface */
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --background: 40 27% 96%; /* #F7F5F1 paper */
+    --foreground: 36 10% 10%; /* #1C1A17 ink */
+    --card: 30 100% 99%; /* #FFFDFB */
+    --card-foreground: 36 10% 10%;
+    --popover: 30 100% 99%;
+    --popover-foreground: 36 10% 10%;
 
     /* --- brand -------------------------------------------------------- */
-    /* Matched to Sessionboard's cornflower blue #4962E2 (measured off their
-       CFP Continue/Next buttons). Theirs leans blue (G>R); the old indigo
-       leaned violet (G<R) — the single most obvious "not Sessionboard" tell. */
-    --primary: 230 72% 59%; /* #4962E2 */
-    --primary-strong: 230 65% 54%; /* #3B54D6 — hover/border */
-    --primary-subtle: 224 100% 96%; /* #E8EEFF — tinted fills */
+    --primary: 18 46% 45%; /* #A85E3E terracotta */
+    --primary-strong: 18 51% 36%; /* #8C4A2E */
+    --primary-subtle: 22 40% 92%; /* #F3E9E3 */
     --primary-foreground: 0 0% 100%;
 
     /* --- neutrals ----------------------------------------------------- */
-    --secondary: 210 40% 96%; /* slate-100 */
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%; /* slate-100 — recessed wells, active fills */
-    --muted-foreground: 215 16% 47%; /* slate-500 — secondary text */
-    --placeholder-foreground: 215 20% 65%; /* slate-400 */
-    --accent: 210 40% 96%; /* slate-100 — hover fill */
-    --accent-foreground: 222 47% 11%;
-    --hover: 224 100% 96%; /* blue-tint — row/card highlight */
-    --border: 214 32% 91%; /* slate-200 */
-    --input: 213 27% 84%; /* slate-300 — one step darker on inputs */
+    --secondary: 36 10% 10% / 0.045;
+    --secondary-foreground: 38 7% 32%;
+    --muted: 36 10% 10% / 0.045;
+    --muted-foreground: 38 7% 32%; /* #57534C */
+    --placeholder-foreground: 38 7% 55%; /* #938D83 */
+    --accent: 36 10% 10% / 0.045;
+    --accent-foreground: 36 10% 10%;
+    --hover: 22 40% 92%;
+    --border: 36 10% 10% / 0.07;
+    --input: 36 10% 10% / 0.13;
     --ring: var(--primary);
 
     /* --- status ------------------------------------------------------- */
-    --success: 142 71% 45%; /* green-500 */
-    --success-strong: 142 72% 29%; /* green-700 — text on tinted fills */
+    --success: 128 21% 45%; /* #5C8C63 */
+    --success-strong: 128 27% 34%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%; /* amber-500 */
-    --warning-strong: 26 90% 37%; /* amber-700 */
-    --warning-foreground: 222 47% 11%;
-    --destructive: 0 72% 51%; /* red-600 */
-    --destructive-strong: 0 70% 42%; /* red-700 */
+    --warning: 43 55% 51%; /* #C89B3C */
+    --warning-strong: 35 55% 40%;
+    --warning-foreground: 36 10% 10%;
+    --destructive: 3 30% 55%; /* #B26A66 */
+    --destructive-strong: 3 30% 43%;
     --destructive-foreground: 0 0% 100%;
+    --status-neutral: 39 17% 78%; /* #CFC9BE */
+    --status-queue: 224 18% 58%; /* #7E8AA8 */
 
-    /* Sessionboard's solid dark-slate lifecycle pill (#1E2430), used for
-       "Open"/status badges. Amber Pending / green Accepted / red Declined stay. */
-    --status-solid: 220 23% 15%; /* #1E2430 */
+    --status-solid: 36 10% 10%;
     --status-solid-foreground: 0 0% 100%;
 
     /* --- sidebar / top chrome ----------------------------------------- */
-    /* The admin sidebar is white (like Sessionboard) and separated from the
-       canvas by a border, not by a fill. */
-    --navigation-background: 0 0% 100%;
-    --navigation-foreground: 215 25% 27%; /* slate-700 */
-    --navigation-accent: 210 40% 96%; /* slate-100 — item hover */
-    --navigation-accent-foreground: 222 47% 11%;
-    --navigation-border: 214 32% 91%;
+    --navigation-background: 40 27% 96%;
+    --navigation-foreground: 38 7% 32%;
+    --navigation-accent: 36 10% 10% / 0.045;
+    --navigation-accent-foreground: 36 10% 10%;
+    --navigation-border: 36 10% 10% / 0.07;
 
     /* --- shape & depth ------------------------------------------------ */
     --radius: 0.5rem;
     --line-height-base: 1.5;
-    --shadow-soft: 0 1px 2px hsl(222 47% 11% / 0.04), 0 2px 6px -2px hsl(222 47% 11% / 0.05);
-    --shadow-raised: 0 1px 2px hsl(222 47% 11% / 0.05), 0 8px 24px -6px hsl(222 47% 11% / 0.1);
-    --shadow-lifted: 0 2px 6px hsl(222 47% 11% / 0.08), 0 16px 32px -8px hsl(222 47% 11% / 0.18);
+    --shadow-soft: 0 1px 2px rgb(28 26 23 / 0.07);
+    --shadow-raised: 0 1px 2px rgb(28 26 23 / 0.07), 0 6px 16px rgb(28 26 23 / 0.04);
+    --shadow-lifted: 0 2px 6px rgb(28 26 23 / 0.08), 0 18px 50px rgb(28 26 23 / 0.07);
   }
 
   .dark {
     color-scheme: dark;
 
-    --background: 224 34% 7%;
-    --foreground: 210 40% 96%;
-    --card: 222 30% 10%;
-    --card-foreground: 210 40% 96%;
-    --popover: 222 30% 10%;
-    --popover-foreground: 210 40% 96%;
+    --background: 36 10% 7%;
+    --foreground: 40 27% 96%;
+    --card: 36 9% 10%;
+    --card-foreground: 40 27% 96%;
+    --popover: 36 9% 10%;
+    --popover-foreground: 40 27% 96%;
 
-    --primary: 230 72% 59%;
-    --primary-strong: 230 82% 68%;
-    --primary-subtle: 229 38% 17%;
+    --primary: 18 46% 55%;
+    --primary-strong: 18 51% 64%;
+    --primary-subtle: 18 24% 18%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 222 25% 13%;
-    --secondary-foreground: 210 40% 96%;
-    --muted: 222 25% 13%;
-    --muted-foreground: 215 20% 67%;
-    --placeholder-foreground: 215 16% 54%;
-    --accent: 222 23% 15%;
-    --accent-foreground: 210 40% 96%;
-    --hover: 230 30% 16%;
-    --border: 220 20% 20%;
-    --input: 218 18% 27%;
+    --secondary: 40 27% 96% / 0.07;
+    --secondary-foreground: 40 27% 96%;
+    --muted: 40 27% 96% / 0.07;
+    --muted-foreground: 38 8% 68%;
+    --placeholder-foreground: 38 7% 55%;
+    --accent: 40 27% 96% / 0.08;
+    --accent-foreground: 40 27% 96%;
+    --hover: 18 22% 18%;
+    --border: 40 27% 96% / 0.11;
+    --input: 40 27% 96% / 0.18;
     --ring: var(--primary);
 
-    --success: 142 65% 47%;
-    --success-strong: 142 72% 68%;
+    --success: 128 25% 55%;
+    --success-strong: 128 28% 68%;
     --success-foreground: 144 61% 8%;
-    --warning: 38 92% 55%;
-    --warning-strong: 43 96% 72%;
-    --warning-foreground: 222 47% 11%;
-    --destructive: 0 72% 58%;
-    --destructive-strong: 0 91% 71%;
+    --warning: 43 55% 58%;
+    --warning-strong: 43 55% 70%;
+    --warning-foreground: 36 10% 10%;
+    --destructive: 3 34% 62%;
+    --destructive-strong: 3 38% 72%;
     --destructive-foreground: 0 0% 100%;
+    --status-neutral: 39 12% 55%;
+    --status-queue: 224 22% 67%;
 
-    --status-solid: 218 20% 23%;
-    --status-solid-foreground: 210 40% 96%;
+    --status-solid: 40 27% 96%;
+    --status-solid-foreground: 36 10% 10%;
 
-    --navigation-background: 222 30% 9%;
-    --navigation-foreground: 215 25% 82%;
-    --navigation-accent: 222 23% 15%;
-    --navigation-accent-foreground: 210 40% 96%;
-    --navigation-border: 220 20% 20%;
+    --navigation-background: 36 10% 7%;
+    --navigation-foreground: 38 8% 72%;
+    --navigation-accent: 40 27% 96% / 0.07;
+    --navigation-accent-foreground: 40 27% 96%;
+    --navigation-border: 40 27% 96% / 0.11;
 
-    --shadow-soft: 0 1px 2px hsl(224 60% 2% / 0.28), 0 2px 8px -2px hsl(224 60% 2% / 0.36);
-    --shadow-raised: 0 2px 5px hsl(224 60% 2% / 0.32), 0 12px 30px -8px hsl(224 60% 2% / 0.52);
-    --shadow-lifted: 0 4px 10px hsl(224 60% 2% / 0.4), 0 22px 48px -12px hsl(224 60% 2% / 0.68);
+    --shadow-soft: 0 1px 2px hsl(36 20% 2% / 0.28), 0 2px 8px -2px hsl(36 20% 2% / 0.36);
+    --shadow-raised: 0 2px 5px hsl(36 20% 2% / 0.32), 0 12px 30px -8px hsl(36 20% 2% / 0.52);
+    --shadow-lifted: 0 4px 10px hsl(36 20% 2% / 0.4), 0 22px 48px -12px hsl(36 20% 2% / 0.68);
   }
 }

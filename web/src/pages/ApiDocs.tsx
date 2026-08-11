@@ -194,7 +194,7 @@ function EndpointReference() {
   return (
     <section id="endpoints" className="scroll-mt-24 space-y-4">
       <SectionHeading title="REST endpoints" />
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-soft">
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="border-b border-border bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
@@ -226,7 +226,7 @@ function Examples() {
       <SectionHeading title="curl examples" />
       <div className="grid gap-5">
         {CURL_EXAMPLES.map((example) => (
-          <article key={example.title} className="rounded-xl border border-border bg-card p-5 shadow-soft">
+          <article key={example.title} className="rounded-xl border border-border bg-card p-5">
             <h3 className="text-sm font-semibold text-foreground">{example.title}</h3>
             <p className="mb-3 mt-1 text-sm text-muted-foreground">{example.description}</p>
             <CodeBlock code={example.code} />
@@ -256,7 +256,7 @@ function McpServer({ endpoint, config }: { endpoint: string; config: string }) {
         <Mono>Authorization: Bearer …</Mono>. Add this entry to your client&rsquo;s MCP JSON configuration:
       </p>
       <CodeBlock code={config} />
-      <div className="rounded-xl border border-border bg-card p-5 shadow-soft">
+      <div className="rounded-xl border border-border bg-card p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resources</p>
         <p className="mt-2 text-sm text-muted-foreground">
           Event-scoped JSON resources are available at <Mono>dais://events/{'{event}'}/schedule</Mono>,{' '}
@@ -264,7 +264,7 @@ function McpServer({ endpoint, config }: { endpoint: string; config: string }) {
           <Mono>dais://events/{'{event}'}/content-status</Mono>.
         </p>
       </div>
-      <div id="mcp-tools" className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-card shadow-soft">
+      <div id="mcp-tools" className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-card">
         <div className="border-b border-border px-5 py-4">
           <h3 className="font-semibold text-foreground">Available tools</h3>
           <p className="mt-1 text-sm text-muted-foreground">All tools are scoped to the token&rsquo;s organization.</p>
@@ -285,7 +285,7 @@ function McpServer({ endpoint, config }: { endpoint: string; config: string }) {
 function CodeBlock({ code }: { code: string }) {
   return (
     <div className="group relative">
-      <pre className="overflow-x-auto rounded-lg border border-border bg-status-solid p-4 pr-12 text-[13px] leading-relaxed text-slate-100">
+      <pre className="overflow-x-auto rounded-lg border border-border bg-status-solid p-4 pr-12 text-[13px] leading-relaxed text-status-solid-foreground/90">
         <code className="font-mono">{code}</code>
       </pre>
       <div className="absolute right-2 top-2 opacity-80 transition-opacity group-hover:opacity-100">
@@ -323,7 +323,7 @@ function SectionHeading({ icon, title }: { icon?: React.ReactNode; title: string
 
 function ConventionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-soft">
+    <div className="rounded-xl border border-border bg-card p-4">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{children}</p>
     </div>

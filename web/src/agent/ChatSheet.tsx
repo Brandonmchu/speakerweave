@@ -37,9 +37,9 @@ class AgentPanelBoundary extends Component<
     if (!this.state.error) return this.props.children
     if (!this.props.open) return null
     return (
-      <aside className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col border-l border-border bg-card sm:w-[var(--chat-sheet-width)]">
-        <div className="flex h-14 items-center justify-end border-b border-border px-4">
-          <button type="button" onClick={this.props.onClose} aria-label="Close chat" className="rounded-md p-2 text-muted-foreground hover:bg-accent">
+      <aside className="fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col border-l border-border bg-card sm:w-[420px]">
+        <div className="flex h-[50px] items-center justify-end border-b border-border px-4">
+          <button type="button" onClick={this.props.onClose} aria-label="Close chat" className="flex h-[27px] w-[27px] items-center justify-center rounded-lg text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -52,7 +52,7 @@ class AgentPanelBoundary extends Component<
           <button
             type="button"
             onClick={() => this.setState({ error: null })}
-            className="mt-5 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary-strong"
+            className="mt-5 inline-flex h-[27px] items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary-strong"
           >
             <RotateCcw className="h-4 w-4" /> Try again
           </button>
@@ -73,10 +73,10 @@ function AgentToggle({ open, onToggle }: { open: boolean; onToggle: () => void }
       aria-pressed={open}
       onClick={onToggle}
       className={cn(
-        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition-[background-color,border-color,transform] active:scale-[0.98] sm:px-3',
+        'inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg bg-card px-2.5 text-[12.5px] font-medium text-foreground shadow-soft transition-[background-color,transform] active:translate-y-px',
         open
-          ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-primary/25 bg-primary-subtle text-primary hover:border-primary/40 hover:bg-primary/10',
+          ? 'bg-foreground/[0.07]'
+          : 'hover:bg-foreground/[0.028]',
       )}
     >
       <Sparkles className="h-4 w-4" />
@@ -105,14 +105,13 @@ function AgentPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open
       aria-label="Ask SpeakerWeave"
       aria-hidden={!open}
       className={cn(
-        'fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col border-l border-border bg-card shadow-lifted transition-[transform,opacity] duration-300 ease-in-out sm:w-[var(--chat-sheet-width)]',
+        'fixed bottom-0 right-0 top-0 z-40 flex w-full flex-col border-l border-border bg-card transition-[transform,opacity] duration-300 ease-in-out sm:w-[420px]',
         !open && 'pointer-events-none translate-x-full opacity-0',
       )}
       onWheel={(event) => event.stopPropagation()}
       onTouchMove={(event) => event.stopPropagation()}
     >
-      <header className="pointer-events-none absolute left-0 right-0 top-0 z-20 bg-gradient-to-b from-card via-card/95 to-transparent px-4 pb-4 pt-3">
-        <div className="flex h-10 items-center gap-2 [&>*]:pointer-events-auto">
+      <header className="flex h-[50px] shrink-0 items-center gap-1.5 border-b border-border px-4">
           <ThreadDropdown />
           <ConnectorStatus />
           <button
@@ -121,7 +120,7 @@ function AgentPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open
             aria-label="New chat"
             disabled={isStreaming}
             onClick={newChat}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-soft transition-colors hover:bg-accent hover:text-foreground active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45"
           >
             <SquarePen className="h-4 w-4" />
           </button>
@@ -130,11 +129,10 @@ function AgentPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open
             title="Close chat"
             aria-label="Close chat"
             onClick={() => onOpenChange(false)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-[0.97]"
+            className="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:translate-y-px"
           >
             <X className="h-4 w-4" />
           </button>
-        </div>
       </header>
       <ChatBox onRequestClose={() => onOpenChange(false)} />
     </aside>
@@ -155,7 +153,7 @@ export function AgentFeature({
   const [toggleContainer, setToggleContainer] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--chat-sheet-width', 'clamp(420px, 29vw, 500px)')
+    document.documentElement.style.setProperty('--chat-sheet-width', '420px')
     setToggleContainer(document.getElementById(toggleContainerId))
     return () => {
       document.documentElement.style.removeProperty('--chat-sheet-width')

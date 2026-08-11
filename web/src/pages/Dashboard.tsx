@@ -7,18 +7,10 @@
  * subscription that half-works), so an organizer can leave this open on a
  * second screen during onboarding week and watch it drain.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
-import {
-  AlertCircle,
-  CheckCircle2,
-  CircleDashed,
-  LayoutDashboard,
-  ListChecks,
-  Mail,
-  Users,
-} from 'lucide-react'
+import { AlertCircle, Users } from 'lucide-react'
 
 import {
   getEventDashboard,
@@ -27,40 +19,37 @@ import {
   type SubmissionFunnel,
 } from '@/lib/dashboardApi'
 import { deliveryStatusLabel } from '@/lib/deliveryStatus'
-import { cn } from '@/lib/utils'
+import { GradientAvatar } from '@/ui/avatar'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
-import { Card } from '@/ui/card'
 import { EmptyState } from '@/ui/empty-state'
+import { Progress } from '@/ui/progress'
 import { Skeleton } from '@/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/table'
 
 /** Polling interval. Fast enough to read as live, slow enough to be free. */
 const REFETCH_MS = 5000
 
-type BadgeVariant = 'default' | 'success' | 'warning' | 'destructive' | 'muted' | 'outline'
-
 /** The funnel, left to right, in the order an organizer reads it. */
 const FUNNEL_STEPS: Array<{
   key: keyof Omit<SubmissionFunnel, 'total'>
   label: string
-  variant: BadgeVariant
-  bar: string
+  dot: string
 }> = [
-  { key: 'pending', label: 'Pending', variant: 'warning', bar: 'bg-warning' },
-  { key: 'accept_queue', label: 'Accept Queue', variant: 'default', bar: 'bg-primary/50' },
-  { key: 'accepted', label: 'Accepted', variant: 'success', bar: 'bg-success' },
-  { key: 'decline_queue', label: 'Decline Queue', variant: 'muted', bar: 'bg-foreground/20' },
-  { key: 'declined', label: 'Declined', variant: 'destructive', bar: 'bg-destructive' },
-  { key: 'withdrawn', label: 'Withdrawn', variant: 'muted', bar: 'bg-foreground/10' },
+  { key: 'pending', label: 'Pending', dot: 'before:bg-warning' },
+  { key: 'accept_queue', label: 'Accept queue', dot: 'before:bg-status-queue' },
+  { key: 'accepted', label: 'Accepted', dot: 'before:bg-success' },
+  { key: 'decline_queue', label: 'Decline queue', dot: 'before:bg-status-queue' },
+  { key: 'declined', label: 'Declined', dot: 'before:bg-destructive' },
+  { key: 'withdrawn', label: 'Withdrawn', dot: 'before:bg-status-neutral' },
 ]
 
 /** email_outbox.status ∈ (queued, sent, failed, cancelled). */
-const EMAIL_STATUS_VARIANT: Record<string, BadgeVariant> = {
-  sent: 'success',
-  queued: 'warning',
-  failed: 'destructive',
-  cancelled: 'muted',
+const EMAIL_STATUS_DOT: Record<string, string> = {
+  sent: 'before:bg-success',
+  queued: 'before:bg-warning',
+  failed: 'before:bg-destructive',
+  cancelled: 'before:bg-status-neutral',
 }
 
 /** "acceptance" → "Acceptance". Template keys are snake_case machine names. */
@@ -149,21 +138,16 @@ export function Dashboard() {
   return (
     <div className="px-4 py-6 md:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <LayoutDashboard className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Dashboard</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Speaker onboarding at a glance{event ? ` for ${event.name}` : ''}.
-            </p>
-          </div>
+        <div>
+          <h1 className="page-title">Today</h1>
+          <p className="page-subtitle">
+            Speaker onboarding at a glance{event ? ` for ${event.name}` : ''}.
+          </p>
         </div>
         {/* Proof of life for a polled page. Deliberately not aria-live: it
             re-stamps every 5s and would hijack a screen reader all session. */}
         {data && !error && (
-          <div className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 font-mono text-[10.5px] text-placeholder">
             <span className="relative flex h-2 w-2" aria-hidden="true">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
@@ -174,7 +158,7 @@ export function Dashboard() {
       </header>
 
       {error ? (
-        <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+        <div className="mt-6 overflow-hidden bg-card">
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
             title="Couldn't load the dashboard"
@@ -196,7 +180,7 @@ export function Dashboard() {
       ) : isLoading ? (
         <LoadingDashboard />
       ) : !event ? (
-        <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+        <div className="mt-6 overflow-hidden bg-card">
           <EmptyState
             icon={<Users className="h-6 w-6 text-muted-foreground" />}
             title="No events yet"
@@ -205,36 +189,31 @@ export function Dashboard() {
         </div>
       ) : (
         <>
-          <div className="mt-6 grid gap-4 lg:grid-cols-[repeat(3,minmax(0,1fr))_1.4fr]">
-            <StatCard
+          <div className="mt-6 grid border-y border-border bg-card sm:grid-cols-2 lg:grid-cols-[repeat(3,minmax(0,1fr))_1.6fr]">
+            <StatBlock
               label="Total speakers"
               value={totals?.speakers ?? 0}
-              icon={<Users className="h-4 w-4" />}
             />
-            <StatCard
+            <StatBlock
               label="Onboarded"
               value={totals?.onboarded ?? 0}
-              tone="success"
-              icon={<CheckCircle2 className="h-4 w-4" />}
               hint={
                 totals?.speakers
                   ? `${Math.round(((totals.onboarded ?? 0) / totals.speakers) * 100)}% of speakers`
                   : undefined
               }
             />
-            <StatCard
+            <StatBlock
               label="Outstanding tasks"
               value={totals?.outstanding_tasks ?? 0}
-              tone={totals?.outstanding_tasks ? 'warning' : 'default'}
-              icon={<ListChecks className="h-4 w-4" />}
             />
             <FunnelCard funnel={funnel} />
           </div>
 
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-foreground">Speaker onboarding</h2>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+              <h2 className="section-label">Speaker onboarding</h2>
+              <p className="mt-1 text-[12.5px] text-muted-foreground">
                 Sorted by what&rsquo;s still owed — the top of this list is your call sheet.
               </p>
             </div>
@@ -244,12 +223,11 @@ export function Dashboard() {
               aria-pressed={onlyOutstanding}
               onClick={() => setOnlyOutstanding((on) => !on)}
             >
-              <CircleDashed />
               Only outstanding
             </Button>
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+          <div className="mt-3 bg-card">
             {ordered.length === 0 ? (
               <EmptyState
                 icon={<Users className="h-6 w-6 text-muted-foreground" />}
@@ -299,40 +277,45 @@ function SpeakerRow({ speaker }: { speaker: SpeakerOnboarding }) {
   return (
     <TableRow>
       <TableCell>
-        <div className="font-medium text-foreground">{speaker.name}</div>
-        {speaker.email && (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{speaker.email}</div>
-        )}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <GradientAvatar id={speaker.contact_id} name={speaker.name} size={24} />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-foreground">{speaker.name}</div>
+            {speaker.email && (
+              <div className="truncate text-[11.5px] text-muted-foreground">{speaker.email}</div>
+            )}
+          </div>
+        </div>
       </TableCell>
       <TableCell>
-        <div className="text-sm tabular-nums text-foreground">
+        <div className="font-mono text-[11px] tabular-nums text-foreground">
           {speaker.session_count} {speaker.session_count === 1 ? 'session' : 'sessions'}
         </div>
-        {mix && <div className="mt-0.5 truncate text-xs capitalize text-muted-foreground">{mix}</div>}
+        {mix && <div className="truncate text-[11px] capitalize text-muted-foreground">{mix}</div>}
       </TableCell>
       <TableCell>
         <OnboardingProgress speaker={speaker} />
       </TableCell>
       <TableCell
-        className="text-sm text-muted-foreground"
+        className="font-mono text-[10.5px] text-muted-foreground"
         title={fullDate(speaker.last_portal_access_at)}
       >
         {speaker.last_portal_access_at ? (
           relativeDate(speaker.last_portal_access_at)
         ) : (
-          <span className="text-warning-strong">Never signed in</span>
+          <span>Never signed in</span>
         )}
       </TableCell>
       <TableCell>
         {speaker.last_email ? (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="flex items-center gap-1 text-sm text-foreground">
-              <Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="text-[12.5px] text-foreground">
               {humanize(speaker.last_email.template_key ?? 'Email')}
             </span>
             {speaker.last_email.status && (
               <Badge
-                variant={EMAIL_STATUS_VARIANT[speaker.last_email.status] ?? 'muted'}
+                variant="dot"
+                className={EMAIL_STATUS_DOT[speaker.last_email.status] ?? 'before:bg-status-neutral'}
                 title={fullDate(speaker.last_email.sent_at)}
               >
                 {deliveryStatusLabel(speaker.last_email.status, speaker.last_email.last_error)}
@@ -340,7 +323,7 @@ function SpeakerRow({ speaker }: { speaker: SpeakerOnboarding }) {
             )}
           </div>
         ) : (
-          <span className="text-sm text-muted-foreground">—</span>
+          <span className="text-muted-foreground">—</span>
         )}
       </TableCell>
     </TableRow>
@@ -357,139 +340,84 @@ function OnboardingProgress({ speaker }: { speaker: SpeakerOnboarding }) {
 
   if (speaker.onboarding_complete) {
     return (
-      <Badge variant="success">
-        <CheckCircle2 className="h-3 w-3" />
+      <Badge variant="dot" className="before:bg-success">
         Onboarded
       </Badge>
     )
   }
 
   if (total === 0) {
-    return <span className="text-sm text-muted-foreground">No tasks assigned</span>
+    return <Badge variant="dot">No tasks assigned</Badge>
   }
 
-  const percent = Math.round((done / total) * 100)
   return (
-    <div className="max-w-[220px]">
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="tabular-nums text-muted-foreground">
+    <div className="flex items-center gap-3">
+      <Progress
+        value={done}
+        max={total}
+        aria-label={`${speaker.name} onboarding progress`}
+      />
+      <div className="flex items-center gap-1.5 font-mono text-[10.5px] tabular-nums text-muted-foreground">
+        <span>
           {done}/{total} done
         </span>
-        <span className="font-medium text-warning-strong">{outstanding} outstanding</span>
-      </div>
-      <div
-        className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={done}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-label={`${speaker.name} onboarding progress`}
-      >
-        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${percent}%` }} />
+        <span>· {outstanding} outstanding</span>
       </div>
     </div>
   )
 }
 
-function StatCard({
+function StatBlock({
   label,
   value,
   hint,
-  icon,
-  tone = 'default',
 }: {
   label: string
   value: number
   hint?: string
-  icon?: ReactNode
-  tone?: 'default' | 'success' | 'warning'
 }) {
   return (
-    <Card className="gap-0 py-5">
-      <div className="flex items-center justify-between gap-2 px-5">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
-        {icon && (
-          <span
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-md',
-              // Tailwind's opacity scale steps by 5 — /12 silently compiles to
-              // nothing (as it does in ui/badge.tsx today).
-              tone === 'success' && 'bg-success/10 text-success-strong',
-              tone === 'warning' && 'bg-warning/15 text-warning-strong',
-              tone === 'default' && 'bg-primary-subtle text-primary'
-            )}
-            aria-hidden="true"
-          >
-            {icon}
-          </span>
-        )}
-      </div>
-      <p className="mt-3 px-5 text-3xl font-semibold tabular-nums leading-none text-foreground">
-        {value}
+    <div className="border-b border-border px-5 py-4 last:border-b-0 sm:[&:nth-child(odd)]:border-r lg:border-b-0 lg:border-r lg:last:border-r-0">
+      <p className="font-mono text-[21px] font-medium tabular-nums leading-6 text-foreground">{value}</p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">
+        {label}{hint ? <span> · {hint}</span> : null}
       </p>
-      <p className="mt-1.5 h-4 px-5 text-xs text-muted-foreground">{hint ?? ''}</p>
-    </Card>
+    </div>
   )
 }
 
 function FunnelCard({ funnel }: { funnel?: SubmissionFunnel }) {
   const steps = FUNNEL_STEPS.map((step) => ({ ...step, count: funnel?.[step.key] ?? 0 }))
-  const charted = steps.reduce((sum, step) => sum + step.count, 0)
-
   return (
-    <Card className="gap-0 py-5">
-      <div className="flex items-center justify-between gap-2 px-5">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Submission funnel
-        </p>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {funnel?.total ?? 0} total
-        </span>
-      </div>
-
-      {/* One bar, six segments. Zero submissions reads as an empty track rather
-          than a divide-by-zero. */}
-      <div className="mt-3 px-5">
-        <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-          {charted > 0 &&
-            steps.map(
-              (step) =>
-                step.count > 0 && (
-                  <div
-                    key={step.key}
-                    className={step.bar}
-                    style={{ width: `${(step.count / charted) * 100}%` }}
-                    title={`${step.label}: ${step.count}`}
-                  />
-                )
-            )}
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1.5 px-5">
+    <div className="border-b border-border px-5 py-4 last:border-b-0 sm:[&:nth-child(odd)]:border-r lg:border-b-0 lg:border-r lg:last:border-r-0">
+      <p className="font-mono text-[21px] font-medium tabular-nums leading-6 text-foreground">
+        {funnel?.total ?? 0}
+      </p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">Submission funnel</p>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
         {steps.map((step) => (
-          <Badge key={step.key} variant={step.variant} className="gap-1">
+          <Badge key={step.key} variant="dot" className={`${step.dot} text-[11px]`}>
             {step.label}
-            <span className="tabular-nums">{step.count}</span>
+            <span className="font-mono tabular-nums">{step.count}</span>
           </Badge>
         ))}
       </div>
-    </Card>
+    </div>
   )
 }
 
 function LoadingDashboard() {
   return (
     <>
-      <div className="mt-6 grid gap-4 lg:grid-cols-[repeat(3,minmax(0,1fr))_1.4fr]">
+      <div className="mt-6 grid border-y border-border bg-card sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i} className="gap-0 py-5">
-            <Skeleton className="mx-5 h-3 w-24" />
-            <Skeleton className="mx-5 mt-4 h-7 w-16" />
-          </Card>
+          <div key={i} className="border-b border-border px-5 py-4 lg:border-b-0 lg:border-r lg:last:border-r-0">
+            <Skeleton className="h-6 w-16" />
+            <Skeleton className="mt-2 h-3 w-24" />
+          </div>
         ))}
       </div>
-      <div className="mt-6 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card shadow-soft">
+      <div className="mt-6 divide-y divide-border bg-card">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="flex items-center gap-4 px-4 py-4">
             <Skeleton className="h-4 w-[26%]" />

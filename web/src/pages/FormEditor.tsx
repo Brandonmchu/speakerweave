@@ -328,7 +328,7 @@ export function FormEditor() {
     return (
       <div className="px-4 py-6 md:px-8">
         <BackLink />
-        <div className="mt-6 rounded-lg border border-border bg-card shadow-soft">
+        <div className="mt-6 rounded-lg border border-border bg-card">
           <EmptyState
             icon={<AlertCircle className="h-6 w-6 text-destructive" />}
             title="Couldn't load this form"
@@ -352,7 +352,7 @@ export function FormEditor() {
 
       <header className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="page-title">
             {form.name || 'Untitled form'}
           </h1>
           <div className="mt-1 flex items-center gap-1">
@@ -469,7 +469,7 @@ function SaveBar({
   savedLabel: string
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-soft">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
       <p className="text-sm text-muted-foreground">
         {dirty ? (
           <span className="inline-flex items-center gap-2 font-medium text-foreground">
@@ -647,7 +647,7 @@ function FieldRow({
   const choices = field.options?.choices ?? []
 
   return (
-    <div className="group rounded-lg border border-border bg-card p-4 shadow-soft transition-colors hover:border-primary/40">
+    <div className="group rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40">
       <div className="flex items-start gap-3">
         <div className="flex flex-col items-center gap-0.5 pt-1">
           <GripVertical className="h-4 w-4 text-muted-foreground/60" />
@@ -1090,7 +1090,7 @@ function RulesTab({
           {rules.map((rule) => (
             <li
               key={rule.key}
-              className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 shadow-soft transition-colors hover:border-primary/40"
+              className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-primary/40"
             >
               <p className="min-w-0 text-sm leading-relaxed text-muted-foreground">
                 {ruleSentenceSegments(
@@ -1473,7 +1473,7 @@ function SettingsTab({
         savedLabel="All changes saved"
       />
 
-      <div className="max-w-2xl space-y-5 rounded-lg border border-border bg-card p-5 shadow-soft">
+      <div className="max-w-2xl space-y-5 rounded-lg border border-border bg-card p-5">
         <div className="space-y-1.5">
           <Label htmlFor="settings-name" required>
             Form name

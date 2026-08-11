@@ -58,7 +58,7 @@ const DialogContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.C
           'w-full max-w-[calc(100vw-2rem)]',
           !className && 'sm:max-w-md md:max-w-lg',
           'max-h-[85vh] overflow-y-auto scrollbar-app',
-          'border border-border bg-card p-6 shadow-lifted rounded-lg',
+          'rounded-lg bg-card p-6 shadow-lifted',
           'duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out',
           'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',

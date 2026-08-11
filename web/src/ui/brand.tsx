@@ -9,7 +9,7 @@ export function BrandMark({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#191918]',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground',
         className,
       )}
       aria-hidden="true"

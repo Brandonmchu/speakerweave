@@ -82,7 +82,7 @@ export function Onboarding() {
         </div>
 
         <form
-          className="mt-6 space-y-5 rounded-lg border border-border bg-card p-6 shadow-raised"
+          className="mt-6 space-y-5 rounded-lg bg-card p-6 shadow-raised"
           onSubmit={(e) => {
             e.preventDefault()
             if (name.trim()) create.mutate()

@@ -29,7 +29,7 @@ import { EmptyState } from '@/ui/empty-state'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { Skeleton } from '@/ui/skeleton'
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs'
+import { Tabs, TabsCount, TabsList, TabsTrigger } from '@/ui/tabs'
 import { toast } from '@/ui/use-toast'
 
 type TabKey = 'all' | 'open' | 'closed'
@@ -107,7 +107,7 @@ export function Forms() {
   const isLoading = eventsQuery.isPending || (Boolean(event?.id) && formsQuery.isPending)
   const error = eventsQuery.error ?? formsQuery.error
 
-  const panelClass = 'mt-6 overflow-hidden rounded-lg border border-border bg-card shadow-soft'
+  const panelClass = 'mt-6 overflow-hidden bg-card'
 
   return (
     <div className="px-4 py-6 md:px-8">
@@ -117,8 +117,8 @@ export function Forms() {
             <FileText className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Forms</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <h1 className="page-title">Forms</h1>
+            <p className="page-subtitle">
               Build the call for papers{event ? ` for ${event.name}` : ''} — questions, conditional logic
               and a public link to share.
             </p>
@@ -235,15 +235,15 @@ function FormsList({ forms }: { forms: FormWithMeta[] }) {
           <TabsList variant="underline" className="w-auto border-b-0">
             <TabsTrigger value="all">
               All
-              <TabCount n={counts.all} active={tab === 'all'} />
+              <TabsCount>{counts.all}</TabsCount>
             </TabsTrigger>
             <TabsTrigger value="open">
               Open
-              <TabCount n={counts.open} active={tab === 'open'} />
+              <TabsCount>{counts.open}</TabsCount>
             </TabsTrigger>
             <TabsTrigger value="closed">
               Closed
-              <TabCount n={counts.closed} active={tab === 'closed'} />
+              <TabsCount>{counts.closed}</TabsCount>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -262,19 +262,6 @@ function FormsList({ forms }: { forms: FormWithMeta[] }) {
         </div>
       )}
     </div>
-  )
-}
-
-function TabCount({ n, active }: { n: number; active: boolean }) {
-  return (
-    <span
-      className={cn(
-        'rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
-        active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-      )}
-    >
-      {n}
-    </span>
   )
 }
 
@@ -305,7 +292,7 @@ function FormCard({ form, closed }: { form: FormWithMeta; closed: boolean }) {
   const created = formatCreated(form.created_at)
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-soft transition-colors hover:border-primary/40">
+    <div className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums text-muted-foreground">
