@@ -119,7 +119,7 @@ for migration in api/migrations/*.sql; do
 done
 ```
 
-The zero-padded filenames make the shell loop apply exactly `001` through `015`. All migrations are intended to be safe to re-run. Before seeding, create a public Storage bucket named `portal-files` in Supabase Dashboard → Storage.
+The zero-padded filenames make the shell loop apply exactly `001` through `018`. All migrations are intended to be safe to re-run. Before seeding, create a public Storage bucket named `portal-files` in Supabase Dashboard → Storage.
 
 ### 4. Seed the demo workspace
 
