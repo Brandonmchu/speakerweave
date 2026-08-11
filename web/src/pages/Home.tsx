@@ -16,6 +16,7 @@ import {
   Globe2,
   MessagesSquare,
   Send,
+  SquareTerminal,
   UserRoundCheck,
   Users,
   Workflow,
@@ -179,8 +180,8 @@ export function Home() {
   const aiSurfaces = [
     {
       icon: BrainCircuit,
-      title: 'In-app Ask assistant',
-      body: 'Query the program, take guarded actions, and stay in the organizer workspace.',
+      title: 'In-app chat agent',
+      body: 'Streaming chat with threads, @-mention any submission or speaker as context, clickable entity badges, and approve/deny gates on anything sensitive.',
       eyebrow: 'Built in',
     },
     {
@@ -188,6 +189,12 @@ export function Home() {
       title: 'Slack bot',
       body: 'Bring the same program context and tools into the channel where the team works.',
       eyebrow: 'Team surface',
+    },
+    {
+      icon: SquareTerminal,
+      title: 'sw CLI',
+      body: 'pipx install, authenticate with an API token, then sw ask — the same brain from any shell or script.',
+      eyebrow: 'Terminal',
     },
   ]
 
@@ -418,19 +425,20 @@ export function Home() {
                 <Workflow className="h-5 w-5" strokeWidth={1.8} />
               </div>
               <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-                One brain, four surfaces
+                One brain, five surfaces
               </p>
               <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
                 Your program context travels with you.
               </h2>
               <p className="mx-auto mt-4 max-w-[68ch] text-pretty text-base leading-7 text-muted-foreground">
-                The in-app assistant, Slack bot, Claude, and ChatGPT all dispatch through the same
-                organization-scoped tool layer. Permissions and program data stay consistent,
-                whichever surface your team chooses.
+                The in-app chat agent, Slack bot, CLI, Claude, and ChatGPT all dispatch through the
+                same organization-scoped tool layer — and MCP connectors (Every is the first preset)
+                bring your business tools into the agent. Permissions and program data stay
+                consistent, whichever surface your team chooses.
               </p>
             </div>
 
-            <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {aiSurfaces.map(({ icon: Icon, title, body, eyebrow }) => (
                 <article key={title} className="rounded-xl border border-border bg-background p-5">
                   <div className="flex items-start justify-between gap-4">
