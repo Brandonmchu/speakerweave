@@ -61,6 +61,13 @@ class ApiTokenAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Under mcp<2 the SDK app's only route is "/", and the parent Mount
+        # hands "/mcp" through with an empty path — Starlette then 307s to
+        # "/mcp/" using the upstream Host header, which breaks strict clients
+        # on the brand domain. Normalize instead of redirecting.
+        if scope.get("path", "") in ("", "/mcp"):
+            scope = {**scope, "path": "/"}
+
         authorization = Headers(scope=scope).get("authorization", "")
         scheme, _, raw_token = authorization.partition(" ")
         resolved = None
