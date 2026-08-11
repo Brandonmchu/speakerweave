@@ -68,4 +68,17 @@ describe('NativeSelect', () => {
     expect(select.value).toBe('UTC')
     expect(screen.getByRole('option', { name: 'America/New_York' })).toBeInTheDocument()
   })
+
+  it('can size its wrapper independently for inline filter bars', () => {
+    render(
+      <NativeSelect
+        aria-label="Inline filter"
+        wrapperClassName="w-auto"
+        value="all"
+        options={[{ value: 'all', label: 'All' }]}
+      />
+    )
+
+    expect(screen.getByLabelText('Inline filter').parentElement).toHaveClass('relative', 'w-auto')
+  })
 })

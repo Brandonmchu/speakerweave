@@ -349,6 +349,7 @@ export function PublicSchedule() {
                 <div className="w-[10.5rem]">
                   <NativeSelect
                     aria-label="Filter by format"
+                    wrapperClassName="w-auto"
                     className="h-8 text-xs"
                     value={format}
                     onValueChange={setFormat}
@@ -363,6 +364,7 @@ export function PublicSchedule() {
                 <div className="w-[10.5rem]">
                   <NativeSelect
                     aria-label="Filter by room"
+                    wrapperClassName="w-auto"
                     className="h-8 text-xs"
                     value={room}
                     onValueChange={setRoom}

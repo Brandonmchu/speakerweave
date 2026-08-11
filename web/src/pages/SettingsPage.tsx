@@ -4,14 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
-  Code2,
   Copy,
   ExternalLink,
-  KeyRound,
   Loader2,
   Plus,
   PlugZap,
-  Settings,
   Trash2,
   X,
 } from 'lucide-react'
@@ -121,9 +118,21 @@ export function slugError(value: string): string | null {
   return null
 }
 
+const SETTINGS_SECTIONS = [
+  { id: 'settings-event', label: 'Event' },
+  { id: 'settings-vocabulary', label: 'Vocabulary' },
+  { id: 'settings-embed', label: 'Embed & share' },
+  { id: 'settings-mcp', label: 'MCP connectors' },
+  { id: 'settings-integrations', label: 'Integrations' },
+  { id: 'settings-api-tokens', label: 'API tokens' },
+] as const
+
+type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]['id']
+
 export function SettingsPage() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('settings-event')
   const eventsQuery = useQuery({
     queryKey: ['events'],
     queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
@@ -148,23 +157,81 @@ export function SettingsPage() {
     setSearchParams(next, { replace: true })
   }, [queryClient, searchParams, setSearchParams])
 
+  useEffect(() => {
+    if (!event || typeof IntersectionObserver === 'undefined') return
+    const root = document.querySelector<HTMLElement>('main')
+    const sections = SETTINGS_SECTIONS.map(({ id }) => document.getElementById(id)).filter(
+      (section): section is HTMLElement => Boolean(section)
+    )
+    if (!root || sections.length === 0) return
+
+    const visible = new Set<HTMLElement>()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const section = entry.target as HTMLElement
+          if (entry.isIntersecting) visible.add(section)
+          else visible.delete(section)
+        })
+        const next = [...visible].sort(
+          (a, b) => Math.abs(a.getBoundingClientRect().top) - Math.abs(b.getBoundingClientRect().top)
+        )[0]
+        if (next) setActiveSection(next.id as SettingsSectionId)
+      },
+      { root, rootMargin: '-72px 0px -65% 0px', threshold: [0, 0.01, 0.5] }
+    )
+    sections.forEach((section) => observer.observe(section))
+    return () => observer.disconnect()
+  }, [event, capabilitiesQuery.data?.assistant])
+
+  const scrollToSection = (id: SettingsSectionId) => {
+    const section = document.getElementById(id)
+    if (!section) return
+    setActiveSection(id)
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    window.history.replaceState(window.history.state, '', `#${id}`)
+  }
+
   if (!eventsQuery.isPending && !eventsQuery.error && !event) {
     return <Navigate to="/onboarding" replace />
   }
 
   return (
     <div className="px-4 py-6 md:px-8">
-      <header className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-          <Settings className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">
-            Event details and the vocabulary your program is built from.
-          </p>
-        </div>
+      <header>
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">
+          Event details and the vocabulary your program is built from.
+        </p>
       </header>
+
+      <nav
+        aria-label="Settings sections"
+        className="sticky top-0 z-30 mt-5 flex max-w-full items-center overflow-x-auto border-b border-border bg-card/95 backdrop-blur-sm scrollbar-hide"
+      >
+        {SETTINGS_SECTIONS.map((section) => {
+          const active = activeSection === section.id
+          return (
+            <a
+              key={section.id}
+              href={`#${section.id}`}
+              aria-current={active ? 'location' : undefined}
+              onClick={(event) => {
+                event.preventDefault()
+                scrollToSection(section.id)
+              }}
+              className={cn(
+                '-mb-px shrink-0 border-b px-3 py-2 text-[13px] transition-colors',
+                active
+                  ? 'border-foreground text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {section.label}
+            </a>
+          )
+        })}
+      </nav>
 
       {eventsQuery.error ? (
         <div className="mt-6 rounded-lg border border-border bg-card">
@@ -185,45 +252,65 @@ export function SettingsPage() {
           <Skeleton className="h-48 w-full max-w-2xl" />
         </div>
       ) : (
-        <div className="mt-6 max-w-3xl space-y-6">
+        <div className="mt-8 max-w-3xl space-y-10">
           <EventCard event={event} />
+          <section id="settings-vocabulary" className="scroll-mt-14">
+            <div className="border-b border-border pb-4">
+              <h2 className="text-[15px] font-medium text-foreground">Vocabulary</h2>
+              <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+                Tracks, rooms, formats, levels and tags used across your program.
+              </p>
+            </div>
+            <div className="mt-5 space-y-8">
+              <TaxonomySection
+                eventId={event.id}
+                kind="tracks"
+                title="Tracks"
+                description="Themes submissions are routed into. Colors carry through to the agenda."
+                extra="color"
+              />
+              <TaxonomySection
+                eventId={event.id}
+                kind="rooms"
+                title="Rooms"
+                description="Where sessions happen. Capacity powers over-capacity conflict checks."
+                extra="capacity"
+              />
+              <TaxonomySection
+                eventId={event.id}
+                kind="formats"
+                title="Formats"
+                description="Talk, workshop, panel — each with a default length."
+                extra="duration"
+              />
+              <TaxonomySection
+                eventId={event.id}
+                kind="levels"
+                title="Levels"
+                description="Audience experience level, shown on the public agenda."
+              />
+              <TaxonomySection
+                eventId={event.id}
+                kind="tags"
+                title="Tags"
+                description="Free-form labels for filtering and reporting."
+              />
+            </div>
+          </section>
           <EmbedSection event={event} />
-          <TaxonomySection
-            eventId={event.id}
-            kind="tracks"
-            title="Tracks"
-            description="Themes submissions are routed into. Colors carry through to the agenda."
-            extra="color"
-          />
-          <TaxonomySection
-            eventId={event.id}
-            kind="rooms"
-            title="Rooms"
-            description="Where sessions happen. Capacity powers over-capacity conflict checks."
-            extra="capacity"
-          />
-          <TaxonomySection
-            eventId={event.id}
-            kind="formats"
-            title="Formats"
-            description="Talk, workshop, panel — each with a default length."
-            extra="duration"
-          />
-          <TaxonomySection
-            eventId={event.id}
-            kind="levels"
-            title="Levels"
-            description="Audience experience level, shown on the public agenda."
-          />
-          <TaxonomySection
-            eventId={event.id}
-            kind="tags"
-            title="Tags"
-            description="Free-form labels for filtering and reporting."
-          />
           {capabilitiesQuery.data?.assistant === true && <MCPConnectorsCard />}
-          <AirtableSyncCard />
-          <SlackBotCard />
+          <section id="settings-integrations" className="scroll-mt-14">
+            <div className="border-b border-border pb-4">
+              <h2 className="text-[15px] font-medium text-foreground">Integrations</h2>
+              <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+                Keep external tools connected to the current workspace.
+              </p>
+            </div>
+            <div className="mt-5 space-y-8">
+              <AirtableSyncCard />
+              <SlackBotCard />
+            </div>
+          </section>
           <ApiTokensSection />
         </div>
       )}
@@ -341,11 +428,11 @@ function MCPConnectorsCard() {
 
   return (
     <>
-      <section className="rounded-lg border border-border bg-card" data-testid="mcp-connectors-card">
+      <section id="settings-mcp" className="scroll-mt-14" data-testid="mcp-connectors-card">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-foreground">MCP connectors</h2>
+              <h2 className="text-[15px] font-medium text-foreground">MCP connectors</h2>
               <Badge variant="muted">
                 {(query.data ?? []).filter((connector) => connector.connected).length} connected
               </Badge>
@@ -586,11 +673,11 @@ function AirtableSyncCard() {
   const syncError = sync.error instanceof Error ? sync.error.message : null
 
   return (
-    <section className="rounded-lg border border-border bg-card" data-testid="airtable-card">
+    <section data-testid="airtable-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-foreground">Airtable sync</h2>
+            <h2 className="text-[15px] font-medium text-foreground">Airtable sync</h2>
             {query.isPending ? (
               <Badge variant="muted">Checking</Badge>
             ) : configured ? (
@@ -722,11 +809,11 @@ function SlackBotCard() {
   const configured = Boolean(status.data?.configured)
 
   return (
-    <section className="rounded-lg border border-border bg-card" data-testid="slack-card">
+    <section className="border-t border-border pt-8" data-testid="slack-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-foreground">Slack bot</h2>
+            <h2 className="text-[15px] font-medium text-foreground">Slack bot</h2>
             {status.isPending ? (
               <Badge variant="muted">Checking environment</Badge>
             ) : configured ? (
@@ -903,13 +990,10 @@ function EmbedSection({ event }: { event: EventSummary }) {
   const iframeSnippet = embedIframeSnippet(event.slug, widget, options)
 
   return (
-    <section className="rounded-lg border border-border bg-card">
-      <div className="flex items-start gap-3 border-b border-border px-5 py-4">
-        <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-          <Code2 className="h-4 w-4" />
-        </div>
+    <section id="settings-embed" className="scroll-mt-14">
+      <div className="border-b border-border px-5 py-4">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Embed &amp; share</h2>
+          <h2 className="text-[15px] font-medium text-foreground">Embed &amp; share</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Your live schedule and speaker pages — share the links, or drop either one
             straight into your event website.
@@ -974,7 +1058,7 @@ function EmbedSection({ event }: { event: EventSummary }) {
               className="h-9 font-mono"
               value={accent}
               maxLength={6}
-              placeholder="4962E2"
+              placeholder="A85E3E"
               aria-invalid={accentError ? true : undefined}
               onChange={(event) => setAccent(event.target.value)}
             />
@@ -1125,22 +1209,17 @@ function ApiTokensSection() {
   const tokens = query.data ?? []
 
   return (
-    <section className="rounded-lg border border-border bg-card">
+    <section id="settings-api-tokens" className="scroll-mt-14">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-            <KeyRound className="h-4 w-4" />
-          </div>
-          <div>
-            <h2 className="text-base font-semibold text-foreground">API tokens</h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Keys for the public REST and MCP integration APIs.{' '}
-              <Link to="/developers" className="text-primary hover:underline">
-                Read the API docs
-              </Link>
-              .
-            </p>
-          </div>
+        <div>
+          <h2 className="text-[15px] font-medium text-foreground">API tokens</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Keys for the public REST and MCP integration APIs.{' '}
+            <Link to="/developers" className="text-primary hover:underline">
+              Read the API docs
+            </Link>
+            .
+          </p>
         </div>
         <Button size="sm" variant="secondary" onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4" />
@@ -1295,10 +1374,10 @@ function EventCard({ event }: { event: EventSummary }) {
   const set = (patch: Partial<EventDraft>) => setDraft({ ...draft, ...patch })
 
   return (
-    <section className="rounded-lg border border-border bg-card">
+    <section id="settings-event" className="scroll-mt-14">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Event</h2>
+          <h2 className="text-[15px] font-medium text-foreground">Event</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Used on public pages, calendar invites and every email you send.
           </p>
@@ -1521,9 +1600,9 @@ function TaxonomySection({
   const rows = query.data ?? []
 
   return (
-    <section className="rounded-lg border border-border bg-card">
+    <section>
       <div className="border-b border-border px-5 py-4">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 className="text-[15px] font-medium text-foreground">{title}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
       </div>
 

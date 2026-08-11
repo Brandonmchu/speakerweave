@@ -239,6 +239,7 @@ export function ContentLibrary() {
         <div className="w-44">
           <NativeSelect
             aria-label="Filter by type"
+            wrapperClassName="w-auto"
             className="bg-transparent px-0 pr-5 hover:bg-transparent"
             value={type}
             onValueChange={(v) => setType(v as ContentType | 'all')}
@@ -248,6 +249,7 @@ export function ContentLibrary() {
         <div className="w-44">
           <NativeSelect
             aria-label="Filter by status"
+            wrapperClassName="w-auto"
             className="bg-transparent px-0 pr-5 hover:bg-transparent"
             value={status}
             onValueChange={(v) => setStatus(v as ContentStatus | 'all')}

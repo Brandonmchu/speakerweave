@@ -2,16 +2,32 @@ import { cn } from '@/lib/utils'
 
 /**
  * The SpeakerWeave mark: an S ribbon woven through a diagonal thread —
- * over at the top crossing, under at the bottom. Ink tile version.
- * Size via className (e.g. "h-8 w-8"); the glyph scales with the tile.
+ * over at the top crossing, under at the bottom.
+ *
+ * Two tiles for two grounds: the ink tile in the app (warm paper behind it),
+ * and the gradient tile on the public site, whose ground is ink and would
+ * swallow the ink version. Same glyph either way. Size via className
+ * (e.g. "h-8 w-8"); the glyph scales with the tile.
  */
-export function BrandMark({ className }: { className?: string }) {
+export function BrandMark({
+  className,
+  tone = 'ink',
+}: {
+  className?: string
+  tone?: 'ink' | 'gradient'
+}) {
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg',
+        tone === 'ink' && 'bg-foreground',
         className,
       )}
+      style={
+        tone === 'gradient'
+          ? { backgroundImage: 'linear-gradient(145deg, #D9A38A, #A97FA8)' }
+          : undefined
+      }
       aria-hidden="true"
     >
       <svg viewBox="0 0 32 32" className="h-full w-full">

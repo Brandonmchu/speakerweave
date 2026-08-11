@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { BrandMark } from '@/ui/brand'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -326,6 +326,7 @@ function CreateEventDialog({
 export function AppShell() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [activeEventId, setActiveEventId] = useState(() => {
     try {
       return window.localStorage.getItem(ACTIVE_EVENT_KEY)
@@ -379,13 +380,31 @@ export function AppShell() {
   useEffect(() => {
     if (!agentEnabled) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return
+      if (!(event.metaKey || event.ctrlKey) || !['j', 'k'].includes(event.key.toLowerCase())) return
       event.preventDefault()
       setAgentOpen(!assistantOpen)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [agentEnabled, assistantOpen, setAgentOpen])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      searchInputRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Shared with Inbox via the same query key — one fetch, both consumers.
   const { data } = useQuery({
@@ -439,13 +458,13 @@ export function AppShell() {
   return (
     <div
       className={cn(
-        'grid h-[100dvh] w-full grid-cols-[minmax(0,1fr)] overflow-hidden bg-background',
+        'grid h-[100dvh] w-full grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background',
         agentEnabled && assistantOpen
           ? 'md:grid-cols-[220px_minmax(0,1fr)_420px]'
           : 'md:grid-cols-[220px_minmax(0,1fr)]',
       )}
     >
-      <aside className="hidden min-h-0 flex-col bg-navigation md:flex">
+      <aside className="hidden h-full min-h-0 flex-col overflow-hidden bg-navigation md:flex">
         <div className="flex h-[50px] shrink-0 items-center gap-2.5 px-5">
           <BrandMark className="h-5 w-5 rounded-md" />
           <span className="text-[14px] font-semibold tracking-[-0.02em] text-foreground">SpeakerWeave</span>
@@ -537,16 +556,18 @@ export function AppShell() {
         )}
       </aside>
 
-      <div className="flex min-w-0 flex-col bg-card">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card">
         <header className="flex h-[50px] shrink-0 items-center gap-3 bg-transparent px-4 md:px-7">
           <div className="relative flex w-full max-w-[300px] items-center">
             <input
-              disabled
+              ref={searchInputRef}
+              aria-label="Find or ask"
+              readOnly
               placeholder="Find or ask"
-              className="h-[30px] w-full rounded-lg border-0 bg-foreground/[0.04] pl-3 pr-12 text-[12.5px] text-foreground outline-none placeholder:text-placeholder disabled:cursor-not-allowed"
+              className="h-[30px] w-full rounded-lg border-0 bg-foreground/[0.04] pl-3 pr-12 text-[12.5px] text-foreground outline-none placeholder:text-placeholder focus-visible:ring-2 focus-visible:ring-primary/15"
             />
             <kbd className="pointer-events-none absolute right-2.5 hidden select-none font-mono text-[10px] text-placeholder sm:block">
-              ⌘K
+              /
             </kbd>
           </div>
 
@@ -572,7 +593,7 @@ export function AppShell() {
                   type="button"
                   data-testid="ask-agent"
                   data-chat-toggle="true"
-                  title="Ask SpeakerWeave (⌘J)"
+                  title="Ask SpeakerWeave (⌘K)"
                   aria-label="Ask SpeakerWeave"
                   aria-pressed={assistantOpen}
                   onClick={() => setAgentOpen(!assistantOpen)}

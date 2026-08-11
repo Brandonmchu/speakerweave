@@ -357,6 +357,7 @@ export function Directory() {
               <Label htmlFor="crm-filter-company">Company</Label>
               <NativeSelect
                 id="crm-filter-company"
+                wrapperClassName="w-auto"
                 className="w-auto min-w-[110px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.company ?? ''}
                 placeholder="Any company"
@@ -368,6 +369,7 @@ export function Directory() {
               <Label htmlFor="crm-filter-title">Job title</Label>
               <NativeSelect
                 id="crm-filter-title"
+                wrapperClassName="w-auto"
                 className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.title ?? ''}
                 placeholder="Any title"
@@ -379,6 +381,7 @@ export function Directory() {
               <Label htmlFor="crm-filter-tag">Tag</Label>
               <NativeSelect
                 id="crm-filter-tag"
+                wrapperClassName="w-auto"
                 className="w-auto min-w-[90px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.tag ?? ''}
                 placeholder="Any tag"
@@ -390,6 +393,7 @@ export function Directory() {
               <Label htmlFor="crm-filter-stage">Pipeline stage</Label>
               <NativeSelect
                 id="crm-filter-stage"
+                wrapperClassName="w-auto"
                 className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.stage ?? ''}
                 placeholder="Any stage"
@@ -404,6 +408,7 @@ export function Directory() {
               <Label htmlFor="crm-filter-event">Event</Label>
               <NativeSelect
                 id="crm-filter-event"
+                wrapperClassName="w-auto"
                 className="w-auto min-w-[100px] bg-transparent px-0 pr-5 hover:bg-transparent"
                 value={filters.event_id ?? ''}
                 placeholder="Any event"

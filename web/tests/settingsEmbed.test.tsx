@@ -74,7 +74,7 @@ const origin = () => window.location.origin
 describe('Settings → Embed & share (EMB-15)', () => {
   it('shows the public schedule and speaker URLs for this event', async () => {
     renderSettings()
-    expect(await screen.findByText('Embed & share')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Embed & share' })).toBeInTheDocument()
 
     expect(screen.getByTestId('public-url-schedule')).toHaveTextContent(
       `${origin()}/e/ai-builders-summit/schedule`
@@ -154,7 +154,7 @@ describe('Settings → Embed & share (EMB-15)', () => {
 
   it('offers an open-in-new-tab link beside each public URL', async () => {
     renderSettings()
-    await screen.findByText('Embed & share')
+    await screen.findByRole('heading', { name: 'Embed & share' })
 
     const link = screen.getByRole('link', { name: 'Open schedule' })
     expect(link).toHaveAttribute('href', `${origin()}/e/ai-builders-summit/schedule`)

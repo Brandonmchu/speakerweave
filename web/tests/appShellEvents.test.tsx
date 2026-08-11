@@ -102,6 +102,15 @@ describe('AppShell event switcher', () => {
     expect(screen.queryByText('Oct 12 – Oct 14, 2026')).not.toBeInTheDocument()
   })
 
+  it('focuses Find or ask with /', async () => {
+    renderShell()
+
+    const search = await screen.findByLabelText('Find or ask')
+    expect(search).not.toHaveFocus()
+    fireEvent.keyDown(window, { key: '/' })
+    expect(search).toHaveFocus()
+  })
+
   it('creates a dated event from the switcher and selects it', async () => {
     renderShell()
     const switcher = await screen.findByRole('button', { name: /DaisConf/ })

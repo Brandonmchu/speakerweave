@@ -815,6 +815,7 @@ export function Inbox() {
               <span>Sort</span>
               <NativeSelect
                 aria-label="Sort submissions"
+                wrapperClassName="w-auto"
                 value={sortKey}
                 onValueChange={(value) => changeSort(value as SortKey)}
                 options={SORT_OPTIONS}
@@ -825,6 +826,7 @@ export function Inbox() {
               <span>Track</span>
               <NativeSelect
                 aria-label="Filter by track"
+                wrapperClassName="w-auto"
                 value={filterTrack}
                 onValueChange={changeFilterTrack}
                 options={[
@@ -838,6 +840,7 @@ export function Inbox() {
               <span>Status</span>
               <NativeSelect
                 aria-label="Filter by status"
+                wrapperClassName="w-auto"
                 value={filterStatus}
                 onValueChange={changeFilterStatus}
                 options={[

@@ -105,4 +105,48 @@ describe('agent capability gate', () => {
     expect(screen.getByText('Manage in Settings')).toBeInTheDocument()
     expect(window.localStorage.getItem('sw.chat.open')).toBe('true')
   })
+
+  it('opens with Command-K and still accepts Control-J', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/api/events')) return jsonResponse({ events: [CURRENT_EVENT] })
+        if (url.endsWith('/api/agent/capabilities')) {
+          return jsonResponse({
+            assistant: true,
+            provider: 'openai',
+            mcp: { available: true, connectors_connected: 0 },
+          })
+        }
+        if (url.endsWith('/api/agent/integrations/mcp')) return jsonResponse({ connectors: [] })
+        if (url.endsWith('/api/agent/threads')) return jsonResponse({ threads: [] })
+        return jsonResponse({}, 404)
+      }),
+    )
+    renderShell()
+    await screen.findByTestId('ask-agent')
+
+    const openEvent = new KeyboardEvent('keydown', {
+      key: 'k',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(window, openEvent)
+    expect(openEvent.defaultPrevented).toBe(true)
+    expect(await screen.findByRole('complementary', { name: 'Ask SpeakerWeave' })).toBeVisible()
+
+    const closeEvent = new KeyboardEvent('keydown', {
+      key: 'j',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    fireEvent(window, closeEvent)
+    expect(closeEvent.defaultPrevented).toBe(true)
+    await waitFor(() =>
+      expect(screen.queryByRole('complementary', { name: 'Ask SpeakerWeave' })).not.toBeInTheDocument()
+    )
+  })
 })

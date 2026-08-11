@@ -284,6 +284,7 @@ export function Speakers() {
           <NativeSelect
             aria-label="Filter by onboarding status"
             data-testid="filter-onboarding"
+            wrapperClassName="w-auto"
             value={onboardingFilter}
             onValueChange={(v) => setOnboardingFilter(v as OnboardingFilter)}
             className="w-auto min-w-[160px]"
@@ -296,6 +297,7 @@ export function Speakers() {
           <NativeSelect
             aria-label="Filter by invite status"
             data-testid="filter-invite"
+            wrapperClassName="w-auto"
             value={inviteFilter}
             onValueChange={(v) => setInviteFilter(v as InviteFilter)}
             className="w-auto min-w-[150px]"
@@ -308,6 +310,7 @@ export function Speakers() {
           <NativeSelect
             aria-label="Filter by speaker status"
             data-testid="filter-speaker-status"
+            wrapperClassName="w-auto"
             value={workflowFilter}
             onValueChange={(v) => setWorkflowFilter(v as WorkflowFilter)}
             className="w-auto min-w-[150px]"

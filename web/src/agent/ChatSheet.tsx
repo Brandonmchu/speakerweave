@@ -162,7 +162,7 @@ export function AgentFeature({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'j') return
+      if (!(event.metaKey || event.ctrlKey) || !['j', 'k'].includes(event.key.toLowerCase())) return
       event.preventDefault()
       onOpenChange(!open)
     }

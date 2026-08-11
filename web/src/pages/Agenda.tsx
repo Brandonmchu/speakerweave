@@ -19,18 +19,12 @@ import {
   AlertTriangle,
   CalendarDays,
   CalendarPlus,
-  CalendarRange,
   CheckCircle2,
-  Clock,
   Columns3,
   ExternalLink,
   Inbox,
-  List,
-  RotateCcw,
-  Send,
   Wand2,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 
 import { ApiError, apiGet, unwrapList, type EventSummary } from '@/lib/api'
@@ -75,6 +69,7 @@ import {
   type SpikeSession,
 } from '@/lib/schedule'
 import { Button } from '@/ui/button'
+import { GradientAvatar } from '@/ui/avatar'
 import { EmptyState } from '@/ui/empty-state'
 import { Skeleton } from '@/ui/skeleton'
 import { toast } from '@/ui/use-toast'
@@ -99,7 +94,6 @@ const SLOT_PX = 24
 
 interface Speaker {
   name: string
-  initials: string
 }
 
 type SpeakerRegistry = Record<string, Speaker>
@@ -209,10 +203,7 @@ function speakerRegistry(sessions: AgendaSession[]): SpeakerRegistry {
       const first = (speaker.first_name ?? '').trim()
       const last = (speaker.last_name ?? '').trim()
       const name = [first, last].filter(Boolean).join(' ') || speaker.contact_id
-      const initials =
-        `${first.slice(0, 1)}${last.slice(0, 1)}`.toUpperCase() ||
-        speaker.contact_id.slice(0, 2).toUpperCase()
-      registry[speaker.contact_id] = { name, initials }
+      registry[speaker.contact_id] = { name }
     }
   }
   return registry
@@ -290,23 +281,24 @@ interface Preview {
 /* Card                                                                        */
 /* -------------------------------------------------------------------------- */
 
-function SpeakerChips({ session, className }: { session: SpikeSession; className?: string }) {
+function SpeakerChips({
+  session,
+  size = 18,
+  className,
+}: {
+  session: SpikeSession
+  size?: number
+  className?: string
+}) {
   const speakers = useContext(SpeakersContext)
-  const colors = palette(session.color)
   return (
     <div className={cn('flex items-center gap-1', className)}>
       {session.speakerIds.map((id) => {
         const speaker = speakers[id]
+        const name = speaker?.name ?? id
         return (
-          <span
-            key={id}
-            title={speaker?.name ?? id}
-            className={cn(
-              'flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none ring-1',
-              colors.chip
-            )}
-          >
-            {speaker?.initials ?? id.slice(0, 2).toUpperCase()}
+          <span key={id} title={name} className="inline-flex">
+            <GradientAvatar id={id} name={name} size={size} />
           </span>
         )
       })}
@@ -322,6 +314,8 @@ function SessionCard({
   session,
   conflicted,
   dense,
+  singleSlot,
+  tray,
   dragging,
   className,
 }: {
@@ -329,6 +323,10 @@ function SessionCard({
   conflicted?: boolean
   /** 30-minute cards get one line of title and an inline meta row. */
   dense?: boolean
+  /** One grid slot has no room for a second line. */
+  singleSlot?: boolean
+  /** The tray uses a roomier two-line card with a shared person avatar. */
+  tray?: boolean
   dragging?: boolean
   className?: string
 }) {
@@ -338,41 +336,49 @@ function SessionCard({
   return (
     <div
       className={cn(
-        'relative flex h-full overflow-hidden rounded-md border transition-shadow',
-        colors.surface,
-        conflicted && 'ring-2 ring-destructive ring-offset-1 ring-offset-card',
+        'relative flex h-full overflow-hidden rounded-[7px] border border-border bg-card shadow-soft transition-shadow',
+        conflicted && 'border-destructive/60',
         dragging && 'shadow-lifted',
         className
       )}
     >
-      <div className={cn('w-1 shrink-0', colors.bar)} />
-      <div className={cn('flex min-w-0 flex-1 flex-col justify-center gap-0.5 px-2 py-1.5')}>
-        <div className="flex items-start gap-1.5">
+      <div className={cn('w-[3px] shrink-0', colors.bar)} />
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 flex-col justify-center overflow-hidden',
+          tray ? 'gap-1 px-2.5 py-2.5 pr-16' : 'gap-0.5 px-2 py-1'
+        )}
+      >
+        <div className="flex min-w-0 items-start gap-1.5 overflow-hidden">
+          {conflicted && (
+            <span
+              aria-label="Has a conflict"
+              className="mt-1 h-[5px] w-[5px] shrink-0 rounded-full bg-destructive"
+            />
+          )}
           <p
             className={cn(
-              'min-w-0 flex-1 text-[12px] font-semibold leading-tight',
-              colors.title,
-              dense ? 'truncate' : 'line-clamp-2'
+              'min-w-0 flex-1 font-medium text-foreground',
+              tray
+                ? 'line-clamp-2 break-words text-[12.5px] leading-[1.25]'
+                : 'text-[12px] leading-tight',
+              !tray && (singleSlot || dense ? 'truncate' : 'line-clamp-2')
             )}
           >
             {session.title}
           </p>
-          {conflicted && (
-            <span
-              aria-label="Has a conflict"
-              className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-destructive ring-2 ring-destructive/25"
-            />
-          )}
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className={cn('truncate text-[11px] leading-none tabular-nums', colors.meta)}>
+        {!singleSlot && (
+          <div className="flex min-w-0 items-center justify-between gap-2 overflow-hidden">
+            <span className="truncate font-mono text-[10.5px] leading-none text-muted-foreground">
             {timing}
-            {isScheduled(session) && (
+            {isScheduled(session) && !tray && (
               <span className="ml-1 opacity-70">· {formatDuration(session.durationMin)}</span>
             )}
-          </span>
-          <SpeakerChips session={session} className="shrink-0" />
-        </div>
+            </span>
+            <SpeakerChips session={session} size={tray ? 20 : 18} className="shrink-0" />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -387,6 +393,8 @@ function DraggableCard({
   conflicted,
   style,
   dense,
+  singleSlot,
+  tray,
   className,
   selected,
   onSelect,
@@ -396,6 +404,8 @@ function DraggableCard({
   conflicted: boolean
   style?: React.CSSProperties
   dense?: boolean
+  singleSlot?: boolean
+  tray?: boolean
   className?: string
   /** Armed for click-to-assign — draws the blue selection ring. */
   selected?: boolean
@@ -431,7 +441,13 @@ function DraggableCard({
         className
       )}
     >
-      <SessionCard session={session} conflicted={conflicted} dense={dense} />
+      <SessionCard
+        session={session}
+        conflicted={conflicted}
+        dense={dense}
+        singleSlot={singleSlot}
+        tray={tray}
+      />
       {action}
     </div>
   )
@@ -500,7 +516,7 @@ const SlotCell = memo(function SlotCell({
       style={{ height: SLOT_PX }}
       className={cn(
         'border-t outline-none',
-        slot % slotsPerHour === 0 ? 'border-border' : 'border-border/45',
+        slot % slotsPerHour === 0 ? 'border-foreground/[0.07]' : 'border-foreground/[0.02]',
         selecting &&
           'cursor-pointer hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary'
       )}
@@ -604,6 +620,7 @@ function RoomColumn({
               session={session}
               conflicted={conflictedIds.has(session.id)}
               dense={session.durationMin <= 30 || lanes > 1}
+              singleSlot={slotsFor(grid, session.durationMin) === 1}
               className="pointer-events-auto absolute z-10"
               selected={selectedId === session.id}
               onSelect={() => onSelect(session.id)}
@@ -668,14 +685,13 @@ function UnscheduledPanel({
       ref={setNodeRef}
       data-testid="unscheduled-panel"
       className={cn(
-        'flex flex-col rounded-lg border bg-card transition-colors',
-        isOver && active ? 'border-primary bg-primary-subtle' : 'border-border'
+        'flex flex-col rounded-lg transition-colors',
+        isOver && active && 'bg-primary/5'
       )}
     >
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-        <Inbox className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold text-foreground">Unscheduled</span>
-        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+      <div className="flex items-center gap-2 border-b border-border px-1 pb-2.5">
+        <span className="text-[13px] font-medium text-foreground">Unscheduled</span>
+        <span className="ml-auto font-mono text-[10.5px] text-placeholder">
           {sessions.length}
         </span>
       </div>
@@ -691,7 +707,8 @@ function UnscheduledPanel({
               <DraggableCard
                 session={session}
                 conflicted={conflictedIds.has(session.id)}
-                className="h-[54px]"
+                className="h-[78px]"
+                tray
                 selected={selectedId === session.id}
                 onSelect={() => onSelect(session.id)}
                 action={
@@ -708,13 +725,12 @@ function UnscheduledPanel({
                       onSelect(session.id)
                     }}
                     className={cn(
-                      'absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none transition-colors',
+                      'absolute right-2 top-1/2 z-10 inline-flex h-6 -translate-y-1/2 items-center rounded-[7px] px-2.5 text-[11px] font-medium leading-none transition-colors',
                       selectedId === session.id
-                        ? 'border-foreground bg-foreground text-white'
-                        : 'border-border bg-card/90 text-muted-foreground hover:border-primary hover:text-primary'
+                        ? 'bg-foreground text-white'
+                        : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground'
                     )}
                   >
-                    <CalendarPlus className="h-3 w-3" />
                     {selectedId === session.id ? 'Selected' : 'Place'}
                   </button>
                 }
@@ -743,11 +759,11 @@ function ConflictsPanel({
       <div
         data-testid="conflicts-panel"
         data-conflict-count={0}
-        className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/10 px-3 py-2"
+        className="flex items-center gap-2 rounded-[8px] border border-border bg-foreground/[0.028] px-3 py-2 text-[13px]"
       >
-        <CheckCircle2 className="h-4 w-4 shrink-0 text-success-strong" />
-        <span className="text-sm font-medium text-success-strong">No conflicts</span>
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-success" />
+        <span className="font-medium text-foreground">No conflicts</span>
+        <span className="truncate text-[12.5px] text-muted-foreground">
           Every scheduled session has its own room and no speaker is in two places at once.
         </span>
       </div>
@@ -758,11 +774,11 @@ function ConflictsPanel({
     <div
       data-testid="conflicts-panel"
       data-conflict-count={conflicts.length}
-      className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2"
+      className="rounded-[8px] border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px]"
     >
       <div className="flex items-center gap-2">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-        <span className="text-sm font-semibold text-destructive-strong">
+        <span className="h-[5px] w-[5px] shrink-0 rounded-full bg-destructive" />
+        <span className="font-medium text-foreground">
           Conflicts ({conflicts.length})
         </span>
       </div>
@@ -770,9 +786,9 @@ function ConflictsPanel({
         {conflicts.map((conflict, i) => (
           <li
             key={`${conflict.type}-${conflict.sessionIds.join('-')}-${i}`}
-            className="flex flex-wrap items-baseline gap-x-2 pl-6 text-xs"
+            className="flex flex-wrap items-baseline gap-x-2 pl-[13px] text-[12px]"
           >
-            <span className="font-medium text-destructive-strong">{conflict.detail}</span>
+            <span className="font-medium text-foreground">{conflict.detail}</span>
             <span className="truncate text-muted-foreground">
               {titles.get(conflict.sessionIds[0])} ↔ {titles.get(conflict.sessionIds[1])}
             </span>
@@ -793,12 +809,12 @@ function ConflictsPanel({
  */
 type AgendaView = 'list' | 'day' | 'week' | 'rooms' | 'conflicts'
 
-const VIEW_TABS: { id: AgendaView; label: string; Icon: LucideIcon }[] = [
-  { id: 'list', label: 'List', Icon: List },
-  { id: 'day', label: 'Day', Icon: CalendarDays },
-  { id: 'week', label: 'Week', Icon: CalendarRange },
-  { id: 'rooms', label: 'Rooms', Icon: Columns3 },
-  { id: 'conflicts', label: 'Conflicts', Icon: AlertTriangle },
+const VIEW_TABS: { id: AgendaView; label: string }[] = [
+  { id: 'list', label: 'List' },
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'rooms', label: 'Rooms' },
+  { id: 'conflicts', label: 'Conflicts' },
 ]
 
 function ViewTabs({
@@ -814,9 +830,9 @@ function ViewTabs({
     <div
       role="tablist"
       aria-label="Agenda views"
-      className="mt-5 flex items-center gap-1 overflow-x-auto border-b border-border"
+      className="mt-5 flex items-center overflow-x-auto border-b border-border"
     >
-      {VIEW_TABS.map(({ id, label, Icon }) => {
+      {VIEW_TABS.map(({ id, label }) => {
         const active = value === id
         return (
           <button
@@ -827,16 +843,15 @@ function ViewTabs({
             data-testid={`agenda-tab-${id}`}
             onClick={() => onChange(id)}
             className={cn(
-              '-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors',
+              '-mb-px flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[13px] font-normal transition-colors',
               active
-                ? 'border-primary text-primary'
+                ? 'border-foreground text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
           >
-            <Icon className="h-4 w-4" />
             {label}
             {id === 'conflicts' && conflictCount > 0 && (
-              <span className="ml-0.5 rounded-full bg-destructive/10 px-1.5 py-0.5 text-2xs font-semibold tabular-nums text-destructive">
+              <span className="font-mono text-[10.5px] text-placeholder">
                 {conflictCount}
               </span>
             )}
@@ -850,8 +865,7 @@ function ViewTabs({
 /** Grey helper strip that tells day/week they are riding on the room grid. */
 function ViewNote({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-      <CalendarDays className="h-4 w-4 shrink-0" />
+    <div className="mt-4 rounded-[8px] border border-border bg-foreground/[0.028] px-3 py-2 text-[12.5px] text-muted-foreground">
       {children}
     </div>
   )
@@ -920,7 +934,7 @@ function DaySwitcher({
               'flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
               active
                 ? 'bg-foreground text-white'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
             <span className="text-2xs font-semibold uppercase tracking-wide opacity-75">
@@ -941,12 +955,12 @@ function DaySwitcher({
           className={cn(
             'flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
             value === OUTSIDE_DAY
-              ? 'bg-destructive text-destructive-foreground shadow-soft'
-              : 'text-destructive hover:bg-destructive/10'
+              ? 'bg-foreground text-white'
+              : 'text-muted-foreground hover:text-foreground'
           )}
         >
-          <AlertTriangle className="h-3.5 w-3.5" />
-          Outside event dates ({outsideCount})
+          Outside event dates{' '}
+          <span className="font-mono text-[10.5px] opacity-70">({outsideCount})</span>
         </button>
       )}
     </div>
@@ -1025,9 +1039,8 @@ function TzNote({ hint }: { hint: string }) {
   return (
     <p
       data-testid="agenda-tz-note"
-      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+      className="font-mono text-[11px] text-muted-foreground"
     >
-      <Clock className="h-3.5 w-3.5 shrink-0" />
       Times shown in {hint}
     </p>
   )
@@ -1074,20 +1087,20 @@ function ListView({
               .join(', ')
             return (
               <li key={session.id} className="flex items-center gap-4 px-5 py-3">
-                <div className="w-24 shrink-0 text-sm font-medium tabular-nums text-foreground">
+                <div className="w-24 shrink-0 font-mono text-[11px] text-foreground">
                   {formatRange(session)}
                 </div>
                 <span className={cn('h-9 w-1 shrink-0 rounded-full', colors.bar)} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-semibold text-foreground">{session.title}</p>
+                    <p className="truncate text-[13px] font-medium text-foreground">{session.title}</p>
                     {conflicted && (
-                      <span className="shrink-0 rounded-full bg-destructive/10 px-1.5 py-0.5 text-2xs font-semibold text-destructive">
-                        Conflict
+                      <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground">
+                        <span className="h-[5px] w-[5px] rounded-full bg-destructive" /> Conflict
                       </span>
                     )}
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate font-mono text-[10.5px] text-muted-foreground">
                     {rooms.get(session.roomId) ?? session.roomId} · {formatDuration(session.durationMin)}
                     {speakers && ` · ${speakers}`}
                   </p>
@@ -1944,12 +1957,12 @@ export function Agenda() {
               <>
                 {/* Room header. Sticks to the top of the app shell's scroll area so
                     the column you are dropping into stays labelled. */}
-                <div className="sticky top-0 z-30 flex border-b border-border bg-card">
+                <div className="sticky top-0 z-30 flex border-b border-border bg-background">
                   <div className="w-14 shrink-0 border-r border-border" />
                   {rooms.map((room) => (
                     <div key={room.id} className="min-w-0 flex-1 border-l border-border px-3 py-2 first:border-l-0">
-                      <div className="truncate text-sm font-semibold text-foreground">{room.name}</div>
-                      <div className="text-xs text-muted-foreground tabular-nums">
+                      <div className="truncate text-[13px] font-medium text-foreground">{room.name}</div>
+                      <div className="font-mono text-[11px] text-muted-foreground">
                         {room.capacity == null ? 'Capacity —' : `Capacity ${room.capacity}`}
                       </div>
                     </div>
@@ -1967,7 +1980,7 @@ export function Agenda() {
                     {hours.map((minutes) => (
                       <div
                         key={minutes}
-                        className="absolute right-2 -translate-y-1/2 text-2xs font-medium tabular-nums text-muted-foreground"
+                        className="absolute right-2 -translate-y-1/2 font-mono text-[10.5px] text-muted-foreground"
                         style={{ top: ((minutes - grid.dayStartMin) / grid.slotMinutes) * SLOT_PX }}
                       >
                         {formatMinutes(minutes)}
@@ -2014,24 +2027,19 @@ export function Agenda() {
       >
         <div className="px-4 py-6 md:px-8">
           <header className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-lg bg-primary-subtle text-primary">
-                <CalendarDays className="h-5 w-5" />
-              </div>
-              <div>
-                <h1 className="page-title">Agenda</h1>
-                <p className="page-subtitle">
-                  Drag a session onto the grid{eventName ? ` for ${eventName}` : ''}, or hit Place
-                  and click a slot. Conflicts are flagged live, before you drop.
-                </p>
-              </div>
+            <div>
+              <h1 className="page-title">Agenda</h1>
+              <p className="page-subtitle">
+                Drag a session onto the grid{eventName ? ` for ${eventName}` : ''}, or hit Place
+                and click a slot. Conflicts are flagged live, before you drop.
+              </p>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="hidden text-sm text-muted-foreground sm:inline tabular-nums">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="hidden font-mono text-[10.5px] text-muted-foreground sm:inline">
                 {scheduledCount} scheduled · {unscheduled.length} unscheduled
               </span>
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={!eventId || agendaQuery.isFetching}
                 onClick={() => {
@@ -2040,20 +2048,19 @@ export function Agenda() {
                   endDrag()
                 }}
               >
-                <RotateCcw className="h-4 w-4" />
                 Refresh
               </Button>
               {/* The one-action fill. Only shown while there is something left
                   to place — an empty tray makes it a button that does nothing. */}
               {unscheduled.length > 0 && (
                 <Button
+                  variant="ghost"
                   size="sm"
                   data-testid="auto-place"
                   disabled={!eventId || autoPlace.isPending}
                   title="Schedule every remaining session into the first conflict-free slot"
                   onClick={() => autoPlace.mutate()}
                 >
-                  <Wand2 className="h-4 w-4" />
                   {autoPlace.isPending
                     ? 'Placing…'
                     : `Auto-place remaining (${unscheduled.length})`}
@@ -2065,7 +2072,6 @@ export function Agenda() {
                 disabled={!eventId || sessions.length === 0 || publish.isPending}
                 onClick={() => publish.mutate()}
               >
-                <Send className="h-4 w-4" />
                 {publish.isPending ? 'Publishing…' : 'Publish schedule'}
               </Button>
             </div>
@@ -2177,6 +2183,7 @@ export function Agenda() {
             <SessionCard
               session={activeSession}
               dense={activeSession.durationMin <= 30}
+              singleSlot={slotsFor(grid, activeSession.durationMin) === 1}
               dragging
               conflicted={(preview?.conflicts.length ?? 0) > 0}
               className="cursor-grabbing"

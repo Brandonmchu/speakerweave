@@ -27,6 +27,8 @@ type NativeSelectProps = Omit<
   React.SelectHTMLAttributes<HTMLSelectElement>,
   'onChange' | 'value'
 > & {
+  /** Override the sizing of the positioning wrapper without changing form defaults. */
+  wrapperClassName?: string
   value?: string
   onValueChange?: (value: string) => void
   /** Options to render. Omit and pass `<option>` children for full control. */
@@ -39,11 +41,23 @@ type NativeSelectProps = Omit<
 }
 
 const NativeSelect = React.forwardRef<HTMLSelectElement, NativeSelectProps>(
-  ({ className, value, onValueChange, options, placeholder, children, ...props }, ref) => {
+  (
+    {
+      className,
+      wrapperClassName,
+      value,
+      onValueChange,
+      options,
+      placeholder,
+      children,
+      ...props
+    },
+    ref
+  ) => {
     const showingPlaceholder = placeholder != null && (value === undefined || value === '')
 
     return (
-      <div className="relative w-full">
+      <div className={cn('relative w-full', wrapperClassName)}>
         <select
           ref={ref}
           value={value ?? ''}
