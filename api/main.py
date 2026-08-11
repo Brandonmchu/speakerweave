@@ -143,6 +143,17 @@ app.include_router(slack_router)
 if mcp_app is not None:
     app.mount("/mcp", mcp_app, name="mcp")
 
+    @app.middleware("http")
+    async def _mcp_exact_path(request, call_next):
+        # Bare "/mcp" misses the Mount regex, and Starlette's redirect_slashes
+        # 307s to an absolute URL built from the upstream Host header — which
+        # breaks strict MCP clients behind the brand-domain proxy. Normalize
+        # the path before routing instead of redirecting.
+        if request.scope.get("path") == "/mcp":
+            request.scope["path"] = "/mcp/"
+            request.scope["raw_path"] = b"/mcp/"
+        return await call_next(request)
+
 
 if __name__ == "__main__":
     import uvicorn
