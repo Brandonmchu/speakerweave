@@ -1,0 +1,54 @@
+{
+  "projectId": "106d77fa-04a6-4a27-b351-c4c2b4d93b67",
+  "shape": "package",
+  "pkg": "dais-web",
+  "globalName": "SpeakerWeaveUI",
+  "srcDir": "src/ui",
+  "tsconfig": "tsconfig.app.json",
+  "cssEntry": ".ds-css/ds.css",
+  "buildCmd": "npx tailwindcss -c tailwind.design-sync.cjs -i src/index.css -o .ds-css/ds.css --minify",
+  "componentSrcMap": {
+    "Badge": "src/ui/badge.tsx",
+    "Button": "src/ui/button.tsx",
+    "Card": "src/ui/card.tsx",
+    "Checkbox": "src/ui/checkbox.tsx",
+    "Dialog": "src/ui/dialog.tsx",
+    "DropdownMenu": "src/ui/dropdown-menu.tsx",
+    "EmptyState": "src/ui/empty-state.tsx",
+    "Input": "src/ui/input.tsx",
+    "Label": "src/ui/label.tsx",
+    "NativeSelect": "src/ui/native-select.tsx",
+    "Select": "src/ui/select.tsx",
+    "Separator": "src/ui/separator.tsx",
+    "Skeleton": "src/ui/skeleton.tsx",
+    "Table": "src/ui/table.tsx",
+    "Tabs": "src/ui/tabs.tsx",
+    "Textarea": "src/ui/textarea.tsx",
+    "Toaster": "src/ui/toaster.tsx"
+  },
+  "extraFonts": [
+    "../.design-sync/fonts/fonts.css"
+  ],
+  "overrides": {
+    "Select": {
+      "cardMode": "single",
+      "primaryStory": "Closed",
+      "viewport": "420x360"
+    },
+    "Dialog": {
+      "cardMode": "single",
+      "primaryStory": "Open",
+      "viewport": "680x520"
+    },
+    "DropdownMenu": {
+      "cardMode": "single",
+      "primaryStory": "Open",
+      "viewport": "420x420"
+    },
+    "Toaster": {
+      "cardMode": "single",
+      "viewport": "480x320"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

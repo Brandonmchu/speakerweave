@@ -1,0 +1,15 @@
+/* Brand-stack fonts (OFL): variable weight, latin subset (fontsource). */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./inter-var.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./geist-var.woff2') format('woff2-variations');
+}

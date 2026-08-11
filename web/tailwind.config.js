@@ -17,6 +17,12 @@ export default {
       '2xl': '1536px',
     },
     extend: {
+      // Tailwind v3's default aria variant map has no `invalid` key, so
+      // aria-invalid:* classes in the ui kit silently compile to nothing
+      // without this.
+      aria: {
+        invalid: 'invalid="true"',
+      },
       fontFamily: {
         sans: [
           'Inter',

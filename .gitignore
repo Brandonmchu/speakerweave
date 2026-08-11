@@ -9,3 +9,11 @@ dist/
 *.local
 # dev mailer output (.eml files written when RESEND_API_KEY is unset)
 outbox_dev/
+
+# design-sync machine state
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+web/.ds-css/
