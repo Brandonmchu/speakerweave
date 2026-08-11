@@ -132,17 +132,18 @@ describe('Home landing', () => {
     }
   })
 
-  it('shows four AI surfaces and copyable MCP configurations for this origin', async () => {
+  it('shows five AI surfaces and copyable MCP configurations for this origin', async () => {
     renderHome()
 
     const aiApps = screen.getByTestId('ai-apps-section')
-    expect(aiApps).toHaveTextContent('One brain, four surfaces')
+    expect(aiApps).toHaveTextContent('One brain, five surfaces')
     expect(
       within(aiApps).getByRole('heading', { name: 'Your program context travels with you.' }),
     ).toBeInTheDocument()
     for (const surface of [
-      'In-app Ask assistant',
+      'In-app chat agent',
       'Slack bot',
+      'sw CLI',
       'Claude (MCP)',
       'ChatGPT (MCP)',
     ]) {
@@ -153,7 +154,7 @@ describe('Home landing', () => {
     expect(aiApps).toHaveTextContent('Authorize when prompted with an API token from Settings')
     expect(aiApps).toHaveTextContent('Power-user MCP config')
     expect(aiApps).toHaveTextContent(
-      'The in-app assistant, Slack bot, Claude, and ChatGPT all dispatch through the same organization-scoped tool layer',
+      'The in-app chat agent, Slack bot, CLI, Claude, and ChatGPT all dispatch through the',
     )
     expect(within(aiApps).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
