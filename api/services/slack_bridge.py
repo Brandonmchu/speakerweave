@@ -277,8 +277,8 @@ async def set_thinking_status(channel_id: str, thread_ts: str | None) -> None:
             {"channel_id": channel_id, "thread_ts": thread_ts, "status": "is thinking..."},
             timeout_seconds=5.0,
         )
-    except Exception:
-        logger.debug("slack bridge: setStatus unavailable", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 - UX polish, never fails the turn
+        logger.info("slack bridge: assistant status ping failed (non-fatal): %s", exc)
 
 
 async def handle_assistant_thread_started(event: dict[str, Any], org_id: str) -> None:
@@ -430,6 +430,12 @@ async def handle_event(
 ) -> None:
     if not await claim_event(event_id):
         return
+    logger.info(
+        "slack bridge: handling %s in %s (event_id=%s)",
+        event.get("type"),
+        event.get("channel"),
+        event_id,
+    )
     channel_id = str(event.get("channel") or "")
     message_ts = str(event.get("ts") or "")
     slack_user_id = str(event.get("user") or "")
@@ -453,10 +459,9 @@ async def handle_event(
         return
 
     try:
-        if channel_type == "im":
-            await set_thinking_status(
-                channel_id, str(event.get("thread_ts") or message_ts)
-            )
+        # Agent-designated apps get a native status line in DM pane threads AND
+        # channel threads — call it everywhere, best-effort (mirrors Every).
+        await set_thinking_status(channel_id, inbound_thread_ts or message_ts)
         resolved = await resolve_thread(event, org_id)
         text = str(event.get("text") or "")
         if event.get("type") == "app_mention":
@@ -491,6 +496,12 @@ async def handle_event(
             },
             permission_timeout_seconds=PERMISSION_TIMEOUT_SECONDS,
             on_event=on_event,
+        )
+        logger.info(
+            "slack bridge: turn %s finished %s (event_id=%s)",
+            result.turn_id,
+            result.status,
+            event_id,
         )
         await post_message(
             channel_id=channel_id,
