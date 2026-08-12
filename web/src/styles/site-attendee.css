@@ -12,15 +12,31 @@
  * the accent) come from the site.
  */
 
+/* The published page's own tokens. Defaults are the canonical SpeakerWeave
+ * look; the branding view overwrites this same set per preset, exactly as the
+ * real feature writes them per event. Every in-page tint is derived from
+ * `--swp-tint` rather than hardcoded ink, so a dark canvas keeps its hairlines
+ * and selected states visible instead of dissolving into the paper. */
 .sw-site .swp-frame {
+  --swp-paper: #fff;
   --swp-ink: #1c1a17;
   --swp-ink2: #57534c;
   --swp-ink3: #8d867c;
   --swp-line: rgba(28, 26, 23, 0.1);
+  --swp-tint: rgba(28, 26, 23, 0.06);
+  --swp-accent: var(--sw-accent);
+  --swp-display: var(--sw-serif);
+  /* Both halves of every inverted chip. Pin only the block and a light-ink
+     preset paints white lettering onto a white pill. */
+  --swp-ink-on: #fff;
+  --swp-accent-on: #fff;
   overflow: hidden;
   border-radius: 14px;
-  background: #fff;
+  background: var(--swp-paper);
   color: var(--swp-ink);
+  transition:
+    background 0.35s var(--sw-ease),
+    color 0.35s var(--sw-ease);
   box-shadow:
     0 1px 2px rgba(28, 26, 23, 0.07),
     0 26px 64px rgba(28, 26, 23, 0.16);
@@ -34,7 +50,9 @@
   gap: 14px;
   padding: 10px 14px;
   background: #f2efeb;
-  border-bottom: 1px solid var(--swp-line);
+  /* Literal, not page ink: this strip is the BROWSER, and it stays the same
+     colour whatever brand the page inside it is wearing. */
+  border-bottom: 1px solid rgba(28, 26, 23, 0.1);
 }
 /* Three window dots from one element. */
 .sw-site .swp-dots {
@@ -54,17 +72,17 @@
   padding: 5px 12px;
   border-radius: 999px;
   background: #fff;
-  box-shadow: inset 0 0 0 1px var(--swp-line);
+  box-shadow: inset 0 0 0 1px rgba(28, 26, 23, 0.1);
   font-family: var(--sw-mono);
   font-size: 11px;
-  color: var(--swp-ink3);
+  color: #8d867c;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .sw-site .swp-url b {
   font-weight: 400;
-  color: var(--swp-ink2);
+  color: #57534c;
 }
 
 /* ── the site itself ──────────────────────────────────────────────────────── */
@@ -78,7 +96,7 @@
 }
 .sw-site .swp-head b {
   display: block;
-  font-family: var(--sw-serif);
+  font-family: var(--swp-display);
   font-size: 21px;
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -109,11 +127,11 @@
     color 0.18s ease;
 }
 .sw-site .swp-head nav button:hover {
-  background: rgba(28, 26, 23, 0.05);
+  background: var(--swp-tint);
   color: var(--swp-ink);
 }
 .sw-site .swp-head nav button[aria-current='page'] {
-  background: rgba(28, 26, 23, 0.07);
+  background: var(--swp-tint);
   color: var(--swp-ink);
 }
 .sw-site .swp-reg {
@@ -121,8 +139,8 @@
   padding: 6px 13px;
   border-radius: 8px;
   font-size: 13px;
-  color: #fff;
-  background: var(--sw-accent);
+  color: var(--swp-accent-on);
+  background: var(--swp-accent);
 }
 .sw-site .swp-page {
   min-height: 356px;
@@ -162,7 +180,7 @@
   box-shadow: inset 0 0 0 1px var(--swp-line);
 }
 .sw-site .swp-days span.on {
-  color: #fff;
+  color: var(--swp-ink-on);
   background: var(--swp-ink);
   box-shadow: none;
 }
@@ -219,7 +237,7 @@
   padding: 3px 9px;
   border-radius: 999px;
   color: var(--swp-ink2);
-  background: rgba(28, 26, 23, 0.05);
+  background: var(--swp-tint);
 }
 .sw-site .swp-t0 {
   background: rgba(168, 94, 62, 0.12);
@@ -242,7 +260,7 @@
 
 .sw-site .swp-face {
   object-fit: cover;
-  background: rgba(28, 26, 23, 0.06);
+  background: var(--swp-tint);
 }
 .sw-site .swp-face-sm {
   width: 18px;
@@ -303,7 +321,7 @@
 }
 .sw-site .swp-detail h3 {
   margin: 10px 0 0;
-  font-family: var(--sw-serif);
+  font-family: var(--swp-display);
   font-size: 27px;
   font-weight: 400;
   line-height: 1.15;
@@ -348,8 +366,8 @@
   box-shadow: inset 0 0 0 1px var(--swp-line);
 }
 .sw-site .swp-act-p {
-  color: #fff;
-  background: var(--sw-accent);
+  color: var(--swp-accent-on);
+  background: var(--swp-accent);
   box-shadow: none;
 }
 
@@ -397,4 +415,55 @@
   .sw-site .swp-gallery figure {
     animation: none !important;
   }
+}
+
+/* ── branding ─────────────────────────────────────────────────────────────── */
+
+/* The four track chips are fixed pastels tuned for paper. On a dark preset they
+   go muddy, so one rule folds them back onto the page's own neutral pair rather
+   than asking every preset to restate four tones. */
+.sw-site .swp-frame[data-dark='true'] .swp-track {
+  background: var(--swp-tint);
+  color: var(--swp-ink2);
+}
+
+.sw-site .swp-brands {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -2px 0 14px;
+  flex-wrap: wrap;
+}
+.sw-site .swp-brands button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--swp-ink2);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--swp-line);
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+.sw-site .swp-brands button:hover {
+  background: var(--swp-tint);
+  color: var(--swp-ink);
+}
+.sw-site .swp-brands button[aria-pressed='true'] {
+  color: var(--swp-ink);
+  background: var(--swp-tint);
+  box-shadow: inset 0 0 0 1px var(--swp-ink3);
+}
+.sw-site .swp-brands i {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(28, 26, 23, 0.16);
 }

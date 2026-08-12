@@ -185,6 +185,41 @@ describe('Home landing', () => {
     expect(section).toHaveTextContent(/Unscheduled|Main Stage/)
   })
 
+  it('lets a visitor try the published page in other conferences\' brands', () => {
+    renderHome()
+
+    const section = screen.getByTestId('attendee-section')
+    const pills = [...section.querySelectorAll<HTMLButtonElement>('.bentabs button')]
+    expect(pills.map((b) => b.textContent)).toContain('Your brand, not ours')
+
+    // The claim is that these pages carry the organiser's identity, so the pill
+    // has to actually restyle the window rather than describe it.
+    fireEvent.click(pills[pills.length - 1])
+    const swatches = [...section.querySelectorAll<HTMLButtonElement>('.swp-brands button')]
+    expect(swatches.map((b) => b.textContent)).toEqual([
+      'Sandstone',
+      'Nightfall',
+      'Meridian',
+      'Signal',
+    ])
+
+    const frame = section.querySelector('.swp-frame') as HTMLElement
+    expect(frame.style.getPropertyValue('--swp-paper')).toBe('')
+
+    fireEvent.click(swatches[1])
+    expect(frame.style.getPropertyValue('--swp-paper')).toBe('#14131c')
+    expect(frame).toHaveAttribute('data-dark', 'true')
+    // Both halves of the inverted chip move together, or a light-ink brand
+    // paints white lettering onto a white pill.
+    expect(frame.style.getPropertyValue('--swp-ink-on')).toBe('#14131c')
+
+    // Branding is an organiser capability, not a page in the attendee's nav.
+    expect(section.textContent).not.toContain('speakerweave.com/e/ai-builders-summit/branding')
+
+    fireEvent.click(swatches[0])
+    expect(frame.style.getPropertyValue('--swp-paper')).toBe('')
+  })
+
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
     renderHome()
     const href = (name: RegExp) =>

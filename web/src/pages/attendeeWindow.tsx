@@ -18,7 +18,82 @@ import { useState, type JSX } from 'react'
 
 import '../styles/site-attendee.css'
 
-type ViewKey = 'schedule' | 'speakers' | 'session'
+type ViewKey = 'schedule' | 'speakers' | 'session' | 'branding'
+
+/**
+ * Four conferences, one platform. The pill that opens this view makes a claim —
+ * that these pages carry the ORGANISER's identity rather than ours — so the demo
+ * restyles instead of asserting: each preset writes the same custom properties
+ * the real feature writes per event, over the same schedule markup and data.
+ *
+ * Every face here is already on the page (JetBrains Mono, Instrument Serif,
+ * Instrument Sans), so trying on a brand costs no font request.
+ */
+type Brand = {
+  key: string
+  name: string
+  dot: string
+  dark?: boolean
+  vars: Record<string, string>
+}
+
+const BRANDS: Brand[] = [
+  {
+    key: 'default',
+    name: 'Sandstone',
+    dot: '#a85e3e',
+    // The canonical look: identical to the tokens the stylesheet already
+    // declares, so the other three views stay pixel-for-pixel unchanged.
+    vars: {},
+  },
+  {
+    key: 'nightfall',
+    name: 'Nightfall',
+    dot: '#7c5cff',
+    dark: true,
+    vars: {
+      '--swp-paper': '#14131c',
+      '--swp-ink': '#f3f1ff',
+      '--swp-ink2': 'rgba(243, 241, 255, 0.72)',
+      '--swp-ink3': 'rgba(243, 241, 255, 0.5)',
+      '--swp-line': 'rgba(243, 241, 255, 0.14)',
+      '--swp-tint': 'rgba(243, 241, 255, 0.08)',
+      '--swp-accent': '#7c5cff',
+      '--swp-ink-on': '#14131c',
+      '--swp-display': "'Instrument Serif', Georgia, serif",
+    },
+  },
+  {
+    key: 'meridian',
+    name: 'Meridian',
+    dot: '#2f6f4e',
+    vars: {
+      '--swp-paper': '#fbf8f0',
+      '--swp-ink': '#16201a',
+      '--swp-ink2': '#44564b',
+      '--swp-ink3': '#7c8c82',
+      '--swp-line': 'rgba(22, 32, 26, 0.13)',
+      '--swp-tint': 'rgba(22, 32, 26, 0.06)',
+      '--swp-accent': '#2f6f4e',
+      '--swp-display': "'Instrument Serif', Georgia, serif",
+    },
+  },
+  {
+    key: 'signal',
+    name: 'Signal',
+    dot: '#c2361f',
+    vars: {
+      '--swp-paper': '#fff',
+      '--swp-ink': '#111',
+      '--swp-ink2': '#4a4a4a',
+      '--swp-ink3': '#8a8a8a',
+      '--swp-line': 'rgba(17, 17, 17, 0.14)',
+      '--swp-tint': 'rgba(17, 17, 17, 0.06)',
+      '--swp-accent': '#c2361f',
+      '--swp-display': "'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif",
+    },
+  },
+]
 
 /** A speaker, with the headshot committed under `web/public/speakers/`. */
 type Person = { name: string; role: string; org: string; photo: string }
@@ -189,6 +264,34 @@ function SessionView() {
   )
 }
 
+/** The same published schedule, wearing a brand the visitor picks. */
+function BrandingView({
+  brand,
+  onBrand,
+}: {
+  brand: Brand
+  onBrand: (next: Brand) => void
+}) {
+  return (
+    <>
+      <div className="swp-brands" role="group" aria-label="Try a conference brand">
+        {BRANDS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            aria-pressed={entry.key === brand.key}
+            onClick={() => onBrand(entry)}
+          >
+            <i style={{ background: entry.dot }} aria-hidden="true" />
+            {entry.name}
+          </button>
+        ))}
+      </div>
+      <ScheduleView />
+    </>
+  )
+}
+
 /**
  * The published site, in browser furniture. Uncontrolled by default; the
  * landing page hands it a view so its own tabs and this nav stay in step.
@@ -201,8 +304,13 @@ export function AttendeeWindow({
   onViewChange?: (next: ViewKey) => void
 } = {}): JSX.Element {
   const [own, setOwn] = useState<ViewKey>('schedule')
+  const [brand, setBrand] = useState<Brand>(BRANDS[0])
   const view = controlled ?? own
-  const path = VIEWS.find((entry) => entry.key === view)?.path ?? VIEWS[0].path
+  // Branding is an organiser capability, not a page in the attendee's nav, so
+  // it borrows the schedule's tab and address — it IS the schedule, restyled.
+  const navKey = view === 'branding' ? 'schedule' : view
+  const path = VIEWS.find((entry) => entry.key === navKey)?.path ?? VIEWS[0].path
+  const skin = view === 'branding' ? brand : BRANDS[0]
 
   const select = (next: ViewKey) => {
     setOwn(next)
@@ -210,7 +318,13 @@ export function AttendeeWindow({
   }
 
   return (
-    <div className="swp-frame" role="group" aria-label="Published program site">
+    <div
+      className="swp-frame"
+      role="group"
+      aria-label="Published program site"
+      data-dark={skin.dark ? 'true' : undefined}
+      style={skin.vars}
+    >
       <div className="swp-bar" aria-hidden="true">
         <i className="swp-dots" />
         <span className="swp-url">
@@ -229,7 +343,7 @@ export function AttendeeWindow({
               <button
                 key={entry.key}
                 type="button"
-                aria-current={entry.key === view ? 'page' : undefined}
+                aria-current={entry.key === navKey ? 'page' : undefined}
                 onClick={() => select(entry.key)}
               >
                 {entry.label}
@@ -243,6 +357,7 @@ export function AttendeeWindow({
           {view === 'schedule' ? <ScheduleView /> : null}
           {view === 'speakers' ? <SpeakersView /> : null}
           {view === 'session' ? <SessionView /> : null}
+          {view === 'branding' ? <BrandingView brand={brand} onBrand={setBrand} /> : null}
         </div>
       </div>
     </div>

@@ -360,6 +360,11 @@ const PUBLIC_BENEFITS: Array<{ label: string; body: string; view: AttendeeViewKe
     body: 'Every session gets its own address, with the abstract, the speaker, and one tap to put it in a calendar — which is what actually fills the room.',
     view: 'session',
   },
+  {
+    label: 'Your brand, not ours',
+    body: 'Colours, type and layout are set per conference, so attendees see your event rather than our template. Run three conferences and each one keeps its own look — try one below.',
+    view: 'branding',
+  },
 ]
 
 /** The attendee tour: same shape as the admin one, other side of the data. */
