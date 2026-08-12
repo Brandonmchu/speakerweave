@@ -169,11 +169,14 @@ function NavMenu({
   label,
   items,
   cta,
+  wide,
 }: {
   label: string
   items: Array<{ label: string; to: string; hint?: string; external?: boolean }>
-  /** The sign-in menu is the nav's one action, so its trigger is the button. */
+  /** Sign in is an action rather than a destination, so its trigger is a button. */
   cta?: boolean
+  /** Browsing menus, which a phone drops in favour of the two ways in. */
+  wide?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const menu = useRef<HTMLDivElement | null>(null)
@@ -195,7 +198,11 @@ function NavMenu({
   }, [open])
 
   return (
-    <div className="navmenu" ref={menu} onMouseLeave={() => setOpen(false)}>
+    <div
+      className={wide ? 'navmenu navwide' : 'navmenu'}
+      ref={menu}
+      onMouseLeave={() => setOpen(false)}
+    >
       <button
         type="button"
         className={cta ? 'navtrigger navcta' : 'navtrigger'}
@@ -228,9 +235,14 @@ function NavMenu({
 /**
  * Sticky site nav. `badge` labels a sub-surface (e.g. the API reference).
  *
- * Three menus, no loose links: what you can go and look at, what you can read,
- * and the way in. A nav of eight routes made the visitor read the sitemap
- * before they could find either of the two things they came for.
+ * Two menus and two buttons: what you can go and look at, what you can read,
+ * the way back in, and the way in for the first time. A nav of eight routes
+ * made the visitor read the sitemap before they could find either of the two
+ * things they came for.
+ *
+ * Signing up is its own button rather than an item inside the sign-in menu:
+ * someone without an account should not have to open a menu labelled for
+ * people who already have one.
  */
 export function SiteNav({ badge }: { badge?: string }) {
   return (
@@ -241,8 +253,8 @@ export function SiteNav({ badge }: { badge?: string }) {
       </Link>
       {badge && <span className="eyebrow">{badge}</span>}
       <div className="navlinks">
-        <NavMenu label="Product" items={PRODUCT_MENU} />
-        <NavMenu label="Resources" items={RESOURCE_MENU} />
+        <NavMenu label="Product" items={PRODUCT_MENU} wide />
+        <NavMenu label="Resources" items={RESOURCE_MENU} wide />
         <NavMenu
           label="Sign in"
           cta
@@ -253,19 +265,13 @@ export function SiteNav({ badge }: { badge?: string }) {
               to: ORGANIZER_SIGNIN_URL,
               hint: 'Run your program',
             },
-            // A first-time organizer arrives here too, and used to find no way in
-            // that did not already assume an account.
-            ...(ORGANIZER_SIGNUP_URL
-              ? [
-                  {
-                    label: 'Create an account',
-                    to: ORGANIZER_SIGNUP_URL,
-                    hint: 'Set up your first event',
-                  },
-                ]
-              : []),
           ]}
         />
+        {ORGANIZER_SIGNUP_URL && (
+          <Link to={ORGANIZER_SIGNUP_URL} className="navsignup">
+            Sign up
+          </Link>
+        )}
       </div>
     </nav>
   )

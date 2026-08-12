@@ -255,10 +255,34 @@ body.sw-site-active {
   background: rgba(255, 255, 255, 0.15);
   color: #fff;
 }
-/* The last menu in the row opens inward, or it would hang off the viewport. */
+/* The sign-in menu is no longer last in the row, but it is still close enough
+   to the edge that opening outward would hang off the viewport. */
 .sw-site .navdrop.right {
   left: auto;
   right: 0;
+}
+
+/* Signing up is the nav's one conversion, so it is the only thing up here
+   wearing the brand colour — and it sits beside sign-in rather than inside it,
+   because someone without an account should not have to open a menu named for
+   people who have one. */
+.sw-site .navlinks a.navsignup {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 9px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--sw-accent);
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+.sw-site .navlinks a.navsignup:hover {
+  color: #fff;
+  background: #b96a47;
 }
 
 /* Keyboard users get to the content without tabbing the whole nav. */
@@ -2328,17 +2352,18 @@ body.sw-site-active {
     padding-left: 24px;
     padding-right: 24px;
   }
-  /* The nav keeps the one thing a phone visitor actually needs — the way in.
+  /* The nav keeps the two things a phone visitor actually needs — the ways in.
      Product and Resources are one scroll away in the footer, which is a better
-     trade than three menus fighting over a 390px row. */
+     trade than four items fighting over a 390px row. */
   .sw-site .navlinks {
-    gap: 14px;
+    gap: 10px;
     font-size: 12.5px;
   }
-  .sw-site .navmenu:not(:last-child) {
+  .sw-site .navwide {
     display: none;
   }
-  .sw-site .navlinks .navtrigger.navcta {
+  .sw-site .navlinks .navtrigger.navcta,
+  .sw-site .navlinks a.navsignup {
     height: 27px;
     padding: 0 11px;
     font-size: 12px;
