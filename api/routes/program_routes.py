@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, limiter
+from services.branding import resolve_branding
 from services.ics import escape_text, format_utc
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
@@ -175,7 +176,9 @@ async def _load_event(slug: str) -> dict:
     event = first(
         await db(
             lambda: supabase.table("events")
-            .select("id, org_id, name, slug, starts_at, ends_at, timezone, location")
+            .select(
+                "id, org_id, name, slug, starts_at, ends_at, timezone, location, branding"
+            )
             .eq("slug", slug)
             .limit(1)
             .execute(),
@@ -412,6 +415,7 @@ async def get_schedule(
             "ends_at": event.get("ends_at"),
             "timezone": zone_key,
             "location": event.get("location"),
+            "branding": resolve_branding(event),
         },
         "days": [{"date": date, "sessions": items} for date, items in days.items()],
     }
@@ -493,7 +497,11 @@ async def get_speakers(request: Request, response: Response, event_slug: str):
         )
 
     return {
-        "event": {"name": event.get("name"), "timezone": event.get("timezone")},
+        "event": {
+            "name": event.get("name"),
+            "timezone": event.get("timezone"),
+            "branding": resolve_branding(event),
+        },
         "speakers": speakers,
     }
 
@@ -615,6 +623,7 @@ async def get_session_detail(
             "name": event.get("name"),
             "timezone": zone_key,
             "location": event.get("location"),
+            "branding": resolve_branding(event),
         },
         "session": {
             "id": str(session["id"]),

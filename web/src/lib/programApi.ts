@@ -5,6 +5,7 @@
  */
 
 import { apiGet } from '@/lib/api'
+import type { BrandingConfig } from '@/lib/branding'
 
 // ── schedule ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ export interface ProgramEvent {
   ends_at: string | null
   timezone: string | null
   location: string | null
+  branding?: BrandingConfig
 }
 
 export interface ProgramSchedule {
@@ -91,7 +93,12 @@ export interface ProgramSessionDetail {
 }
 
 export interface ProgramSessionResponse {
-  event: { name: string | null; timezone: string | null; location: string | null }
+  event: {
+    name: string | null
+    timezone: string | null
+    location: string | null
+    branding?: BrandingConfig
+  }
   session: ProgramSessionDetail
 }
 
@@ -127,7 +134,7 @@ export interface ProgramSpeaker {
 }
 
 export interface ProgramSpeakers {
-  event: { name: string | null; timezone?: string | null }
+  event: { name: string | null; timezone?: string | null; branding?: BrandingConfig }
   speakers: ProgramSpeaker[]
 }
 

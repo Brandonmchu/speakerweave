@@ -124,6 +124,7 @@ def seeded_db(fake_db):
             "name": "AI Builders Summit",
             "slug": "ai-builders-summit",
             "timezone": "America/Los_Angeles",
+            "branding": {},
         },
     )
     fake_db.seed(
@@ -133,6 +134,7 @@ def seeded_db(fake_db):
             "org_id": OTHER_ORG_ID,
             "name": "Someone Else's Conf",
             "slug": "someone-else",
+            "branding": {},
         },
     )
     return fake_db

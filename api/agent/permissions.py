@@ -23,6 +23,7 @@ INTERACTIVE_APPROVAL_TOOL_GUIDANCE = (
 PERMISSION_REQUIRED_TOOLS: dict[str, str] = {
     "decide_submission": "DECIDE_SUBMISSION",
     "publish_schedule": "PUBLISH_SCHEDULE",
+    "set_event_branding": "UPDATE_BRANDING",
     "queue_portal_invite": "SEND_EMAIL",
     "invite_speaker_to_portal": "SEND_EMAIL",
     "remind_outstanding_content": "SEND_EMAIL",
@@ -204,6 +205,8 @@ def permission_description(
         return f"{decision.title()} {display}?"
     if action == "PUBLISH_SCHEDULE":
         return "Publish this event's schedule?"
+    if action == "UPDATE_BRANDING":
+        return "Update this event's branding?"
     if action == "SEND_EMAIL":
         if tool_name == "remind_outstanding_content":
             return "Queue reminder emails to every speaker with outstanding content?"

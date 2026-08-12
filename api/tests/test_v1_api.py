@@ -98,7 +98,15 @@ def test_list_events_is_scoped_to_the_key_org(v1_client, api_db):
     events = response.json()["data"]
     # Only org_dev's event, never OTHER_ORG's.
     assert [e["slug"] for e in events] == ["ai-builders-summit"]
-    assert set(events[0]) == {"id", "name", "slug", "starts_at", "ends_at", "timezone"}
+    assert set(events[0]) == {
+        "id",
+        "name",
+        "slug",
+        "starts_at",
+        "ends_at",
+        "timezone",
+        "branding",
+    }
 
 
 def test_get_event_and_cross_org_404(v1_client, api_db):

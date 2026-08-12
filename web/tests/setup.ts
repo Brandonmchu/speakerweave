@@ -2,6 +2,13 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
+// Public-page tests assert the selected font tokens, not Vite's CSS-chunk
+// transport. Keep them hermetic and avoid loading font-face assets in jsdom.
+vi.mock('@/lib/brandFonts', () => ({
+  useBrandingFonts: () => undefined,
+  useBrandingFavicon: () => undefined,
+}))
+
 // jsdom ships neither of these; Radix primitives and our Tabs indicator use
 // them. Real browsers have had both for years.
 if (!globalThis.ResizeObserver) {

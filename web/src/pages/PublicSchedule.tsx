@@ -27,6 +27,8 @@ import {
   type ProgramSession,
   type ProgramSessionDetail,
 } from '@/lib/programApi'
+import { sanitizeBranding, type BrandingConfig, type ScheduleLayout } from '@/lib/branding'
+import { useBrandingFavicon, useBrandingFonts } from '@/lib/brandFonts'
 import { stripUnsafeHtml } from '@/lib/sanitize'
 import { cn } from '@/lib/utils'
 import { Input } from '@/ui/input'
@@ -104,7 +106,7 @@ export function PublicSchedule() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
   const embed = searchParams.get('embed') === '1'
-  const compact = searchParams.get('compact') === '1'
+  const urlCompact = searchParams.get('compact') === '1'
   const accent = searchParams.get('accent')
   const requestedTrack = searchParams.get('track')?.trim() || ANY
 
@@ -117,6 +119,15 @@ export function PublicSchedule() {
     enabled: Boolean(slug),
     retry: false,
   })
+
+  const branding = useMemo(
+    () => sanitizeBranding(query.data?.event.branding),
+    [query.data?.event.branding]
+  )
+  useBrandingFonts(branding)
+  useBrandingFavicon(branding)
+  const compact = urlCompact || branding.density === 'compact'
+  const scheduleLayout = branding.schedule_layout
 
   const days = useMemo(() => query.data?.days ?? [], [query.data])
   // The zone every time/day on this page is formatted in: the event's own.
@@ -448,22 +459,16 @@ export function PublicSchedule() {
                 {flatResults.length === 1 ? '' : 's'}
                 {' across all days'}
               </p>
-              <ol className="divide-y divide-border border-t border-border">
-                {flatResults.map(({ session, date }, i) => (
-                  <li key={session.id || `${session.title}-${i}`}>
-                    <SessionCard
-                      session={session}
-                      zone={zone}
-                      date={date}
-                      location={eventLocation}
-                      starred={Boolean(session.id && starred.has(session.id))}
-                      onToggleStar={() => session.id && toggle(session.id)}
-                      onOpen={() => session.id && setSelectedId(session.id)}
-                      compact={compact}
-                    />
-                  </li>
-                ))}
-              </ol>
+              <SessionCollection
+                items={flatResults}
+                layout={scheduleLayout}
+                zone={zone}
+                location={eventLocation}
+                starred={starred}
+                onToggleStar={toggle}
+                onOpen={setSelectedId}
+                compact={compact}
+              />
             </div>
           )
         ) : dayResults.length === 0 ? (
@@ -472,21 +477,16 @@ export function PublicSchedule() {
             description="Try a different track, format or room — or clear your search."
           />
         ) : (
-          <ol className="divide-y divide-border border-t border-border">
-            {dayResults.map((session, i) => (
-              <li key={session.id || `${session.title}-${i}`}>
-                <SessionCard
-                  session={session}
-                  zone={zone}
-                  location={eventLocation}
-                  starred={Boolean(session.id && starred.has(session.id))}
-                  onToggleStar={() => session.id && toggle(session.id)}
-                  onOpen={() => session.id && setSelectedId(session.id)}
-                  compact={compact}
-                />
-              </li>
-            ))}
-          </ol>
+          <SessionCollection
+            items={dayResults.map((session) => ({ session }))}
+            layout={scheduleLayout}
+            zone={zone}
+            location={eventLocation}
+            starred={starred}
+            onToggleStar={toggle}
+            onOpen={setSelectedId}
+            compact={compact}
+          />
         )}
 
         <SessionDetailDialog
@@ -496,6 +496,8 @@ export function PublicSchedule() {
           starred={starred}
           onToggleStar={toggle}
           onClose={() => setSelectedId(null)}
+          branding={branding}
+          accent={accent}
         />
       </div>
     )
@@ -505,9 +507,10 @@ export function PublicSchedule() {
     return (
       <div
         data-testid="public-program-page"
+        data-branding-root
         data-compact={compact ? 'true' : undefined}
         className={compact ? 'bg-transparent px-1 py-1' : 'bg-transparent px-1 py-2'}
-        style={programAccentStyle(accent)}
+        style={programAccentStyle(accent, branding)}
       >
         {body}
       </div>
@@ -521,10 +524,11 @@ export function PublicSchedule() {
       active="schedule"
       accent={accent}
       compact={compact}
+      branding={branding}
     >
       {!compact && query.data && (
         <header className="mb-8">
-          <h1 className="font-serif text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">
+          <h1 className="text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">
             {query.data.event.name}
           </h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-2 text-[13px] text-muted-foreground">
@@ -542,6 +546,83 @@ export function PublicSchedule() {
 }
 
 // ── pieces ───────────────────────────────────────────────────────────────────
+
+interface SessionCollectionItem {
+  session: ProgramSession
+  date?: string
+}
+
+function SessionCollection({
+  items,
+  layout,
+  zone,
+  location,
+  starred,
+  onToggleStar,
+  onOpen,
+  compact,
+}: {
+  items: SessionCollectionItem[]
+  layout: ScheduleLayout
+  zone: string | null
+  location: string | null
+  starred: Set<string>
+  onToggleStar: (id: string) => void
+  onOpen: (id: string) => void
+  compact: boolean
+}) {
+  const card = ({ session, date }: SessionCollectionItem, index: number) => (
+    <li key={session.id || `${session.title}-${index}`}>
+      <SessionCard
+        session={session}
+        zone={zone}
+        date={date}
+        location={location}
+        starred={Boolean(session.id && starred.has(session.id))}
+        onToggleStar={() => session.id && onToggleStar(session.id)}
+        onOpen={() => session.id && onOpen(session.id)}
+        compact={compact}
+      />
+    </li>
+  )
+
+  if (layout === 'grid') {
+    return (
+      <ol
+        data-testid="schedule-layout-grid"
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 [&>li>article]:h-full [&>li>article]:rounded-[var(--radius)] [&>li>article]:border [&>li>article]:border-border [&>li>article]:px-4"
+      >
+        {items.map(card)}
+      </ol>
+    )
+  }
+
+  if (layout === 'tracks') {
+    const groups = new Map<string, SessionCollectionItem[]>()
+    for (const item of items) {
+      const label = item.session.track?.name || 'Other sessions'
+      groups.set(label, [...(groups.get(label) ?? []), item])
+    }
+    return (
+      <div data-testid="schedule-layout-tracks" className="space-y-7">
+        {[...groups.entries()].map(([label, sessions]) => (
+          <section key={label}>
+            <h2 className="mb-2 text-sm font-semibold text-foreground">{label}</h2>
+            <ol className="divide-y divide-border border-t border-border">
+              {sessions.map(card)}
+            </ol>
+          </section>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <ol data-testid="schedule-layout-list" className="divide-y divide-border border-t border-border">
+      {items.map(card)}
+    </ol>
+  )
+}
 
 function SessionCard({
   session,
@@ -772,6 +853,8 @@ export function SessionDetailDialog({
   starred,
   onToggleStar,
   onClose,
+  branding,
+  accent,
 }: {
   slug: string
   sessionId: string | null
@@ -779,6 +862,8 @@ export function SessionDetailDialog({
   starred: Set<string>
   onToggleStar: (id: string) => void
   onClose: () => void
+  branding?: BrandingConfig
+  accent?: string | null
 }) {
   const detail = useQuery({
     queryKey: ['program-session', slug, sessionId],
@@ -793,7 +878,12 @@ export function SessionDetailDialog({
 
   return (
     <Dialog open={sessionId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl" data-testid="session-detail-dialog">
+      <DialogContent
+        className="sm:max-w-2xl"
+        data-testid="session-detail-dialog"
+        data-branding-root
+        style={programAccentStyle(accent ?? null, branding)}
+      >
         {detail.isPending ? (
           <>
             <DialogHeader>

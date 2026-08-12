@@ -21,7 +21,16 @@ from auth import (
     get_display_name,
     verify_org_access,
 )
-from services import crm, mailer, portal, session_revisions, speaker_crm
+from security.upload_validation import UploadValidationError, validate_upload
+from services import (
+    crm,
+    integration_api,
+    mailer,
+    portal,
+    session_revisions,
+    speaker_crm,
+)
+from services.branding import resolve_branding, validate_branding_patch
 from services.comms import DEFAULT_TEMPLATES, render_template
 from services.evaluations import session_review_aggregate, session_review_scores
 from services.forms import load_form_layout
@@ -138,6 +147,7 @@ class EventPatchRequest(BaseModel):
     day_start: time | None = None
     day_end: time | None = None
     slot_minutes: int | None = None
+    branding: dict | None = None
 
 
 @router.get("/events")
@@ -151,7 +161,10 @@ async def list_events(auth: tuple = Depends(get_current_user_and_org)):
         .execute(),
         "list_events",
     )
-    return {"events": rows(res)}
+    events = rows(res)
+    for event in events:
+        event["branding"] = resolve_branding(event)
+    return {"events": events}
 
 
 def _as_datetime(value: object) -> datetime | None:
@@ -218,13 +231,16 @@ async def create_event(
         # cannot see and cannot name again (the slug is taken).
         logger.warning("events: default formats not seeded event_id=%s", event["id"], exc_info=True)
 
+    event["branding"] = resolve_branding(event)
     return {"event": event}
 
 
 @router.get("/events/{event_id}")
 async def get_event(event_id: str, auth: tuple = Depends(get_current_user_and_org)):
     _user_id, org_id = auth
-    return {"event": await fetch_scoped("events", event_id, org_id, "Event")}
+    event = await fetch_scoped("events", event_id, org_id, "Event")
+    event["branding"] = resolve_branding(event)
+    return {"event": event}
 
 
 @router.patch("/events/{event_id}")
@@ -245,6 +261,9 @@ async def update_event(
     existing = await fetch_scoped("events", event_id, org_id, "Event")
 
     provided = payload.model_dump(exclude_unset=True)
+    branding_patch: dict | None = None
+    if "branding" in provided:
+        branding_patch = validate_branding_patch(payload.branding)
     patch: dict = {}
     for key in ("timezone", "location", "slot_minutes"):
         if key in provided:
@@ -290,7 +309,7 @@ async def update_event(
                     status_code=409, detail="That public URL slug is already taken"
                 )
             patch["slug"] = normalized
-    if not patch:
+    if not patch and not branding_patch:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
     # The merged range, not just the patched half: moving `ends_at` before an
@@ -300,19 +319,103 @@ async def update_event(
     if starts_at and ends_at and ends_at <= starts_at:
         raise HTTPException(status_code=400, detail="The event must end after it starts")
 
-    updated = first(
-        await db(
-            lambda: supabase.table("events")
-            .update(patch)
-            .eq("id", event_id)
-            .eq("org_id", org_id)
-            .execute(),
-            "update_event",
+    updated = existing
+    if patch:
+        updated = first(
+            await db(
+                lambda: supabase.table("events")
+                .update(patch)
+                .eq("id", event_id)
+                .eq("org_id", org_id)
+                .execute(),
+                "update_event",
+            )
         )
-    )
-    if not updated:
-        raise HTTPException(status_code=404, detail="Event not found")
+        if not updated:
+            raise HTTPException(status_code=404, detail="Event not found")
+    if branding_patch:
+        await integration_api.update_event_branding(org_id, event_id, branding_patch)
+        updated = await fetch_scoped("events", event_id, org_id, "Event")
+    updated["branding"] = resolve_branding(updated)
     return {"event": updated}
+
+
+async def _upload_brand_asset(
+    event_id: str,
+    file: UploadFile,
+    org_id: str,
+    kind: Literal["logo", "favicon"],
+) -> dict:
+    await fetch_event(event_id, org_id)
+    content = await file.read()
+    try:
+        ext, mimetype = validate_upload(file.filename, content, category="image")
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    path, public_url = await portal.store_upload(
+        org_id,
+        f"events/{event_id}/branding/{kind}",
+        ext,
+        content,
+        mimetype,
+    )
+    result = await integration_api.update_event_branding(
+        org_id,
+        event_id,
+        {f"{kind}_path": path, f"{kind}_url": public_url},
+        server_managed=True,
+    )
+    return {"branding": result}
+
+
+@router.post("/events/{event_id}/branding/logo")
+async def upload_event_branding_logo(
+    event_id: str,
+    file: Annotated[UploadFile, File()],
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    _user_id, org_id = auth
+    return await _upload_brand_asset(event_id, file, org_id, "logo")
+
+
+@router.delete("/events/{event_id}/branding/logo")
+async def delete_event_branding_logo(
+    event_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    _user_id, org_id = auth
+    result = await integration_api.update_event_branding(
+        org_id,
+        event_id,
+        {"logo_path": None, "logo_url": None},
+        server_managed=True,
+    )
+    return {"branding": result}
+
+
+@router.post("/events/{event_id}/branding/favicon")
+async def upload_event_branding_favicon(
+    event_id: str,
+    file: Annotated[UploadFile, File()],
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    _user_id, org_id = auth
+    return await _upload_brand_asset(event_id, file, org_id, "favicon")
+
+
+@router.delete("/events/{event_id}/branding/favicon")
+async def delete_event_branding_favicon(
+    event_id: str,
+    auth: tuple = Depends(get_current_user_and_org),
+):
+    _user_id, org_id = auth
+    result = await integration_api.update_event_branding(
+        org_id,
+        event_id,
+        {"favicon_path": None, "favicon_url": None},
+        server_managed=True,
+    )
+    return {"branding": result}
 
 
 @router.get("/events/{event_id}/submissions")

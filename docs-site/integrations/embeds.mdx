@@ -11,3 +11,5 @@ description: Put the schedule and speaker gallery on any site; consume the progr
 - **iCal** — `/public/program/{event_slug}/calendar.ics` for the whole accepted program, plus per-session downloads on the public schedule.
 
 Feeds and widgets update live when the program changes — snippets carry no version token. Sessions gated by [content approval](/ai/chat-agent) or unscheduled/unpublished states are excluded from all public output.
+
+The event's stored colors, fonts, logo, density, and schedule or speaker layout now apply automatically to both iframe and script embeds. Existing per-embed accent overrides are unchanged: `?accent=RRGGBB` on an iframe and `data-dais-accent="RRGGBB"` on the script loader override the stored accent for that embed only. All other branding continues to come from the event.

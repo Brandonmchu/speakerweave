@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -92,6 +93,8 @@ def test_mcp_handshake_lists_tools_and_round_trips_org_scoped(client, mcp_db):
         "remind_outstanding_content",
         "evaluation_summary",
         "ai_triage",
+        "get_event_branding",
+        "set_event_branding",
     }
     assert all(tool.get("description") for tool in tools)
 
@@ -103,7 +106,71 @@ def test_mcp_handshake_lists_tools_and_round_trips_org_scoped(client, mcp_db):
     assert all(event.get("org_id") != OTHER_ORG_ID for event in structured["data"])
 
     templates = mcp.request("resources/templates/list")["resourceTemplates"]
-    assert len(templates) == 3
+    assert len(templates) == 4
+
+
+def test_mcp_branding_tools_and_resource_are_scoped(client, mcp_db):
+    mcp = McpAsgiClient(client, HEADERS)
+    mcp.initialize()
+    definitions = {
+        tool["name"]: tool for tool in mcp.request("tools/list")["tools"]
+    }
+    set_schema = definitions["set_event_branding"]["inputSchema"]
+    assert set_schema["properties"]["schedule_layout"]["anyOf"][0]["enum"] == [
+        "list",
+        "tracks",
+        "grid",
+    ]
+
+    changed = mcp.request(
+        "tools/call",
+        {
+            "name": "set_event_branding",
+            "arguments": {
+                "event": TEST_EVENT_ID,
+                "accent": "ABCDEF",
+                "schedule_layout": "grid",
+            },
+        },
+    )
+    assert changed["structuredContent"]["data"]["accent"] == "abcdef"
+    assert changed["structuredContent"]["data"]["event_id"] == TEST_EVENT_ID
+    write = next(
+        entry
+        for entry in reversed(mcp_db.log)
+        if entry["table"] == "events" and entry["op"] == "update"
+    )
+    assert ("eq", "org_id", TEST_ORG_ID) in write["filters"]
+
+    resource = mcp.request(
+        "resources/read",
+        {"uri": f"dais://events/{TEST_EVENT_ID}/branding"},
+    )
+    document = json.loads(resource["contents"][0]["text"])
+    assert document["accent"] == "abcdef"
+    assert document["schedule_layout"] == "grid"
+
+    # An omitted argument and an explicit null are indistinguishable in a Python
+    # signature, so clearing a value has its own channel. Without it, an MCP
+    # client could set a color but never take it back off.
+    cleared = mcp.request(
+        "tools/call",
+        {
+            "name": "set_event_branding",
+            "arguments": {"event": TEST_EVENT_ID, "reset": ["accent"]},
+        },
+    )
+    assert cleared["structuredContent"]["data"]["accent"] is None
+    assert cleared["structuredContent"]["data"]["schedule_layout"] == "grid"
+
+    foreign = mcp.request(
+        "tools/call",
+        {
+            "name": "get_event_branding",
+            "arguments": {"event": "11111111-1111-1111-1111-1111111111ff"},
+        },
+    )
+    assert foreign.get("isError") is True
 
 
 def test_mcp_rejects_bad_bearer_token(client, mcp_db):

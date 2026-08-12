@@ -12,6 +12,7 @@
  */
 
 import type { QuestionRule } from '@/lib/rules'
+import { sanitizeBranding, type BrandingConfig } from '@/lib/branding'
 
 const TOKEN_STORAGE_KEY = 'dais.token'
 
@@ -206,6 +207,7 @@ export interface EventSummary {
   ends_at?: string | null
   timezone?: string | null
   location?: string | null
+  branding?: BrandingConfig
 }
 
 export type SubmissionStatus =
@@ -292,6 +294,7 @@ export interface PublicForm {
   slug: string
   name: string
   event_name?: string | null
+  branding: BrandingConfig
   welcome_html?: string | null
   confirmation_html?: string | null
   closed?: boolean
@@ -357,7 +360,7 @@ interface PublicFormWire {
       submission_limit?: number | null
     } | null
   }
-  event: { name?: string | null } | null
+  event: { name?: string | null; branding?: BrandingConfig } | null
   fields: Array<{
     id: string
     label: string
@@ -387,6 +390,10 @@ export async function getPublicForm(slug: string): Promise<PublicForm> {
     slug: wire.form.slug,
     name: wire.form.name,
     event_name: wire.event?.name ?? null,
+    // Resolve here rather than casting `{}`: the type promises a COMPLETE
+    // document, and a direct read like `branding.show_powered_by` on a bare
+    // object would silently be undefined (falsy) rather than the default.
+    branding: sanitizeBranding(wire.event?.branding),
     welcome_html: wire.form.welcome_html ?? null,
     confirmation_html: settings.confirmation_html ?? null,
     closed: closeAt !== null && closeAt.getTime() < Date.now(),

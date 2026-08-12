@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from security.rate_limiting import RATE_PUBLIC_DEFAULT, RATE_PUBLIC_WRITE, limiter
 from services import crm, submitter_selfservice
+from services.branding import resolve_branding
 from services.forms import (
     abstract_from_answers,
     apply_live_choices,
@@ -258,7 +259,7 @@ async def get_public_form(request: Request, slug: str):
 
     event_res = await db(
         lambda: supabase.table("events")
-        .select("id, name, slug, starts_at, ends_at, timezone, location")
+        .select("id, name, slug, starts_at, ends_at, timezone, location, branding")
         .eq("id", form["event_id"])
         .eq("org_id", form["org_id"])
         .limit(1)
@@ -266,6 +267,8 @@ async def get_public_form(request: Request, slug: str):
         "public_form_event",
     )
     event = first(event_res)
+    if event:
+        event["branding"] = resolve_branding(event)
 
     # Defense in depth: sanitize on the way out too, so a row written before the
     # server-side sanitizer existed (or by some other path) can't fire in a

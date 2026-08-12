@@ -29,7 +29,7 @@ from agent.router import (
 from agent.tools import TurnContext
 from auth import get_current_user_or_api_org
 from services import assistant
-from tests.conftest import OTHER_ORG_ID, TEST_ORG_ID
+from tests.conftest import OTHER_EVENT_ID, OTHER_ORG_ID, TEST_EVENT_ID, TEST_ORG_ID
 
 
 @pytest.fixture(autouse=True)
@@ -196,6 +196,12 @@ def test_permission_policy_covers_dais_and_external_mcp_mutations():
     assert permissions.permission_action_for_tool("publish_schedule") == (
         "PUBLISH_SCHEDULE"
     )
+    assert permissions.permission_action_for_tool("set_event_branding") == (
+        "UPDATE_BRANDING"
+    )
+    assert permissions.permission_description(
+        "UPDATE_BRANDING", "set_event_branding", {"event": TEST_EVENT_ID}
+    ) == "Update this event's branding?"
     assert permissions.permission_action_for_tool("send_communication") == "SEND_EMAIL"
     assert permissions.permission_action_for_tool("delete_form") == "DELETE"
     assert permissions.permission_action_for_tool("mcp__every__create_proposal") == (
@@ -248,6 +254,35 @@ async def test_new_tool_registry_handler_parity_and_navigation_validation():
     assert isinstance(rejected, dict) and "error" in rejected
     assert tools.is_valid_navigation_route("/forms/form-1")
     assert tools.is_valid_navigation_route("/forms")
+
+    definitions = {definition["name"]: definition for definition in tools.NEW_TOOLS}
+    schema = definitions["set_event_branding"]["input_schema"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["schedule_layout"]["enum"] == [
+        "list",
+        "tracks",
+        "grid",
+    ]
+    assert "6 hex digits, no #" in schema["properties"]["accent"]["description"]
+
+
+async def test_branding_tool_handlers_are_org_scoped(seeded_db):
+    result = await tools._set_event_branding(
+        TEST_ORG_ID,
+        {"event": TEST_EVENT_ID, "accent": "ABCDEF", "radius": "large"},
+    )
+    assert result["data"]["accent"] == "abcdef"
+    assert result["data"]["event_id"] == TEST_EVENT_ID
+    write = next(
+        entry
+        for entry in reversed(seeded_db.log)
+        if entry["table"] == "events" and entry["op"] == "update"
+    )
+    assert ("eq", "org_id", TEST_ORG_ID) in write["filters"]
+
+    with pytest.raises(Exception) as caught:
+        await tools._get_event_branding(TEST_ORG_ID, {"event": OTHER_EVENT_ID})
+    assert getattr(caught.value, "status_code", None) == 404
 
 
 async def test_entity_updates_are_deterministic_and_deduplicated():

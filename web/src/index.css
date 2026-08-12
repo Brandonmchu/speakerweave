@@ -1,6 +1,6 @@
 /* Product typefaces are local npm assets; no remote font request is made.
- * The serif italic is a separate face — the public site sets its lifecycle
- * numerals in it, and fontsource's default entry only ships the roman. */
+ * Event-selected public fonts are split into lazy CSS chunks by brandFonts.ts,
+ * so this entry point keeps shipping only the organizer app's core faces. */
 @import '@fontsource-variable/instrument-sans';
 @import '@fontsource-variable/jetbrains-mono';
 @import '@fontsource/instrument-serif';

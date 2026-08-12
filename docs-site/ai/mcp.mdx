@@ -3,7 +3,7 @@ title: Hosted MCP server
 description: Connect ChatGPT, Claude, or any MCP client to your SpeakerWeave organization.
 ---
 
-Every deployment hosts a remote MCP server at `/mcp` (Streamable HTTP) exposing 14 organization-scoped tools and 3 resources: events, submissions, decisions, speakers, portal invitations, scheduling, content status, reminders, evaluation summaries, and AI triage.
+Every deployment hosts a remote MCP server at `/mcp` (Streamable HTTP) exposing 16 organization-scoped tools and 4 resources: events, per-event branding, submissions, decisions, speakers, portal invitations, scheduling, content status, reminders, evaluation summaries, and AI triage.
 
 There is one thing to paste into any client:
 
@@ -93,6 +93,14 @@ For any client that supports custom headers, skip OAuth entirely:
 The client discovers `/.well-known/oauth-protected-resource`, registers dynamically, and runs authorization-code + PKCE. SpeakerWeave's approval page exchanges an API token (from **Settings → API tokens**) for short-lived OAuth access with rotating refresh tokens — the raw API token is never stored by the client.
 
 Tool calls are scoped to the organization that owns the token; cross-organization access is structurally impossible.
+
+## Event branding
+
+- `get_event_branding(event)` returns the complete resolved branding document plus the event ID, slug, and public URL.
+- `set_event_branding(event, …)` merge-patches the supplied colors, fonts, layout, density, header, radius, and powered-by fields. Its generated schema advertises every allowed enum value; logo and favicon assets remain upload-only through the organizer API.
+- `dais://events/{event}/branding` exposes the same resolved document as the `event-branding` JSON resource.
+
+Both tools resolve the event inside the authenticated token's organization. An event belonging to another organization is indistinguishable from a missing event.
 
 <Note>
   Connectors run the other way too: bring your own MCP servers *into* the SpeakerWeave agent under **Settings → Integrations → MCP connectors** ([details](/integrations/mcp-connectors)).

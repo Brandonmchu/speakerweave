@@ -18,17 +18,30 @@ import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
 import {
   createApiToken,
   createTaxonomy,
+  deleteEventBrandAsset,
   deleteApiToken,
   deleteTaxonomy,
   listApiTokens,
   listTaxonomy,
   updateEvent,
   updateTaxonomy,
+  uploadEventBrandAsset,
   type ApiTokenRow,
   type TaxonomyInput,
   type TaxonomyKind,
   type TaxonomyRow,
 } from '@/lib/adminApi'
+import {
+  DEFAULT_BRANDING,
+  FONT_LABELS,
+  FONT_TOKENS,
+  brandingStyle,
+  contrastRatio,
+  sanitizeBranding,
+  type BrandingConfig,
+  type FontToken,
+} from '@/lib/branding'
+import { useBrandingFonts } from '@/lib/brandFonts'
 import {
   embedPageQuery,
   embedIframeSnippet,
@@ -120,6 +133,7 @@ export function slugError(value: string): string | null {
 
 const SETTINGS_SECTIONS = [
   { id: 'settings-event', label: 'Event' },
+  { id: 'settings-branding', label: 'Branding' },
   { id: 'settings-vocabulary', label: 'Vocabulary' },
   { id: 'settings-embed', label: 'Embed & share' },
   { id: 'settings-mcp', label: 'MCP connectors' },
@@ -254,6 +268,7 @@ export function SettingsPage() {
       ) : (
         <div className="mt-8 max-w-3xl space-y-10">
           <EventCard event={event} />
+          <BrandingSection event={event} />
           <section id="settings-vocabulary" className="scroll-mt-14">
             <div className="border-b border-border pb-4">
               <h2 className="text-[15px] font-medium text-foreground">Vocabulary</h2>
@@ -1533,6 +1548,388 @@ function EventCard({ event }: { event: EventSummary }) {
         </div>
       </div>
     </section>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Event branding                                                             */
+/* -------------------------------------------------------------------------- */
+
+const BRAND_HEX_RE = /^[0-9a-fA-F]{6}$/
+const BRAND_COLOR_DEFAULTS = {
+  accent: 'a85e3e',
+  background: 'f7f5f1',
+  surface: 'fffdfb',
+  ink: '1c1a17',
+} as const
+type BrandingColorKey = keyof typeof BRAND_COLOR_DEFAULTS
+
+const BRAND_COLOR_FIELDS: Array<{ key: BrandingColorKey; label: string }> = [
+  { key: 'accent', label: 'Accent' },
+  { key: 'background', label: 'Background' },
+  { key: 'surface', label: 'Surface' },
+  { key: 'ink', label: 'Ink' },
+]
+
+function brandingClientPatch(branding: BrandingConfig): Partial<BrandingConfig> {
+  return {
+    accent: branding.accent,
+    background: branding.background,
+    surface: branding.surface,
+    ink: branding.ink,
+    heading_font: branding.heading_font,
+    body_font: branding.body_font,
+    radius: branding.radius,
+    schedule_layout: branding.schedule_layout,
+    speaker_layout: branding.speaker_layout,
+    density: branding.density,
+    header_style: branding.header_style,
+    show_powered_by: branding.show_powered_by,
+  }
+}
+
+function useFilePreview(file: File | null): string | null {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!file || typeof URL.createObjectURL !== 'function') {
+      setUrl(null)
+      return
+    }
+    const next = URL.createObjectURL(file)
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [file])
+  return url
+}
+
+function BrandingSection({ event }: { event: EventSummary }) {
+  const queryClient = useQueryClient()
+  const initial = sanitizeBranding(event.branding)
+  const [draft, setDraft] = useState<BrandingConfig>(initial)
+  const [baseline, setBaseline] = useState(() => JSON.stringify(brandingClientPatch(initial)))
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [faviconFile, setFaviconFile] = useState<File | null>(null)
+  const [removeLogo, setRemoveLogo] = useState(false)
+  const [removeFavicon, setRemoveFavicon] = useState(false)
+
+  useEffect(() => {
+    const next = sanitizeBranding(event.branding)
+    setDraft(next)
+    setBaseline(JSON.stringify(brandingClientPatch(next)))
+    setLogoFile(null)
+    setFaviconFile(null)
+    setRemoveLogo(false)
+    setRemoveFavicon(false)
+  }, [event.id, event.branding])
+
+  const localLogo = useFilePreview(logoFile)
+  const localFavicon = useFilePreview(faviconFile)
+  const logoPreview = localLogo ?? (!removeLogo ? draft.logo_url : null)
+  const faviconPreview = localFavicon ?? (!removeFavicon ? draft.favicon_url : null)
+  const previewBranding = sanitizeBranding({
+    ...draft,
+    logo_url: logoPreview,
+    favicon_url: faviconPreview,
+  })
+  useBrandingFonts(previewBranding)
+  const invalidColors = BRAND_COLOR_FIELDS.filter(({ key }) => {
+    const value = draft[key]
+    return Boolean(value && !BRAND_HEX_RE.test(value))
+  })
+  const currentColors = {
+    accent: BRAND_HEX_RE.test(draft.accent ?? '') ? (draft.accent as string) : BRAND_COLOR_DEFAULTS.accent,
+    background: BRAND_HEX_RE.test(draft.background ?? '')
+      ? (draft.background as string)
+      : BRAND_COLOR_DEFAULTS.background,
+    surface: BRAND_HEX_RE.test(draft.surface ?? '') ? (draft.surface as string) : BRAND_COLOR_DEFAULTS.surface,
+    ink: BRAND_HEX_RE.test(draft.ink ?? '') ? (draft.ink as string) : BRAND_COLOR_DEFAULTS.ink,
+  }
+  const inkContrast = contrastRatio(currentColors.ink, currentColors.background)
+  const accentContrast = contrastRatio(currentColors.accent, currentColors.surface)
+  const dirty =
+    JSON.stringify(brandingClientPatch(draft)) !== baseline ||
+    Boolean(logoFile || faviconFile || removeLogo || removeFavicon)
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await updateEvent(event.id, { branding: brandingClientPatch(draft) })
+      if (logoFile) await uploadEventBrandAsset(event.id, 'logo', logoFile)
+      else if (removeLogo) await deleteEventBrandAsset(event.id, 'logo')
+      if (faviconFile) await uploadEventBrandAsset(event.id, 'favicon', faviconFile)
+      else if (removeFavicon) await deleteEventBrandAsset(event.id, 'favicon')
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['events'] })
+      toast({ title: 'Branding updated' })
+    },
+    onError: (error: Error) =>
+      toast({ variant: 'destructive', title: "Couldn't save branding", description: error.message }),
+  })
+
+  const set = (patch: Partial<BrandingConfig>) => setDraft((current) => ({ ...current, ...patch }))
+  const reset = () => {
+    setDraft({ ...DEFAULT_BRANDING })
+    setLogoFile(null)
+    setFaviconFile(null)
+    setRemoveLogo(Boolean(draft.logo_url))
+    setRemoveFavicon(Boolean(draft.favicon_url))
+  }
+
+  return (
+    <section id="settings-branding" className="scroll-mt-14">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div>
+          <h2 className="text-[15px] font-medium text-foreground">Branding</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            The colors, type and layout attendees see for this event only.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="ghost" onClick={reset} disabled={save.isPending}>
+            Reset to defaults
+          </Button>
+          <Button
+            type="button"
+            data-testid="save-branding"
+            disabled={!dirty || invalidColors.length > 0 || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Saving…' : 'Save branding'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-8 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="space-y-7">
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-foreground">Colors</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {BRAND_COLOR_FIELDS.map(({ key, label }) => {
+                const invalid = Boolean(draft[key] && !BRAND_HEX_RE.test(draft[key] as string))
+                return (
+                  <div key={key} className="space-y-1.5">
+                    <Label htmlFor={`branding-${key}`}>{label}</Label>
+                    <div className="grid grid-cols-[minmax(0,1fr)_42px] gap-2">
+                      <Input
+                        id={`branding-${key}`}
+                        value={draft[key] ?? ''}
+                        placeholder={BRAND_COLOR_DEFAULTS[key].toUpperCase()}
+                        maxLength={7}
+                        aria-invalid={invalid || undefined}
+                        onChange={(e) => {
+                          const value = e.target.value.trim().replace(/^#/, '')
+                          set({ [key]: value || null })
+                        }}
+                      />
+                      <input
+                        type="color"
+                        aria-label={`${label} color picker`}
+                        value={`#${currentColors[key]}`}
+                        onChange={(e) => set({ [key]: e.target.value.slice(1).toLowerCase() })}
+                        className="h-9 w-[42px] cursor-pointer rounded-md border border-input bg-card p-1"
+                      />
+                    </div>
+                    {invalid && <p className="text-xs text-destructive">Use exactly six hex digits.</p>}
+                  </div>
+                )
+              })}
+            </div>
+            {(inkContrast < 4.5 || accentContrast < 3) && (
+              <div className="space-y-1 rounded-md border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning-strong">
+                {inkContrast < 4.5 && <p>Ink on background is {inkContrast.toFixed(2)}:1; aim for 4.5:1.</p>}
+                {accentContrast < 3 && <p>Accent on surface is {accentContrast.toFixed(2)}:1; aim for 3:1.</p>}
+              </div>
+            )}
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-foreground">Type</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="branding-heading-font">Heading font</Label>
+                <NativeSelect
+                  id="branding-heading-font"
+                  value={draft.heading_font}
+                  onValueChange={(value) => set({ heading_font: value as FontToken })}
+                  options={FONT_TOKENS.map((value) => ({ value, label: FONT_LABELS[value] }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="branding-body-font">Body font</Label>
+                <NativeSelect
+                  id="branding-body-font"
+                  value={draft.body_font}
+                  onValueChange={(value) => set({ body_font: value as FontToken })}
+                  options={FONT_TOKENS.map((value) => ({ value, label: FONT_LABELS[value] }))}
+                />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-foreground">Layout</legend>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <BrandingSelect label="Schedule" value={draft.schedule_layout} options={['list', 'tracks', 'grid']} onChange={(value) => set({ schedule_layout: value as BrandingConfig['schedule_layout'] })} />
+              <BrandingSelect label="Speakers" value={draft.speaker_layout} options={['grid', 'list']} onChange={(value) => set({ speaker_layout: value as BrandingConfig['speaker_layout'] })} />
+              <BrandingSelect label="Density" value={draft.density} options={['comfortable', 'compact']} onChange={(value) => set({ density: value as BrandingConfig['density'] })} />
+              <BrandingSelect label="Header" value={draft.header_style} options={['minimal', 'banner']} onChange={(value) => set({ header_style: value as BrandingConfig['header_style'] })} />
+              <BrandingSelect label="Corner radius" value={draft.radius} options={['none', 'small', 'medium', 'large']} onChange={(value) => set({ radius: value as BrandingConfig['radius'] })} />
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-4">
+            <legend className="text-sm font-semibold text-foreground">Assets</legend>
+            <BrandAssetInput
+              kind="logo"
+              label="Event logo"
+              preview={logoPreview}
+              onFile={(file) => {
+                setLogoFile(file)
+                setRemoveLogo(false)
+              }}
+              onRemove={() => {
+                setLogoFile(null)
+                setRemoveLogo(Boolean(draft.logo_url))
+              }}
+            />
+            <BrandAssetInput
+              kind="favicon"
+              label="Favicon"
+              preview={faviconPreview}
+              onFile={(file) => {
+                setFaviconFile(file)
+                setRemoveFavicon(false)
+              }}
+              onRemove={() => {
+                setFaviconFile(null)
+                setRemoveFavicon(Boolean(draft.favicon_url))
+              }}
+            />
+          </fieldset>
+
+          <label className="flex cursor-pointer items-center gap-3 text-sm text-foreground">
+            <Checkbox
+              checked={draft.show_powered_by}
+              onCheckedChange={(value) => set({ show_powered_by: value === true })}
+            />
+            Powered by SpeakerWeave
+          </label>
+        </div>
+
+        <div className="lg:sticky lg:top-16 lg:self-start">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-foreground">Live preview</p>
+            <a
+              href={publicProgramUrl(event.slug, 'schedule')}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Open live page <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
+          <div
+            data-testid="branding-preview"
+            data-branding-root
+            className="mt-3 overflow-hidden rounded-[var(--radius)] border border-border bg-background text-foreground shadow-soft"
+            style={brandingStyle(previewBranding)}
+          >
+            <div className={cn('border-b border-border bg-card p-4', previewBranding.header_style === 'banner' && 'py-7')}>
+              {logoPreview ? (
+                <img src={logoPreview} alt={event.name} className="h-8 max-w-[160px] object-contain object-left" />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full bg-primary" />
+                  <span className="text-[10px] text-muted-foreground">SpeakerWeave</span>
+                </div>
+              )}
+              <h3 className="mt-3 text-xl font-normal leading-tight">{event.name}</h3>
+            </div>
+            <div className="p-4">
+              <div className="rounded-[var(--radius)] border border-border bg-card p-3">
+                <p className="font-mono text-[9px] text-muted-foreground">10:30–11:15</p>
+                <h4 className="mt-1 text-sm font-medium">Designing systems people trust</h4>
+                <p className="mt-1 text-[10px] text-muted-foreground">Main stage · Product</p>
+              </div>
+            </div>
+            {previewBranding.show_powered_by && (
+              <p className="px-4 pb-4 text-[9px] text-muted-foreground">Powered by SpeakerWeave</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function BrandingSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+}) {
+  const id = `branding-${label.toLowerCase().replace(/\s+/g, '-')}`
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <NativeSelect
+        id={id}
+        value={value}
+        onValueChange={onChange}
+        options={options.map((option) => ({
+          value: option,
+          label: option.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase()),
+        }))}
+      />
+    </div>
+  )
+}
+
+function BrandAssetInput({
+  kind,
+  label,
+  preview,
+  onFile,
+  onRemove,
+}: {
+  kind: 'logo' | 'favicon'
+  label: string
+  preview: string | null
+  onFile: (file: File) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-[72px_minmax(0,1fr)] sm:items-center">
+      <div className="flex h-14 w-[72px] items-center justify-center overflow-hidden rounded-md border border-border bg-card p-2">
+        {preview ? (
+          <img src={preview} alt={`${label} preview`} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <span className="text-[10px] text-placeholder">No {kind}</span>
+        )}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={`branding-${kind}`}>{label}</Label>
+        <Input
+          id={`branding-${kind}`}
+          type="file"
+          accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) onFile(file)
+          }}
+        />
+        {preview && (
+          <Button type="button" size="sm" variant="ghost" onClick={onRemove}>
+            Remove {kind}
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }
 

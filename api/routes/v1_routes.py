@@ -96,6 +96,28 @@ async def get_event(event_id: str, auth: tuple = Depends(get_api_org)) -> dict:
     return {"data": await integration_api.get_event(org_id, event_id)}
 
 
+@router.get("/events/{event_id}/branding")
+async def get_event_branding(
+    event_id: str, auth: tuple = Depends(get_api_org)
+) -> dict:
+    """Get the resolved public branding for one event."""
+    org_id, _scopes = auth
+    return {"data": await integration_api.get_event_branding(org_id, event_id)}
+
+
+@router.put("/events/{event_id}/branding")
+async def put_event_branding(
+    event_id: str,
+    body: dict,
+    auth: tuple = Depends(get_api_org),
+) -> dict:
+    """Merge a validated branding patch into one event."""
+    org_id, _scopes = auth
+    return {
+        "data": await integration_api.update_event_branding(org_id, event_id, body)
+    }
+
+
 @router.get("/events/{event_id}/sessions")
 @router.get("/events/{event_id}/submissions")
 async def list_submissions(

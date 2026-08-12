@@ -61,6 +61,13 @@
   textarea {
     @apply text-base md:text-sm;
   }
+
+  [data-branding-root] {
+    font-family: var(--brand-body-font, inherit);
+  }
+  [data-branding-root] :is(h1, h2, h3, h4, h5, h6) {
+    font-family: var(--brand-heading-font, inherit);
+  }
 }
 
 @layer components {

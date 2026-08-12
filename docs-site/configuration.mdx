@@ -31,6 +31,31 @@ Required for everything. This implementation uses **Supabase** (Postgres + Stora
 | `PUBLIC_API_URL` | Public origin of the API, used for absolute calendar-invite links |
 | `VITE_BACKEND_URL` (web) | Backend origin baked at build time; leave empty for same-origin proxying |
 
+## Per-event branding
+
+Each event owns one branding document, edited under **Settings → Branding** or through the v1, agent, and MCP branding tools. Branding is scoped to that event: it changes the public schedule, speaker directory, session dialog, embeds, and public CFP form without repainting another event or the organizer app.
+
+| Field | Values | Default |
+|---|---|---|
+| `accent` | Six hexadecimal digits, without `#`, or `null` | SpeakerWeave terracotta |
+| `background` | Six hexadecimal digits, without `#`, or `null` | Public-page canvas |
+| `surface` | Six hexadecimal digits, without `#`, or `null` | Public card surface |
+| `ink` | Six hexadecimal digits, without `#`, or `null` | Public body text |
+| `heading_font` | A font token from the roster below | `instrument-serif` |
+| `body_font` | A font token from the roster below | `instrument-sans` |
+| `radius` | `none`, `small`, `medium`, or `large` | `medium` |
+| `schedule_layout` | `list`, `tracks`, or `grid` | `list` |
+| `speaker_layout` | `grid` or `list` | `grid` |
+| `density` | `comfortable` or `compact` | `comfortable` |
+| `header_style` | `minimal` or `banner` | `minimal` |
+| `logo_url` / `logo_path` | Server-managed upload URL and storage path | `null` |
+| `favicon_url` / `favicon_path` | Server-managed upload URL and storage path | `null` |
+| `show_powered_by` | Boolean | `true` |
+
+The self-hosted font roster is `instrument-sans`, `instrument-serif`, `inter`, `space-grotesk`, `dm-sans`, `ibm-plex-sans`, `figtree`, `playfair-display`, `source-serif`, `lora`, `jetbrains-mono`, and `ibm-plex-mono`. Public pages load only the event's selected heading and body families; they do not request remote stylesheets or font files.
+
+For embed colors, precedence is **`?accent=` or `data-dais-accent` → stored event branding → SpeakerWeave defaults**. The URL or script attribute override changes only that embed instance.
+
 ## AI: the agent, triage, and every AI surface
 
 The in-app Ask agent, the Slack agent, AI triage, and title generation all run from the same provider configuration. **One key is enough** — bring OpenAI or Anthropic:

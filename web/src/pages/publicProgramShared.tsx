@@ -9,6 +9,12 @@ import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { BrandMark } from '@/ui/brand'
 import { Link } from 'react-router-dom'
 
+import {
+  DEFAULT_BRANDING,
+  brandingStyle,
+  sanitizeBranding,
+  type BrandingConfig,
+} from '@/lib/branding'
 import { initialsOf, sanitizeAccent } from '@/lib/programApi'
 import { cn } from '@/lib/utils'
 import { avatarGradient } from '@/ui/avatar'
@@ -72,39 +78,14 @@ export function Avatar({
   )
 }
 
-/** Scope a validated ?accent=RRGGBB value to one public program page. */
-export function programAccentStyle(value: string | null): CSSProperties | undefined {
+/** Scope URL accent > stored event branding > product defaults to one page. */
+export function programAccentStyle(
+  value: string | null,
+  storedBranding?: BrandingConfig
+): CSSProperties | undefined {
   const accent = sanitizeAccent(value)
-  if (!accent) return undefined
-
-  const red = Number.parseInt(accent.slice(0, 2), 16) / 255
-  const green = Number.parseInt(accent.slice(2, 4), 16) / 255
-  const blue = Number.parseInt(accent.slice(4, 6), 16) / 255
-  const max = Math.max(red, green, blue)
-  const min = Math.min(red, green, blue)
-  const lightness = (max + min) / 2
-  const delta = max - min
-  let hue = 0
-  if (delta) {
-    if (max === red) hue = ((green - blue) / delta) % 6
-    else if (max === green) hue = (blue - red) / delta + 2
-    else hue = (red - green) / delta + 4
-    hue *= 60
-    if (hue < 0) hue += 360
-  }
-  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1))
-  const hsl = `${Math.round(hue)} ${Math.round(saturation * 100)}% ${Math.round(lightness * 100)}%`
-  const strong = `${Math.round(hue)} ${Math.round(saturation * 100)}% ${Math.max(
-    0,
-    Math.round(lightness * 100) - 6
-  )}%`
-
-  return {
-    '--dais-accent': `#${accent}`,
-    '--primary': hsl,
-    '--primary-strong': strong,
-    '--ring': hsl,
-  } as CSSProperties
+  if (!storedBranding && !accent) return undefined
+  return brandingStyle(storedBranding ?? DEFAULT_BRANDING, accent ? { accent } : undefined)
 }
 
 /** The public microsite frame: brand mark, event name, and Schedule/Speakers tabs. */
@@ -113,6 +94,7 @@ export function ProgramShell({
   eventName,
   active,
   accent,
+  branding,
   compact = false,
   children,
 }: {
@@ -120,29 +102,57 @@ export function ProgramShell({
   eventName: string | null | undefined
   active: 'schedule' | 'speakers'
   accent?: string | null
+  branding?: unknown
   compact?: boolean
   children: ReactNode
 }) {
+  const resolvedBranding = sanitizeBranding(branding)
+  const banner = resolvedBranding.header_style === 'banner'
+
   return (
     <div
       data-testid="public-program-page"
+      data-branding-root
       data-compact={compact ? 'true' : undefined}
-      className="min-h-screen bg-card"
-      style={programAccentStyle(accent ?? null)}
+      className="min-h-[100dvh] bg-background text-foreground"
+      style={programAccentStyle(accent ?? null, resolvedBranding)}
     >
       {!compact && <header
         data-testid="program-header"
         className="border-b border-border bg-card"
       >
-        <div className="mx-auto flex w-full max-w-[1280px] items-center gap-3 px-5 py-4 sm:px-14">
-          <BrandMark className="h-5 w-5" />
-          <span className="text-[13px] font-medium tracking-tight text-foreground">SpeakerWeave</span>
-          {eventName && (
+        <div
+          className={cn(
+            'mx-auto flex w-full max-w-[1280px] px-5 sm:px-14',
+            banner ? 'flex-col items-start gap-4 py-8 sm:py-12' : 'items-center gap-3 py-4'
+          )}
+        >
+          {resolvedBranding.logo_url ? (
+            <img
+              src={resolvedBranding.logo_url}
+              alt={eventName || 'Event'}
+              className={cn('max-w-full object-contain object-left', banner ? 'h-16 sm:h-20' : 'h-7 w-auto')}
+            />
+          ) : (
             <>
-              <span className="text-border">/</span>
-              <span className="truncate text-[13px] text-muted-foreground">{eventName}</span>
+              <BrandMark className={banner ? 'h-8 w-8' : 'h-5 w-5'} />
+              {!banner && (
+                <span className="text-[13px] font-medium tracking-tight text-foreground">SpeakerWeave</span>
+              )}
             </>
           )}
+          {banner ? (
+            eventName && (
+              <h1 className="text-3xl font-normal leading-tight tracking-tight text-foreground sm:text-5xl">
+                {eventName}
+              </h1>
+            )
+          ) : eventName ? (
+            <>
+              {!resolvedBranding.logo_url && <span className="text-border">/</span>}
+              <span className="truncate text-[13px] text-muted-foreground">{eventName}</span>
+            </>
+          ) : null}
         </div>
         <div className="mx-auto flex w-full max-w-[1280px] gap-5 px-5 sm:px-14">
           <ShellTab to={`/e/${slug}/schedule`} label="Schedule" active={active === 'schedule'} />
@@ -159,7 +169,11 @@ export function ProgramShell({
       </main>
       <footer className="mx-auto w-full max-w-[1280px] px-5 pb-12 sm:px-14">
         <EmbedSnippet slug={slug} widget={active} />
-        <p className="mt-5 border-t border-border pt-4 text-[11px] text-placeholder">Powered by SpeakerWeave</p>
+        {resolvedBranding.show_powered_by && (
+          <p className="mt-5 border-t border-border pt-4 text-[11px] text-placeholder">
+            Powered by SpeakerWeave
+          </p>
+        )}
       </footer>
     </div>
   )

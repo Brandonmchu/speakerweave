@@ -516,6 +516,12 @@ export function Home() {
         <SpeakerWall />
       </section>
 
+      {/* The hero and the section under it share a ground, so the page needs a
+          seam of its own — a hairline that fades out at both ends. */}
+      <div className="wrap">
+        <hr className="seam rv" />
+      </div>
+
       {/* ── agentic ──────────────────────────────────────────────────────── */}
       {/* The surface tabs below say "wherever you already work" better than a
           card row under the hero did, so this section carries that claim alone.

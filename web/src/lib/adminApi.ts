@@ -13,6 +13,7 @@
  */
 
 import { apiGet, apiPatch, apiPost, request, unwrapList, type RequestOptions } from '@/lib/api'
+import type { BrandingConfig } from '@/lib/branding'
 
 // --- verbs api.ts doesn't have --------------------------------------------
 
@@ -292,7 +293,10 @@ export interface CreateEventInput {
  * an existing event's public URL is the organizer's to choose. A collision comes
  * back as a 409 rather than a silent suffix.
  */
-export type EventPatch = Partial<CreateEventInput> & { slug?: string | null }
+export type EventPatch = Partial<CreateEventInput> & {
+  slug?: string | null
+  branding?: Partial<BrandingConfig>
+}
 
 export function createEvent(input: CreateEventInput): Promise<EventRow> {
   return apiPost<{ event: EventRow }>('/api/events', input).then((r) => r.event)
@@ -313,6 +317,30 @@ export interface EventRow {
   ends_at?: string | null
   timezone?: string | null
   location?: string | null
+  branding?: BrandingConfig
+}
+
+export async function uploadEventBrandAsset(
+  eventId: string,
+  kind: 'logo' | 'favicon',
+  file: File
+): Promise<BrandingConfig> {
+  const form = new FormData()
+  form.append('file', file)
+  const wire = await request<{ branding: BrandingConfig & { event_id?: string } }>(
+    `/api/events/${encodeURIComponent(eventId)}/branding/${kind}`,
+    { method: 'POST', body: form }
+  )
+  return wire.branding
+}
+
+export function deleteEventBrandAsset(
+  eventId: string,
+  kind: 'logo' | 'favicon'
+): Promise<BrandingConfig> {
+  return apiDelete<{ branding: BrandingConfig }>(
+    `/api/events/${encodeURIComponent(eventId)}/branding/${kind}`
+  ).then((wire) => wire.branding)
 }
 
 export function listEvents(): Promise<EventRow[]> {

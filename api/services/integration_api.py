@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from postgrest.exceptions import APIError
 
 from app.core.settings import settings
-from services import content_pipeline, evaluations
+from services import branding, content_pipeline, evaluations
 from services.magic_links import mint
 from services.org_scope import fetch_event
 from services.speaker_crm import full_name, looks_like_email, normalize_email
@@ -112,6 +112,7 @@ def _serialize_event(row: dict) -> dict:
         "starts_at": row.get("starts_at"),
         "ends_at": row.get("ends_at"),
         "timezone": row.get("timezone"),
+        "branding": branding.resolve_branding(row),
     }
 
 
@@ -301,8 +302,84 @@ async def list_events(
 
 
 async def get_event(org_id: str, event_id: str) -> dict:
-    event = await fetch_event(event_id, org_id)
+    event = await fetch_event(event_id, org_id, columns="*")
     return _serialize_event(event)
+
+
+def _branding_result(event: dict, resolved: dict) -> dict:
+    slug = event.get("slug")
+    return {
+        "event_id": event.get("id"),
+        "slug": slug,
+        "public_url": (
+            f"{settings.frontend_url.rstrip('/')}/e/{slug}/schedule" if slug else None
+        ),
+        **resolved,
+    }
+
+
+async def get_event_branding(org_id: str, event_id: str) -> dict:
+    """Return one event's complete branding contract, scoped to ``org_id``."""
+    event = await fetch_event(
+        event_id,
+        org_id,
+        columns="id, slug, branding",
+    )
+    return _branding_result(event, branding.resolve_branding(event))
+
+
+async def update_event_branding(
+    org_id: str,
+    event_id: str,
+    patch: dict,
+    *,
+    server_managed: bool = False,
+) -> dict:
+    """Merge and persist an event branding patch through the sole write path.
+
+    ``server_managed`` is reserved for the authenticated logo/favicon routes;
+    all public/admin/v1/agent/MCP document patches pass through the client
+    validator and therefore cannot forge Storage paths or URLs.
+    """
+    event = await fetch_event(
+        event_id,
+        org_id,
+        columns="id, slug, branding",
+    )
+    if server_managed:
+        invalid = sorted(set(patch) - branding.SERVER_MANAGED_KEYS)
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"branding.{invalid[0]} is not server-managed; valid values: "
+                    + ", ".join(sorted(branding.SERVER_MANAGED_KEYS))
+                ),
+            )
+        for key, value in patch.items():
+            if value is not None and not isinstance(value, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"branding.{key} must be one of: a URL/path string, null",
+                )
+        validated = dict(patch)
+    else:
+        validated = branding.validate_branding_patch(patch)
+
+    merged = branding.merge_branding(event.get("branding") or {}, validated)
+    updated = first(
+        await db(
+            lambda: supabase.table("events")
+            .update({"branding": merged})
+            .eq("id", event_id)
+            .eq("org_id", org_id)
+            .execute(),
+            "integration_update_event_branding",
+        )
+    )
+    if not updated:
+        raise _not_found("Event")
+    return _branding_result(updated, branding.resolve_branding(updated))
 
 
 async def resolve_event(org_id: str, reference: str | None) -> dict:

@@ -10,6 +10,8 @@ import {
   speakerKey,
   type ProgramSpeaker,
 } from '@/lib/programApi'
+import { sanitizeBranding, type BrandingConfig } from '@/lib/branding'
+import { useBrandingFavicon, useBrandingFonts } from '@/lib/brandFonts'
 import { cn } from '@/lib/utils'
 import { avatarGradient } from '@/ui/avatar'
 import { Input } from '@/ui/input'
@@ -36,7 +38,7 @@ export function PublicSpeakers() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
   const embed = searchParams.get('embed') === '1'
-  const compact = searchParams.get('compact') === '1'
+  const urlCompact = searchParams.get('compact') === '1'
   const accent = searchParams.get('accent')
   const requestedTrack = searchParams.get('track')?.trim() ?? ''
 
@@ -46,6 +48,13 @@ export function PublicSpeakers() {
     enabled: Boolean(slug),
     retry: false,
   })
+  const branding = useMemo(
+    () => sanitizeBranding(query.data?.event.branding),
+    [query.data?.event.branding]
+  )
+  useBrandingFonts(branding)
+  useBrandingFavicon(branding)
+  const compact = urlCompact || branding.density === 'compact'
 
   // De-duplicated ONCE, here: every consumer below — the search filter, the
   // result count, the rendered cards — reads this same array, so the number on
@@ -61,9 +70,12 @@ export function PublicSpeakers() {
   const [track, setTrack] = useState(requestedTrack)
   // ?view=list deep-links the directory rendering (the embeddable "list of
   // speakers"); the photo grid is the default.
-  const [view, setView] = useState<SpeakerView>(
-    searchParams.get('view') === 'list' || compact ? 'list' : 'gallery'
-  )
+  const [viewOverride, setViewOverride] = useState<SpeakerView | null>(null)
+  const requestedView = searchParams.get('view') === 'list' ? 'list' : null
+  const view: SpeakerView =
+    viewOverride ??
+    requestedView ??
+    (compact || branding.speaker_layout === 'list' ? 'list' : 'gallery')
 
   // The personal schedule is shared with the schedule page (same localStorage),
   // so a session starred from a speaker's dialog also lights up on the agenda.
@@ -158,7 +170,7 @@ export function PublicSpeakers() {
               />
             </div>
           </div>
-          <ViewToggle view={view} onChange={setView} />
+          <ViewToggle view={view} onChange={setViewOverride} />
           </div>
         </div>
         {filtered.length === 0 ? (
@@ -205,6 +217,8 @@ export function PublicSpeakers() {
         zone={zone}
         onOpenSession={openSession}
         onClose={() => setSelected(null)}
+        branding={branding}
+        accent={accent}
       />
       <SessionDetailDialog
         slug={slug}
@@ -213,6 +227,8 @@ export function PublicSpeakers() {
         starred={starred}
         onToggleStar={toggle}
         onClose={() => setSelectedSessionId(null)}
+        branding={branding}
+        accent={accent}
       />
     </>
   )
@@ -221,9 +237,10 @@ export function PublicSpeakers() {
     return (
       <div
         data-testid="public-program-page"
+        data-branding-root
         data-compact={compact ? 'true' : undefined}
         className={compact ? 'px-1 py-1' : 'px-1 py-2'}
-        style={programAccentStyle(accent)}
+        style={programAccentStyle(accent, branding)}
       >
         {content}
       </div>
@@ -237,10 +254,11 @@ export function PublicSpeakers() {
       active="speakers"
       accent={accent}
       compact={compact}
+      branding={branding}
     >
       {!compact && query.data && (
         <header className="mb-7">
-          <h1 className="font-serif text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">Speakers</h1>
+          <h1 className="text-[40px] font-normal leading-[1.08] tracking-[-0.03em] text-foreground">Speakers</h1>
           <p
             role="status"
             data-testid="speaker-result-count"
@@ -408,15 +426,23 @@ function SpeakerDialog({
   zone,
   onOpenSession,
   onClose,
+  branding,
+  accent,
 }: {
   speaker: ProgramSpeaker | null
   zone: string | null
   onOpenSession: (sessionId: string) => void
   onClose: () => void
+  branding: BrandingConfig
+  accent: string | null
 }) {
   return (
     <Dialog open={speaker !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        data-branding-root
+        style={programAccentStyle(accent, branding)}
+      >
         {speaker && (
           <>
             <DialogHeader>

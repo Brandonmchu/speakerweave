@@ -38,8 +38,14 @@ function at(seconds: number): CSSProperties {
 }
 
 /**
- * Lands `.in` on the demo root once it is on screen, mirroring `useReveal`.
- * Reduced motion (or a browser without the observer) lands it immediately.
+ * Lands `.in` on the demo root, immediately if it is already on screen.
+ *
+ * Waiting for an intersection is the right default for a page of reveals, but
+ * the wrong one for a demo that mounts in place: the surface tabs swap demos
+ * under a stage the visitor is already looking at, and that demo must start
+ * playing rather than wait for a scroll that will never come. Anything below
+ * the fold still waits, so scrolling down finds the sequence at its first frame
+ * instead of its last.
  */
 function useDemoReveal<T extends HTMLElement>() {
   const ref = useRef<T | null>(null)
@@ -51,8 +57,10 @@ function useDemoReveal<T extends HTMLElement>() {
     const reduced =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const box = node.getBoundingClientRect()
+    const onScreen = box.top < window.innerHeight && box.bottom > 0
 
-    if (reduced || typeof IntersectionObserver === 'undefined') {
+    if (reduced || onScreen || typeof IntersectionObserver === 'undefined') {
       node.classList.add('in')
       return
     }

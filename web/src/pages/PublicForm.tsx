@@ -27,6 +27,8 @@ import {
   type SubmissionInput,
   type SubmissionReceipt,
 } from '@/lib/api'
+import { brandingStyle, sanitizeBranding } from '@/lib/branding'
+import { useBrandingFavicon, useBrandingFonts } from '@/lib/brandFonts'
 import {
   evaluateRules,
   isFieldRequired,
@@ -427,7 +429,7 @@ export function PublicForm() {
 
   if (receipt) {
     return (
-      <PublicShell eyebrow={form.event_name ?? undefined}>
+      <PublicShell eyebrow={form.event_name ?? undefined} branding={form.branding}>
         <div className="flex flex-col items-center py-6 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success/12">
             <CheckCircle2 className="h-7 w-7 text-success-strong" />
@@ -483,7 +485,7 @@ export function PublicForm() {
   if (form.closed) {
     const closedAt = form.close_at ? new Date(form.close_at) : null
     return (
-      <PublicShell eyebrow={form.event_name ?? undefined}>
+      <PublicShell eyebrow={form.event_name ?? undefined} branding={form.branding}>
         <div className="flex flex-col items-center py-6 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
             <Lock className="h-6 w-6 text-muted-foreground" />
@@ -511,7 +513,7 @@ export function PublicForm() {
   const closeAt = form.close_at ? new Date(form.close_at) : null
 
   return (
-    <PublicShell eyebrow={form.event_name ?? undefined}>
+    <PublicShell eyebrow={form.event_name ?? undefined} branding={form.branding}>
       {submissionLimit != null && (
         <div className="mb-6 rounded-lg border border-border bg-card px-4 py-3 text-center text-sm font-medium text-foreground">
           Submission Limit: {submissionLimit} submission{submissionLimit === 1 ? '' : 's'} per user
@@ -786,16 +788,41 @@ export function PublicForm() {
 
 // --- pieces ---------------------------------------------------------------
 
-function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: string }) {
+function PublicShell({
+  children,
+  eyebrow,
+  branding,
+}: {
+  children: ReactNode
+  eyebrow?: string
+  branding?: unknown
+}) {
+  const resolvedBranding = sanitizeBranding(branding)
+  useBrandingFonts(resolvedBranding)
+  useBrandingFavicon(resolvedBranding)
   return (
-    <div className="min-h-screen bg-background">
+    <div
+      data-branding-root
+      className="min-h-[100dvh] bg-background text-foreground"
+      style={brandingStyle(resolvedBranding)}
+    >
       <div className="mx-auto w-full max-w-[920px] px-5 py-10 sm:py-16">
         <div className="mb-6 flex items-center gap-2">
-          <BrandMark className="h-7 w-7" />
-          <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
+          {resolvedBranding.logo_url ? (
+            <img
+              src={resolvedBranding.logo_url}
+              alt={eyebrow || 'Event'}
+              className="h-10 max-w-[220px] object-contain object-left"
+            />
+          ) : (
+            <>
+              <BrandMark className="h-7 w-7" />
+              <span className="text-sm font-semibold tracking-tight text-foreground">speakerweave</span>
+            </>
+          )}
           {eyebrow && (
             <>
-              <span className="text-border">/</span>
+              {!resolvedBranding.logo_url && <span className="text-border">/</span>}
               <span className="truncate text-sm text-muted-foreground">{eyebrow}</span>
             </>
           )}
@@ -807,8 +834,12 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
           <Link to="/speaker-signin" className="font-medium text-primary hover:underline">
             Speaker sign in
           </Link>
-          <span aria-hidden> · </span>
-          Powered by SpeakerWeave
+          {resolvedBranding.show_powered_by && (
+            <>
+              <span aria-hidden> · </span>
+              Powered by SpeakerWeave
+            </>
+          )}
         </p>
       </div>
     </div>

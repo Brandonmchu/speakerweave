@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 # mcp 2.x renamed FastMCP to MCPServer; openai-agents (chat agent's OpenAI lane)
@@ -268,6 +268,88 @@ async def ai_triage(ctx: Context, plan: str) -> dict[str, Any]:
     return {"data": await integration_api.run_ai_triage(_org_id(ctx), plan)}
 
 
+FontToken = Literal[
+    "instrument-sans",
+    "instrument-serif",
+    "inter",
+    "space-grotesk",
+    "dm-sans",
+    "ibm-plex-sans",
+    "figtree",
+    "playfair-display",
+    "source-serif",
+    "lora",
+    "jetbrains-mono",
+    "ibm-plex-mono",
+]
+RadiusToken = Literal["none", "small", "medium", "large"]
+ScheduleLayout = Literal["list", "tracks", "grid"]
+SpeakerLayout = Literal["grid", "list"]
+DensityToken = Literal["comfortable", "compact"]
+HeaderStyle = Literal["minimal", "banner"]
+
+
+@mcp_server.tool()
+async def get_event_branding(ctx: Context, event: str) -> dict[str, Any]:
+    """Get an event's resolved public colors, fonts, assets, and layouts."""
+    event_id = await _event_id(ctx, event)
+    return {
+        "data": await integration_api.get_event_branding(_org_id(ctx), event_id)
+    }
+
+
+@mcp_server.tool()
+async def set_event_branding(
+    ctx: Context,
+    event: str,
+    accent: str | None = None,
+    background: str | None = None,
+    surface: str | None = None,
+    ink: str | None = None,
+    heading_font: FontToken | None = None,
+    body_font: FontToken | None = None,
+    radius: RadiusToken | None = None,
+    schedule_layout: ScheduleLayout | None = None,
+    speaker_layout: SpeakerLayout | None = None,
+    density: DensityToken | None = None,
+    header_style: HeaderStyle | None = None,
+    show_powered_by: bool | None = None,
+    reset: list[str] | None = None,
+) -> dict[str, Any]:
+    """Merge selected branding properties into an event's public identity.
+
+    Color values are six hexadecimal digits without a leading ``#``. Omitted
+    properties stay unchanged; to clear one back to its default, name it in
+    ``reset`` — an omitted argument and an explicit null are indistinguishable
+    in this signature, so clearing needs its own channel.
+    """
+    event_id = await _event_id(ctx, event)
+    values = {
+        "accent": accent,
+        "background": background,
+        "surface": surface,
+        "ink": ink,
+        "heading_font": heading_font,
+        "body_font": body_font,
+        "radius": radius,
+        "schedule_layout": schedule_layout,
+        "speaker_layout": speaker_layout,
+        "density": density,
+        "header_style": header_style,
+        "show_powered_by": show_powered_by,
+    }
+    patch: dict[str, Any] = {
+        key: value for key, value in values.items() if value is not None
+    }
+    for key in reset or ():
+        patch[str(key)] = None
+    return {
+        "data": await integration_api.update_event_branding(
+            _org_id(ctx), event_id, patch
+        )
+    }
+
+
 def _resource_json(value: dict[str, Any]) -> str:
     return json.dumps(value, default=str, separators=(",", ":"))
 
@@ -311,6 +393,19 @@ async def content_status_resource(event: str, ctx: Context) -> str:
     event_id = await _event_id(ctx, event)
     return _resource_json(
         await integration_api.content_status(_org_id(ctx), event_id)
+    )
+
+
+@mcp_server.resource(
+    "dais://events/{event}/branding",
+    name="event-branding",
+    description="Resolved branding JSON for one event.",
+    mime_type="application/json",
+)
+async def branding_resource(event: str, ctx: Context) -> str:
+    event_id = await _event_id(ctx, event)
+    return _resource_json(
+        await integration_api.get_event_branding(_org_id(ctx), event_id)
     )
 
 

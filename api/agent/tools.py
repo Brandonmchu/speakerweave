@@ -21,7 +21,7 @@ from agent.permissions import (
     strip_display_fields,
     with_permission_guidance,
 )
-from services import assistant, content_pipeline, integration_api
+from services import assistant, branding, content_pipeline, integration_api
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
 
@@ -122,6 +122,84 @@ NEW_TOOLS: list[dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {"event": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_event_branding",
+        "description": "Get an event's colors, fonts, logo, and public-page layouts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event": {
+                    "type": "string",
+                    "description": "Event id or public slug.",
+                }
+            },
+            "required": ["event"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_event_branding",
+        "description": (
+            "Update selected colors, fonts, and public-page layouts for an event. "
+            "Omitted properties stay unchanged."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event": {
+                    "type": "string",
+                    "description": "Event id or public slug.",
+                },
+                "accent": {
+                    "type": ["string", "null"],
+                    "description": "Accent color as 6 hex digits, no #; null resets it.",
+                },
+                "background": {
+                    "type": ["string", "null"],
+                    "description": "Page color as 6 hex digits, no #; null resets it.",
+                },
+                "surface": {
+                    "type": ["string", "null"],
+                    "description": "Card color as 6 hex digits, no #; null resets it.",
+                },
+                "ink": {
+                    "type": ["string", "null"],
+                    "description": "Text color as 6 hex digits, no #; null resets it.",
+                },
+                "heading_font": {
+                    "type": "string",
+                    "enum": list(branding.FONT_TOKENS),
+                },
+                "body_font": {
+                    "type": "string",
+                    "enum": list(branding.FONT_TOKENS),
+                },
+                "radius": {
+                    "type": "string",
+                    "enum": list(branding.RADIUS_VALUES),
+                },
+                "schedule_layout": {
+                    "type": "string",
+                    "enum": list(branding.SCHEDULE_LAYOUT_VALUES),
+                },
+                "speaker_layout": {
+                    "type": "string",
+                    "enum": list(branding.SPEAKER_LAYOUT_VALUES),
+                },
+                "density": {
+                    "type": "string",
+                    "enum": list(branding.DENSITY_VALUES),
+                },
+                "header_style": {
+                    "type": "string",
+                    "enum": list(branding.HEADER_STYLE_VALUES),
+                },
+                "show_powered_by": {"type": "boolean"},
+            },
+            "required": ["event"],
             "additionalProperties": False,
         },
     },
@@ -304,6 +382,27 @@ async def _publish_schedule(
     }
 
 
+async def _get_event_branding(
+    org_id: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    event = await integration_api.resolve_event(org_id, str(arguments["event"]))
+    return {
+        "data": await integration_api.get_event_branding(org_id, str(event["id"]))
+    }
+
+
+async def _set_event_branding(
+    org_id: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    event = await integration_api.resolve_event(org_id, str(arguments["event"]))
+    patch = {key: value for key, value in arguments.items() if key != "event"}
+    return {
+        "data": await integration_api.update_event_branding(
+            org_id, str(event["id"]), patch
+        )
+    }
+
+
 async def _invite_speaker_to_portal(
     org_id: str, arguments: dict[str, Any]
 ) -> dict[str, Any]:
@@ -327,6 +426,8 @@ LOCAL_TOOL_HANDLERS: dict[
     "list_content_items": _list_content_items,
     "get_content_item": _get_content_item,
     "publish_schedule": _publish_schedule,
+    "get_event_branding": _get_event_branding,
+    "set_event_branding": _set_event_branding,
     "invite_speaker_to_portal": _invite_speaker_to_portal,
     "remind_outstanding_content": _remind_outstanding_content,
 }
@@ -359,6 +460,14 @@ _TOOL_MESSAGES: dict[str, tuple[str, str]] = {
     "publish_schedule": (
         "Working with publish_schedule",
         "Preparing the schedule to publish…",
+    ),
+    "get_event_branding": (
+        "Working with get_event_branding",
+        "Looking at the event's branding…",
+    ),
+    "set_event_branding": (
+        "Working with set_event_branding",
+        "Updating the event's branding…",
     ),
     "invite_speaker_to_portal": (
         "Working with invite_speaker_to_portal",
@@ -420,14 +529,16 @@ def _event_entity(
 ) -> dict[str, Any] | None:
     data = result.get("data") if isinstance(result, dict) else None
     data = data if isinstance(data, dict) else {}
-    entity_id = str(data.get("id") or arguments.get("event") or "")
+    entity_id = str(
+        data.get("id") or data.get("event_id") or arguments.get("event") or ""
+    )
     if not entity_id:
         return None
     return {
         "entity_type": "event",
         "entity_id": entity_id,
         "change_type": "updated",
-        "display": str(data.get("name") or "Event schedule"),
+        "display": str(data.get("name") or "Event"),
     }
 
 
@@ -436,6 +547,7 @@ _ENTITY_TOOL_SPECS: dict[
 ] = {
     "decide_submission": _submission_entity,
     "publish_schedule": _event_entity,
+    "set_event_branding": _event_entity,
 }
 
 
