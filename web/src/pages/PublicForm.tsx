@@ -602,6 +602,21 @@ export function PublicForm() {
         />
       )}
 
+      {/* Four promises, all of them already true on this page: the anxiety a
+          speaker brings to a CFP form is losing work and being locked out of
+          their own submission, and both are already solved — silently, which
+          helps nobody. Autosave is `draftStorageKey` above; the manage link is
+          on the confirmation screen; editing closes when the call does. */}
+      <ul
+        className="mt-5 flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground"
+        aria-label="What to expect"
+      >
+        <li>One page.</li>
+        <li>No account needed.</li>
+        <li>Your draft saves as you type.</li>
+        <li>Edit or withdraw until the call closes.</li>
+      </ul>
+
       <form ref={formRef} onSubmit={handleSubmit} noValidate className="mt-8 space-y-8">
         <section className="space-y-5">
           <SectionHeading title="About you" />

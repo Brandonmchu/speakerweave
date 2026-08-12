@@ -43,4 +43,5 @@ export function preloadOrganizerRoute(path: string): void {
 }
 export const loadKillMySaas = () => import('@/pages/KillMySaas')
 export const loadJudge = () => import('@/pages/Judge')
+export const loadManifesto = () => import('@/pages/Manifesto')
 export const loadOpenSource = () => import('@/pages/OpenSource')

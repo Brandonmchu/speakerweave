@@ -8,6 +8,7 @@ import {
   loadApiDocs,
   loadChooseWorkspace,
   loadJudge,
+  loadManifesto,
   loadKillMySaas,
   loadOpenSource,
   loadComms,
@@ -52,6 +53,9 @@ const LazyKillMySaas = lazy(() =>
   loadKillMySaas().then(({ KillMySaas }) => ({ default: KillMySaas })),
 )
 const LazyJudge = lazy(() => loadJudge().then(({ Judge }) => ({ default: Judge })))
+const LazyManifesto = lazy(() =>
+  loadManifesto().then(({ Manifesto }) => ({ default: Manifesto })),
+)
 const LazyOpenSource = lazy(() =>
   loadOpenSource().then(({ OpenSource }) => ({ default: OpenSource })),
 )
@@ -277,6 +281,14 @@ export default function App() {
           }
         />
         {/* One URL to hand somebody evaluating this: every door, in one place. */}
+        <Route
+          path="/manifesto"
+          element={
+            <DeferredPage fullPage>
+              <LazyManifesto />
+            </DeferredPage>
+          }
+        />
         <Route
           path="/judge"
           element={

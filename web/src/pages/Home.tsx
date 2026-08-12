@@ -75,7 +75,7 @@ const FIXES = [
  * map of the year, and the detail lives in the demo further down.
  */
 const LIFECYCLE = [
-  { title: 'Call for Papers', body: 'Every proposal arrives on one clean form.' },
+  { title: 'Call for Papers', body: 'One page, no account, drafts that survive.' },
   { title: 'Review', body: 'Committees score blind, without a spreadsheet.' },
   { title: 'Decisions', body: 'Accept, reject and notify in one pass.' },
   { title: 'Speaker Portal', body: 'Speakers onboard themselves.' },

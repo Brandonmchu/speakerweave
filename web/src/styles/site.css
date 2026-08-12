@@ -456,6 +456,54 @@ body.sw-site-active {
   color: var(--sw-dmute);
 }
 
+/* Seven numbered positions. Numbered because the order is an argument, and a
+   reader who disagrees with one should be able to point at which. */
+.sw-site .beliefs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: 76ch;
+}
+.sw-site .beliefs li {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  padding: 26px 0;
+  border-top: 1px solid var(--sw-dline);
+}
+.sw-site .beliefs li:first-child {
+  border-top: 0;
+  padding-top: 6px;
+}
+.sw-site .beliefs em {
+  font-family: var(--sw-mono);
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--sw-accent-lite);
+  padding-top: 4px;
+}
+.sw-site .beliefs h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--sw-dbright);
+}
+.sw-site .beliefs p {
+  margin: 9px 0 0;
+  font-size: 14.5px;
+  line-height: 1.68;
+  color: var(--sw-dmute);
+}
+
+@media (max-width: 620px) {
+  .sw-site .beliefs li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* The machine-readable surfaces, one card each. */
 .sw-site .surfacecards {
   display: grid;

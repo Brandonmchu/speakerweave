@@ -155,6 +155,7 @@ const PRODUCT_MENU = [
 
 /** Everything for people who want to read, extend, or self-host it. */
 const RESOURCE_MENU = [
+  { label: 'Manifesto', to: '/manifesto', hint: 'What this believes, and why' },
   { label: 'Developers', to: DEVELOPERS_URL, hint: 'API, MCP tools, webhooks' },
   { label: 'Docs', to: DOCS_URL, hint: 'Guides and reference', external: true },
   { label: 'Open source', to: '/open-source', hint: 'MIT, end to end' },
@@ -290,6 +291,8 @@ export function SiteFooter() {
               {label}
             </Link>
           ))}
+          <Link to="/judge">Open it as any role</Link>
+          <Link to="/manifesto">Manifesto</Link>
           <Link to={DEVELOPERS_URL}>Developers</Link>
           <Link to="/speaker-signin">Speaker sign in</Link>
           <Link to={ORGANIZER_SIGNIN_URL}>Organizer sign in</Link>
