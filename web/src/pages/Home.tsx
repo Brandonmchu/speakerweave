@@ -602,49 +602,11 @@ export function Home() {
         <SpeakerWall />
       </section>
 
-      {/* ── the problem ──────────────────────────────────────────────────── */}
-      {/* Said before any feature is: an organizer recognises their own year in
-          the left column, and the right column is the answer to that exact
-          line rather than a list of capabilities. The ground changes here, so
-          this band is also the seam between the hero and everything after. */}
-      <section className="light" data-testid="problem-section">
-        <div className="wrap">
-          <div className="rv" style={{ maxWidth: '54ch' }}>
-            <p className="eyebrow">Why this exists</p>
-            <h2 className="h2 serif">You have run this conference before.</h2>
-          </div>
-          <div className="ledger rv" style={vars({ '--d': '.08s' })}>
-            <div>
-              <p className="eyebrow">What the year usually costs</p>
-              <ul className="pains">
-                {PAINS.map((pain) => (
-                  <li key={pain}>{pain}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <p className="eyebrow">What this does instead</p>
-              <ul className="fixes">
-                {FIXES.map((fix) => (
-                  <li key={fix}>{fix}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          {/* The claim above is ours; this is somebody else's. */}
-          <div className="proof rv" style={vars({ '--d': '.12s' })}>
-            <b>100 / 100</b>
-            <p>
-              on the independent SessionBoard evaluation — all seven areas, 96 rubric items, 197
-              weighted points, graded by a browser agent with no help from us.
-            </p>
-            <Link to="/killmysaas" className="arrowlink">
-              Read the scorecard →
-            </Link>
-          </div>
-        </div>
-      </section>
+      {/* The hero and the section under it share a ground again, so the page
+          needs its own seam — a hairline that fades out at both ends. */}
+      <div className="wrap">
+        <hr className="hairline rv" />
+      </div>
 
       {/* ── agentic ──────────────────────────────────────────────────────── */}
       {/* The surface tabs below say "wherever you already work" better than a
@@ -742,6 +704,48 @@ export function Home() {
               </Link>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── the problem ──────────────────────────────────────────────────── */}
+      {/* Last, not first: the demos have already shown what this does, so the
+          two columns land as recognition rather than as a pitch — the year an
+          organizer already had, and beside each line the thing that replaces
+          it. The verdict underneath is the one claim that is not ours. */}
+      <section className="wrap sect" data-testid="problem-section">
+        <div className="rv" style={{ maxWidth: '54ch' }}>
+          <p className="eyebrow">Why this exists</p>
+          <h2 className="h2 serif">You have run this conference before.</h2>
+        </div>
+        <div className="ledger rv" style={vars({ '--d': '.08s' })}>
+          <div>
+            <p className="eyebrow">What the year usually costs</p>
+            <ul className="pains">
+              {PAINS.map((pain) => (
+                <li key={pain}>{pain}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="eyebrow">What this does instead</p>
+            <ul className="fixes">
+              {FIXES.map((fix) => (
+                <li key={fix}>{fix}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* The claim above is ours; this is somebody else's. */}
+        <div className="proof rv" style={vars({ '--d': '.12s' })}>
+          <b>100 / 100</b>
+          <p>
+            on the independent SessionBoard evaluation — all seven areas, 96 rubric items, 197
+            weighted points, graded by a browser agent with no help from us.
+          </p>
+          <Link to="/killmysaas" className="arrowlink">
+            Read the scorecard →
+          </Link>
         </div>
       </section>
 
