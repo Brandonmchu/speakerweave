@@ -769,6 +769,17 @@ body.sw-site-active {
   padding-top: 70px;
   padding-bottom: 72px;
 }
+
+/* A section that ends where the ground changes must close itself. Sections on
+   the ink ground normally borrow their bottom gap from the next section's top
+   padding, which works until the next thing is a full-bleed paper band — then
+   the colour changes right under the last line and the section reads as
+   clipped. This is a floor, not an override: sections that already pad
+   themselves (`.sect`, `.factsect`) keep their own larger value. */
+.sw-site main > section:not(.light):not(.doc):has(+ .light),
+.sw-site main > section:not(.light):not(.doc):has(+ .doc) {
+  padding-bottom: max(72px, var(--sw-close, 0px));
+}
 /* Where the agent runs, as a row of cards directly under the hero. This replaced
    a strip of project statistics: true, but the wrong first thing to say. */
 .sw-site .wherelede {

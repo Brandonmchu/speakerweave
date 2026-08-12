@@ -130,7 +130,12 @@ describe('organizer content library fetchers', () => {
     const blob = await fetchContentBundle('e1')
     expect(last().url).toBe('/api/events/e1/content/export')
     expect(last().headers.get('Authorization')).toBe('Bearer admin-token')
-    expect(blob).toBeInstanceOf(Blob)
+    // Realm-agnostic Blob check: on Node 20 the fetch mock's Blob comes from a
+    // different global than the test's, so instanceof fails while the value is
+    // a perfectly good Blob. Assert the contract instead of the constructor.
+    expect(typeof blob.size).toBe('number')
+    expect(blob.size).toBeGreaterThan(0)
+    expect(typeof blob.type).toBe('string')
   })
 
   it('fetchContentBundle carries the selected ids through to the request', async () => {
