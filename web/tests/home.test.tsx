@@ -97,7 +97,8 @@ describe('Home landing', () => {
       screen.getByRole('heading', { name: 'Every speaker, from submission to stage.' })
     ).toBeInTheDocument()
     expect(screen.getByText(/SpeakerWeave runs your whole conference/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Enter the demo workspace/i })).toBeInTheDocument()
+    // The same entry point opens the page and closes it.
+    expect(screen.getAllByRole('button', { name: /Enter the demo workspace/i })).toHaveLength(2)
     expect(screen.getByText('No sign-up. Jump into a fully seeded workspace.')).toBeInTheDocument()
   })
 
@@ -199,32 +200,21 @@ describe('Home landing', () => {
     expect(href(/Sign in with your account/i)).toContain('/sign-in')
   })
 
-  it('presents the open-source posture, stack, and swappable infrastructure', () => {
+  it('closes on the sign-up CTA, with the open-source posture beneath it', () => {
     renderHome()
 
+    // The page ends on the two ways in; what the project is made of lives on
+    // its own page rather than in a stack table on the landing page.
+    expect(screen.queryByTestId('stack-section')).toBeNull()
+    expect(
+      screen.getByRole('heading', { name: 'Run your next conference on it.' })
+    ).toBeInTheDocument()
+
     const openSource = screen.getByTestId('open-source-section')
-    expect(within(openSource).getByRole('heading', { name: 'Open source' })).toBeInTheDocument()
-    expect(openSource).toHaveTextContent('SpeakerWeave is open source')
-    expect(openSource).toHaveTextContent('MIT licensed from end to end')
+    expect(openSource).toHaveTextContent('MIT licensed')
     expect(within(openSource).getByRole('link', { name: /source repository/i })).toHaveAttribute(
       'href',
       REPO_URL
-    )
-
-    const stack = screen.getByTestId('stack-section')
-    expect(within(stack).getByRole('heading', { name: 'The stack' })).toBeInTheDocument()
-    for (const technology of [
-      'FastAPI',
-      'React + Vite',
-      'Supabase (Postgres)',
-      'Clerk',
-      'Resend',
-      'Railway',
-    ]) {
-      expect(within(stack).getByText(technology)).toBeInTheDocument()
-    }
-    expect(stack).toHaveTextContent(
-      'Swap auth, email, hosting, or data providers without touching the domain core'
     )
     expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
       'href',
@@ -241,7 +231,7 @@ describe('Home landing', () => {
       'Review',
       'Decisions',
       'Speaker Portal',
-      'Agenda Builder',
+      'Agenda',
       'Publish',
       'Speaker CRM',
     ]) {
@@ -300,7 +290,7 @@ describe('Home landing', () => {
 
   it('the primary CTA fetches a demo token, stores it, and lands in the app', async () => {
     renderHome()
-    fireEvent.click(screen.getByRole('button', { name: /Enter the demo workspace/i }))
+    fireEvent.click(screen.getAllByRole('button', { name: /Enter the demo workspace/i })[0])
     expect(await screen.findByText('Dashboard reached')).toBeInTheDocument()
     expect(calls).toContain('/public/demo-token')
     expect(window.localStorage.getItem('dais.token')).toBe('demo.jwt.token')

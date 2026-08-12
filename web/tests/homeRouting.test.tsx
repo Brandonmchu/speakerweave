@@ -43,9 +43,10 @@ afterEach(() => {
 describe('Home + public-alias routing', () => {
   it('renders the public landing at / for an unauthenticated visitor (no redirect)', async () => {
     renderApp('/')
+    // The landing opens and closes on the same entry point, hence *All*.
     expect(
-      await screen.findByRole('button', { name: /Enter the demo workspace/i })
-    ).toBeInTheDocument()
+      await screen.findAllByRole('button', { name: /Enter the demo workspace/i })
+    ).not.toHaveLength(0)
     // Stayed on / — not bounced to the auth wall.
     expect(pathname()).toBe('/')
     expect(screen.queryByText('Developer sign-in')).not.toBeInTheDocument()

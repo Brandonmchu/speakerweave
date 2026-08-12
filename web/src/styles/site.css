@@ -158,8 +158,9 @@ body.sw-site-active {
   color: var(--sw-accent-hover);
 }
 
-/* Attendee-portal menu. The three attendee pages sit under one label so the
-   top level reads as audiences rather than as a list of routes. */
+/* Nav menus. Three of them — Product, Resources, Sign in — so the top level
+   reads as "what can I look at", "what can I read", and "how do I get in"
+   rather than as a list of routes. */
 .sw-site .navmenu {
   position: relative;
 }
@@ -231,18 +232,16 @@ body.sw-site-active {
   color: var(--sw-dfaint);
 }
 
-/* Organizer sign-in is the one nav item that is an action rather than a
-   destination, and it is the product's primary audience — so it takes button
-   treatment. Speaker sign-in stays a quiet link beside it: same verb, a much
-   smaller audience, and speakers almost always arrive from an emailed link
-   rather than by navigating here. */
-.sw-site .navlinks a.navcta {
-  display: inline-flex;
-  align-items: center;
+/* Signing in is the nav's one action rather than a destination, so its trigger
+   takes button treatment. Which door you use — speaker or organizer — is a
+   choice inside the menu, not a ranking in the nav: the two audiences arrive
+   with the same intent, and speakers mostly arrive from an emailed link. */
+.sw-site .navlinks .navtrigger.navcta {
   height: 30px;
-  padding: 0 13px;
+  padding: 0 12px;
   border-radius: 9px;
   font-size: 13px;
+  white-space: nowrap;
   color: var(--sw-dbright);
   background: rgba(255, 255, 255, 0.09);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11);
@@ -250,33 +249,15 @@ body.sw-site-active {
     background 0.2s ease,
     color 0.2s ease;
 }
-.sw-site .navlinks a.navcta:hover {
+.sw-site .navlinks .navtrigger.navcta:hover,
+.sw-site .navlinks .navtrigger.navcta[aria-expanded='true'] {
   background: rgba(255, 255, 255, 0.15);
   color: #fff;
 }
-.sw-site .navcta-short {
-  display: none;
-}
-.sw-site .navlinks a.navcta,
-.sw-site .navlinks a.navflag {
-  white-space: nowrap;
-}
-
-/* The competition entry is time-boxed, so it is flagged rather than ranked
-   alongside the permanent nav. */
-.sw-site .navlinks a.navflag {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  color: var(--sw-accent-lite);
-  background: rgba(168, 94, 62, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.28);
-}
-.sw-site .navlinks a.navflag:hover {
-  color: #f2c39f;
-  background: rgba(168, 94, 62, 0.26);
+/* The last menu in the row opens inward, or it would hang off the viewport. */
+.sw-site .navdrop.right {
+  left: auto;
+  right: 0;
 }
 
 /* Keyboard users get to the content without tabbing the whole nav. */
@@ -315,6 +296,12 @@ body.sw-site-active {
 .sw-site a.badge:hover {
   background: rgba(255, 255, 255, 0.1);
 }
+/* Two claims about the project, side by side above the headline. */
+.sw-site .badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .sw-site .badge {
   display: inline-flex;
   transition: background 0.2s ease;
@@ -325,6 +312,20 @@ body.sw-site-active {
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.06);
   color: #cfc8be;
+}
+/* The competition entry is time-boxed, so it is flagged rather than dressed
+   like the permanent one beside it. */
+.sw-site a.badge.flag,
+.sw-site a.badge.flag:hover {
+  color: var(--sw-accent-lite);
+}
+.sw-site .badge.flag {
+  background: rgba(168, 94, 62, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.28);
+}
+.sw-site a.badge.flag:hover {
+  color: #f2c39f;
+  background: rgba(168, 94, 62, 0.26);
 }
 .sw-site .badge i {
   width: 5px;
@@ -364,6 +365,150 @@ body.sw-site-active {
 .sw-site .h2.sm {
   font-size: 36px;
 }
+/* ── benefit tabs over a demo ─────────────────────────────────────────────── */
+
+/* Named by what the visitor gets, not by what the screen is called: the tab is
+   the claim, the frame underneath is the proof, and the line between them is
+   the only prose the claim needs. Both demo sections use these. */
+.sw-site .bentabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 32px;
+}
+.sw-site .bentabs button {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--sw-dmute);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--sw-dline);
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.sw-site .bentabs button:hover {
+  color: var(--sw-dbright);
+  background: rgba(255, 255, 255, 0.07);
+}
+.sw-site .bentabs button[aria-selected='true'] {
+  color: var(--sw-dbright);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.45);
+}
+.sw-site .light .bentabs button {
+  color: var(--sw-ink2);
+  background: rgba(28, 26, 23, 0.03);
+  box-shadow: inset 0 0 0 1px var(--sw-line2);
+}
+.sw-site .light .bentabs button:hover {
+  color: var(--sw-ink);
+  background: rgba(28, 26, 23, 0.06);
+}
+.sw-site .light .bentabs button[aria-selected='true'] {
+  color: var(--sw-ink);
+  background: rgba(28, 26, 23, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(168, 94, 62, 0.5);
+}
+/* Keyed by tab, so the line fades in fresh each time rather than swapping under
+   the reader mid-sentence. */
+.sw-site .benline {
+  max-width: 74ch;
+  margin: 18px 0 0;
+  font-size: 15px;
+  line-height: 1.62;
+  color: var(--sw-dmute);
+  animation: sw-rise 0.4s var(--sw-ease) both;
+}
+.sw-site .light .benline {
+  color: var(--sw-ink2);
+}
+
+/* ── lifecycle track ──────────────────────────────────────────────────────── */
+
+/* Seven stops on one line. The rail draws itself left to right behind the dots
+   and each stop rises after the rail has reached it, so the section performs
+   the order it is describing. Delays ride on `--d` per item. */
+.sw-site .flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 18px;
+  margin: 44px 0 0;
+  padding: 0;
+  list-style: none;
+}
+/* The rail runs dot-centre to dot-centre. The dots sit at the left edge of each
+   column, so the right inset is one column plus the dot's own radius — column
+   width being the grid minus its six gaps, over seven. */
+.sw-site .flow::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  right: calc((100% - 6 * 18px) / 7 - 5px);
+  height: 1px;
+  background: linear-gradient(90deg, var(--sw-accent) 0%, rgba(168, 94, 62, 0.28) 100%);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.sw-site .flow.in::before {
+  animation: sw-rail 1.5s var(--sw-ease) 0.15s forwards;
+}
+@keyframes sw-rail {
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes sw-rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sw-site .flow li {
+  position: relative;
+  opacity: 0;
+  transform: translateY(8px);
+}
+.sw-site .flow.in li {
+  animation: sw-rise 0.5s var(--sw-ease) var(--d, 0s) forwards;
+}
+.sw-site .flow i {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--sw-paper);
+  box-shadow: inset 0 0 0 2px var(--sw-accent);
+}
+.sw-site .flow em {
+  display: block;
+  margin-top: 14px;
+  font-family: var(--sw-mono);
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--sw-ink3);
+}
+.sw-site .flow h3 {
+  margin: 5px 0 0;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--sw-ink);
+}
+.sw-site .flow p {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--sw-ink2);
+}
+
 /* A seam, not a rule: full-bleed inside the wrap, one pixel, fading to nothing
    at both ends so it separates two sections without drawing a line across the
    page. Used where the ground does not change and the sections would otherwise
@@ -2179,29 +2324,17 @@ body.sw-site-active {
     padding-left: 24px;
     padding-right: 24px;
   }
-  /* The nav keeps the two things a phone visitor actually needs — the
-     competition entry and organizer sign-in. Everything else is one scroll
-     away in the footer, which is a better trade than a nav with nothing in
-     it. */
+  /* The nav keeps the one thing a phone visitor actually needs — the way in.
+     Product and Resources are one scroll away in the footer, which is a better
+     trade than three menus fighting over a 390px row. */
   .sw-site .navlinks {
     gap: 14px;
     font-size: 12.5px;
   }
-  .sw-site .navmore,
-  .sw-site .navmenu {
+  .sw-site .navmenu:not(:last-child) {
     display: none;
   }
-  .sw-site .navlinks a.navflag {
-    font-size: 11.5px;
-    padding: 3px 8px;
-  }
-  .sw-site .navcta-full {
-    display: none;
-  }
-  .sw-site .navcta-short {
-    display: inline;
-  }
-  .sw-site .navlinks a.navcta {
+  .sw-site .navlinks .navtrigger.navcta {
     height: 27px;
     padding: 0 11px;
     font-size: 12px;

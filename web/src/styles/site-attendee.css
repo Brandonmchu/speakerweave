@@ -1,0 +1,400 @@
+/**
+ * The attendee window — the published program site in browser furniture, shown
+ * on the landing page under the admin window.
+ *
+ * Owned by `pages/attendeeWindow.tsx`, which imports this file directly. Scoped
+ * under `.sw-site` and prefixed `swp-` so it can never collide with `site.css`,
+ * the app, or Tailwind's `important: '#root'` utilities.
+ *
+ * The frame keeps the published site's own palette — white page, ink text —
+ * regardless of the band it sits in, because it is a picture of a public web
+ * page rather than a surface of ours. Only the tokens it borrows (`--sw-mono`,
+ * the accent) come from the site.
+ */
+
+.sw-site .swp-frame {
+  --swp-ink: #1c1a17;
+  --swp-ink2: #57534c;
+  --swp-ink3: #8d867c;
+  --swp-line: rgba(28, 26, 23, 0.1);
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--swp-ink);
+  box-shadow:
+    0 1px 2px rgba(28, 26, 23, 0.07),
+    0 26px 64px rgba(28, 26, 23, 0.16);
+}
+
+/* ── browser furniture ────────────────────────────────────────────────────── */
+
+.sw-site .swp-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: #f2efeb;
+  border-bottom: 1px solid var(--swp-line);
+}
+/* Three window dots from one element. */
+.sw-site .swp-dots {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 28px;
+  flex: 0 0 auto;
+  background: rgba(28, 26, 23, 0.16);
+  box-shadow:
+    14px 0 0 rgba(28, 26, 23, 0.16),
+    28px 0 0 rgba(28, 26, 23, 0.16);
+}
+.sw-site .swp-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--swp-line);
+  font-family: var(--sw-mono);
+  font-size: 11px;
+  color: var(--swp-ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-site .swp-url b {
+  font-weight: 400;
+  color: var(--swp-ink2);
+}
+
+/* ── the site itself ──────────────────────────────────────────────────────── */
+
+.sw-site .swp-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--swp-line);
+}
+.sw-site .swp-head b {
+  display: block;
+  font-family: var(--sw-serif);
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.sw-site .swp-head > div span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--swp-ink3);
+}
+.sw-site .swp-head nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.sw-site .swp-head nav button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  color: var(--swp-ink2);
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+.sw-site .swp-head nav button:hover {
+  background: rgba(28, 26, 23, 0.05);
+  color: var(--swp-ink);
+}
+.sw-site .swp-head nav button[aria-current='page'] {
+  background: rgba(28, 26, 23, 0.07);
+  color: var(--swp-ink);
+}
+.sw-site .swp-reg {
+  margin-left: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #fff;
+  background: var(--sw-accent);
+}
+.sw-site .swp-page {
+  min-height: 356px;
+  padding: 20px 22px 24px;
+  animation: swp-in 0.4s var(--sw-ease) both;
+}
+@keyframes swp-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Every row and card lands on a short ladder keyed off its index, so a view
+   change reads as the page painting rather than as a hard cut. */
+@keyframes swp-row {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+}
+
+/* ── schedule ─────────────────────────────────────────────────────────────── */
+
+.sw-site .swp-days {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--swp-line);
+}
+.sw-site .swp-days span {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--swp-ink2);
+  box-shadow: inset 0 0 0 1px var(--swp-line);
+}
+.sw-site .swp-days span.on {
+  color: #fff;
+  background: var(--swp-ink);
+  box-shadow: none;
+}
+.sw-site .swp-days em {
+  margin-left: auto;
+  font-style: normal;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: var(--swp-ink3);
+}
+.sw-site .swp-sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sw-site .swp-sessions li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--swp-line);
+  animation: swp-row 0.45s var(--sw-ease) both;
+  animation-delay: calc(var(--i, 0) * 0.07s + 0.1s);
+}
+.sw-site .swp-sessions time {
+  flex: 0 0 auto;
+  width: 46px;
+  font-family: var(--sw-mono);
+  font-size: 12.5px;
+  color: var(--swp-ink2);
+}
+.sw-site .swp-sessions div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sw-site .swp-sessions b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.sw-site .swp-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--swp-ink3);
+}
+.sw-site .swp-track {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--swp-ink2);
+  background: rgba(28, 26, 23, 0.05);
+}
+.sw-site .swp-t0 {
+  background: rgba(168, 94, 62, 0.12);
+  color: #8c4a2e;
+}
+.sw-site .swp-t1 {
+  background: rgba(92, 140, 99, 0.14);
+  color: #3f6a48;
+}
+.sw-site .swp-t2 {
+  background: rgba(126, 138, 168, 0.16);
+  color: #4f5c7c;
+}
+.sw-site .swp-t3 {
+  background: rgba(200, 155, 60, 0.16);
+  color: #8a6717;
+}
+
+/* ── faces ────────────────────────────────────────────────────────────────── */
+
+.sw-site .swp-face {
+  object-fit: cover;
+  background: rgba(28, 26, 23, 0.06);
+}
+.sw-site .swp-face-sm {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+.sw-site .swp-face-lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+
+/* ── speaker gallery ──────────────────────────────────────────────────────── */
+
+.sw-site .swp-gallery {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.sw-site .swp-gallery figure {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--swp-line);
+  animation: swp-row 0.45s var(--sw-ease) both;
+  animation-delay: calc(var(--i, 0) * 0.05s + 0.1s);
+}
+.sw-site .swp-gallery figcaption {
+  min-width: 0;
+}
+.sw-site .swp-gallery b {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.sw-site .swp-gallery span,
+.sw-site .swp-gallery em {
+  display: block;
+  font-style: normal;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--swp-ink3);
+}
+
+/* ── one session ──────────────────────────────────────────────────────────── */
+
+.sw-site .swp-detail {
+  max-width: 62ch;
+}
+.sw-site .swp-crumb {
+  margin: 0;
+  font-family: var(--sw-mono);
+  font-size: 11px;
+  color: var(--swp-ink3);
+}
+.sw-site .swp-detail h3 {
+  margin: 10px 0 0;
+  font-family: var(--sw-serif);
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.sw-site .swp-abstract {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.62;
+  color: var(--swp-ink2);
+}
+.sw-site .swp-byline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--swp-line);
+}
+.sw-site .swp-byline b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+}
+.sw-site .swp-byline span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--swp-ink3);
+}
+.sw-site .swp-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.sw-site .swp-act {
+  font-size: 12.5px;
+  padding: 6px 13px;
+  border-radius: 9px;
+  color: var(--swp-ink2);
+  box-shadow: inset 0 0 0 1px var(--swp-line);
+}
+.sw-site .swp-act-p {
+  color: #fff;
+  background: var(--sw-accent);
+  box-shadow: none;
+}
+
+/* ── narrow ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .sw-site .swp-gallery {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sw-site .swp-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .sw-site .swp-head nav {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 620px) {
+  .sw-site .swp-gallery {
+    grid-template-columns: 1fr;
+  }
+  .sw-site .swp-page {
+    padding: 16px 14px 20px;
+  }
+  .sw-site .swp-head {
+    padding: 14px;
+  }
+  .sw-site .swp-sessions li {
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .sw-site .swp-track {
+    display: none;
+  }
+}
+
+/* ── reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-site .swp-page,
+  .sw-site .swp-sessions li,
+  .sw-site .swp-gallery figure {
+    animation: none !important;
+  }
+}

@@ -444,7 +444,7 @@ const CONTENT_OUTSTANDING = CONTENT_MATRIX.filter((row) =>
 /* Navigation — AppShell.tsx NAV                                               */
 /* -------------------------------------------------------------------------- */
 
-type ScreenKey = 'submissions' | 'agenda' | 'speakers' | 'content'
+export type ScreenKey = 'submissions' | 'agenda' | 'speakers' | 'content'
 
 interface NavItem {
   label: string
@@ -1493,8 +1493,26 @@ const SCREEN_TABS: Array<{ key: ScreenKey; label: string }> = [
   { key: 'content', label: 'Content' },
 ]
 
-export function AppWindow(): JSX.Element {
-  const [screen, setScreen] = useState<ScreenKey>('submissions')
+/**
+ * The admin interface, real DOM rather than a screenshot.
+ *
+ * Uncontrolled by default; pass `screen` to drive it from outside (the landing
+ * page's benefit tabs do), and `onScreenChange` to hear about clicks on its own
+ * rail so the outside stays in step.
+ */
+export function AppWindow({
+  screen: controlled,
+  onScreenChange,
+}: {
+  screen?: ScreenKey
+  onScreenChange?: (next: ScreenKey) => void
+} = {}): JSX.Element {
+  const [own, setOwn] = useState<ScreenKey>('submissions')
+  const screen = controlled ?? own
+  const setScreen = (next: ScreenKey) => {
+    setOwn(next)
+    onScreenChange?.(next)
+  }
 
   return (
     <div className="swa-frame" role="group" aria-label="SpeakerWeave admin interface">

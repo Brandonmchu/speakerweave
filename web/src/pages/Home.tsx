@@ -30,48 +30,25 @@ import {
 } from '@/lib/programApi'
 import { avatarGradient, stableHash } from '@/ui/avatar'
 import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
-import { AppWindow } from '@/pages/appWindow'
+import { AppWindow, type ScreenKey } from '@/pages/appWindow'
+import { AttendeeWindow, type AttendeeViewKey } from '@/pages/attendeeWindow'
 import { DOCS_URL, EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
 
-/** The lifecycle, in the order a program runs. */
+/**
+ * The lifecycle, in the order a program runs — a left-to-right track rather
+ * than a list, because the order is the point. One short line each: this is the
+ * map of the year, and the detail lives in the demo further down.
+ */
 const LIFECYCLE = [
-  {
-    title: 'Call for Papers',
-    body: 'Smart forms with conditional logic for every submission path.',
-    kicker: 'Forms',
-  },
-  {
-    title: 'Review',
-    body: 'Committees, blind rounds, scorecards, and practical AI triage.',
-    kicker: 'Scoring',
-  },
-  {
-    title: 'Decisions',
-    body: 'One click sends emails and kicks off speaker onboarding.',
-    kicker: 'Automation',
-  },
-  {
-    title: 'Speaker Portal',
-    body: 'Bios, headshots, versioned content, and approvals in one place.',
-    kicker: 'Onboarding',
-  },
-  {
-    title: 'Agenda Builder',
-    body: 'Drag-and-drop planning, live conflict checks, and auto-place.',
-    kicker: 'Scheduling',
-  },
-  {
-    title: 'Publish',
-    body: 'Public schedule, speaker gallery, embeds, and iCal feeds.',
-    kicker: 'Public site',
-  },
-  {
-    title: 'Speaker CRM',
-    body: 'A cross-event directory with sourcing pipeline and segments.',
-    kicker: 'Sourcing',
-  },
+  { title: 'Call for Papers', body: 'Every proposal arrives on one clean form.' },
+  { title: 'Review', body: 'Committees score blind, without a spreadsheet.' },
+  { title: 'Decisions', body: 'Accept, reject and notify in one pass.' },
+  { title: 'Speaker Portal', body: 'Speakers onboard themselves.' },
+  { title: 'Agenda', body: 'A schedule that catches its own conflicts.' },
+  { title: 'Publish', body: 'Site, embeds and calendar feeds follow.' },
+  { title: 'Speaker CRM', body: 'Your bench, ready for next year.' },
 ]
 
 /**
@@ -295,47 +272,126 @@ function AgentSurfaces({ endpoint }: { endpoint: string }) {
   )
 }
 
-const STACK = [
-  { name: 'FastAPI', role: 'Typed API + hosted MCP' },
-  { name: 'React + Vite', role: 'Fast web interface' },
-  { name: 'Supabase (Postgres)', role: 'Program data' },
-  { name: 'Clerk', role: 'Organizer auth' },
-  { name: 'Resend', role: 'Transactional email' },
-  { name: 'Railway', role: 'Application hosting' },
+/**
+ * The workspace, named by what the visitor gets rather than by what the screen
+ * is called. Each tab drives the real interface below it, so the claim and the
+ * proof are never more than one click apart — which is why the page no longer
+ * needs a band per feature explaining the same four things in prose.
+ */
+const BENEFITS: Array<{ label: string; body: string; screen: ScreenKey }> = [
+  {
+    label: 'Read every proposal once',
+    body: 'Submissions land in one queue with reviewer scores attached, so the committee argues about talks instead of about spreadsheets.',
+    screen: 'submissions',
+  },
+  {
+    label: 'Build a schedule that holds',
+    body: 'Auto-place fills the grid from accepted talks, and every move is checked live against speaker availability and room capacity — a double-booking surfaces before the program does.',
+    screen: 'agenda',
+  },
+  {
+    label: 'Stop chasing speakers',
+    body: 'Everyone confirmed shows up here with what they still owe. Reminders name only the missing piece, so nobody gets a nag about something they already sent.',
+    screen: 'speakers',
+  },
+  {
+    label: 'Know what is still missing',
+    body: 'Bios, headshots and slides in one matrix, every revision kept, so you can see at a glance what would hold up publishing tomorrow.',
+    screen: 'content',
+  },
 ]
 
-/** Round 2 of the seeded demo workspace — the numbers the demo really shows. */
-const REVIEW_ROUNDS = [
-  { committee: 'Committee A', width: '72%', score: '3.6' },
-  { committee: 'Committee B', width: '62%', score: '3.1' },
-  { committee: 'Committee C', width: '80%', score: '4.0' },
-  { committee: 'Committee D', width: '56%', score: '2.8' },
+/**
+ * The admin tour: benefit tabs over the real interface.
+ *
+ * The tabs and the app's own rail drive the same state, so clicking either one
+ * keeps the other honest — the visitor can browse by what they want or by where
+ * it lives, and never sees the two disagree.
+ */
+function AdminTour({ onEnter, loading }: { onEnter: () => void; loading: boolean }) {
+  const [screen, setScreen] = useState<ScreenKey>('submissions')
+  const active = BENEFITS.find((benefit) => benefit.screen === screen) ?? BENEFITS[0]
+
+  return (
+    <>
+      <div className="bentabs rv" role="tablist" aria-label="What the workspace does">
+        {BENEFITS.map((benefit) => (
+          <button
+            key={benefit.screen}
+            type="button"
+            role="tab"
+            aria-selected={benefit.screen === screen}
+            onClick={() => setScreen(benefit.screen)}
+          >
+            {benefit.label}
+          </button>
+        ))}
+      </div>
+      <p className="benline rv" key={active.screen}>
+        {active.body}
+      </p>
+
+      <div className="appframe rv" style={vars({ '--d': '.1s' })}>
+        <AppWindow screen={screen} onScreenChange={setScreen} />
+      </div>
+      <div className="rv" style={{ marginTop: 26 }}>
+        <button type="button" className="arrowlink" onClick={onEnter} disabled={loading}>
+          Open the real thing →
+        </button>
+      </div>
+    </>
+  )
+}
+
+/** What the published side is worth, view by view. */
+const PUBLIC_BENEFITS: Array<{ label: string; body: string; view: AttendeeViewKey }> = [
+  {
+    label: 'A schedule that is never stale',
+    body: 'Move a session at 9am and the public schedule, the embeds on your own site, and every subscribed calendar have it by 9:01.',
+    view: 'schedule',
+  },
+  {
+    label: 'Speakers who look the part',
+    body: 'Bios and headshots come straight from what each speaker approved in their portal — no copy-paste, no out-of-date photo from three years ago.',
+    view: 'speakers',
+  },
+  {
+    label: 'A page worth sharing',
+    body: 'Every session gets its own address, with the abstract, the speaker, and one tap to put it in a calendar — which is what actually fills the room.',
+    view: 'session',
+  },
 ]
 
-/** Saturday of the seeded agenda: [time, Main Hall, Track A, Workshop]. */
-const AGENDA_ROWS: Array<[string, ...Array<{ title: string; tone: string } | null>]> = [
-  ['09:00', { title: 'Opening keynote', tone: 'g1' }, null, null],
-  ['10:15', null, { title: 'RAG in Production', tone: 'g3' }, { title: 'Fine-tuning lab', tone: 'g4' }],
-  ['11:30', { title: 'Guardrails', tone: 'g6' }, { title: 'Observability', tone: 'g2' }, null],
-  ['13:00', null, { title: 'Multimodal RAG', tone: 'g5' }, { title: 'Tool-using agents', tone: 'g8' }],
-]
+/** The attendee tour: same shape as the admin one, other side of the data. */
+function AttendeeTour() {
+  const [view, setView] = useState<AttendeeViewKey>('schedule')
+  const active = PUBLIC_BENEFITS.find((benefit) => benefit.view === view) ?? PUBLIC_BENEFITS[0]
 
-const SCHEDULE_PREVIEW = [
-  ['09:00', 'Opening keynote: The Agentic Future Is Boring', 'Main Hall'],
-  ['10:15', 'RAG in Production: Lessons From 10B Queries', 'Track A'],
-  ['11:30', 'Guardrails: Structured Outputs Without the Pain', 'Track B'],
-  ['13:00', 'Hands-On: Fine-Tuning Open Models', 'Workshop'],
-  ['14:30', 'Evaluating LLM Agents That Actually Ship', 'Track A'],
-]
+  return (
+    <>
+      <div className="bentabs rv" role="tablist" aria-label="What attendees get">
+        {PUBLIC_BENEFITS.map((benefit) => (
+          <button
+            key={benefit.view}
+            type="button"
+            role="tab"
+            aria-selected={benefit.view === view}
+            onClick={() => setView(benefit.view)}
+          >
+            {benefit.label}
+          </button>
+        ))}
+      </div>
+      <p className="benline rv" key={active.view}>
+        {active.body}
+      </p>
 
-const PORTAL_TASKS: Array<[string, string, boolean]> = [
-  ['Accept your invitation', 'Aug 2', true],
-  ['Bio · v3 approved', 'Aug 9', true],
-  ['Headshot uploaded', 'Aug 14', true],
-  ['Talk description', 'Aug 18', true],
-  ['Slides', 'due Aug 27', false],
-  ['Travel details', 'due Sep 4', false],
-]
+      <div className="appframe rv" style={vars({ '--d': '.1s' })}>
+        <AttendeeWindow view={view} onViewChange={setView} />
+      </div>
+    </>
+  )
+}
 
 /** Twelve tiles, three drifting columns. */
 const WALL_SIZE = 12
@@ -480,23 +536,23 @@ export function Home() {
     }
   }
 
-  /** The three feature demos have no public counterpart to link to — the real
-   *  surface is the seeded workspace, so each one opens it. */
-  const demoLink = (label: string) => (
-    <button type="button" className="arrowlink" onClick={enterDemo} disabled={loading}>
-      {label} →
-    </button>
-  )
-
   return (
     <SiteShell>
       {/* ── hero ─────────────────────────────────────────────────────────── */}
       <section className="wrap hero">
         <div className="rv in">
-          <Link to="/open-source" className="badge">
-            <i />
-            Open-source conference operations
-          </Link>
+          {/* Both badges are claims about the project rather than the product,
+              and they belong together — the competition entry left the nav for
+              this row, where it reads as context instead of as a route. */}
+          <div className="badges">
+            <Link to="/open-source" className="badge">
+              <i />
+              Open source
+            </Link>
+            <Link to="/killmysaas" className="badge flag">
+              Kill My SaaS competition
+            </Link>
+          </div>
           <h1 className="h1 serif">Every speaker, from submission to stage.</h1>
           <p className="lede">
             SpeakerWeave runs your whole conference — submissions, reviews, speakers, and the
@@ -550,303 +606,107 @@ export function Home() {
       </section>
 
       {/* ── lifecycle ────────────────────────────────────────────────────── */}
-      <section className="wrap sect">
-        <div className="rv">
-          <p className="eyebrow">The whole program lifecycle</p>
-          <h2 className="h2 serif">From first proposal to final room assignment.</h2>
-          <p className="lede">
-            One operating system for program teams, review committees, speakers, and attendees.
-          </p>
-        </div>
-        <div className="numtop" style={{ marginTop: 36 }}>
-          {LIFECYCLE.map(({ title, body, kicker }, index) => (
-            <div
-              key={title}
-              className="num rv"
-              style={vars({ '--d': `${index * 0.06}s` })}
-            >
-              <em aria-hidden="true">{String(index + 1).padStart(2, '0')}</em>
-              <div>
+      {/* A year of program work reads as a track, not a list: the line draws
+          itself left to right and the stops land on it in order, which is the
+          one thing a stack of cards could never say. */}
+      <section className="light">
+        <div className="wrap">
+          <div className="rv" style={{ maxWidth: '54ch' }}>
+            <p className="eyebrow">The whole program lifecycle</p>
+            <h2 className="h2 serif">From first proposal to full room.</h2>
+            <p className="lede">
+              One system carries the year — so nothing is retyped, and nothing falls between two
+              tools.
+            </p>
+          </div>
+          <ol className="flow rv" style={vars({ '--d': '.1s' })}>
+            {LIFECYCLE.map(({ title, body }, index) => (
+              <li key={title} style={vars({ '--d': `${0.25 + index * 0.09}s` })}>
+                <i aria-hidden="true" />
+                <em aria-hidden="true">{String(index + 1).padStart(2, '0')}</em>
                 <h3>{title}</h3>
                 <p>{body}</p>
-              </div>
-              <span>{kicker}</span>
-            </div>
-          ))}
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
       {/* ── the app itself ───────────────────────────────────────────────── */}
       {/* The lifecycle above says what the product does; this is the product
           doing it. Real DOM rather than a screenshot, so it stays crisp and the
-          rail actually switches screens. */}
-      <section className="light" data-testid="app-window-section">
-        <div className="wrap">
-          <div className="rv" style={{ maxWidth: '58ch' }}>
-            <p className="eyebrow">Inside the workspace</p>
-            <h2 className="h2 serif">The actual product, not a screenshot.</h2>
-            <p className="lede">
-              Seeded with the AI Builders Summit — twenty submissions, a scored review round, a
-              scheduled agenda with a real double-booking. Click through the rail.
-            </p>
-          </div>
-          <div className="appframe rv" style={vars({ '--d': '.1s' })}>
-            <AppWindow />
-          </div>
-          <div className="rv" style={{ marginTop: 26 }}>
-            <button type="button" className="arrowlink" onClick={enterDemo} disabled={loading}>
-              Open the real thing →
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ── review demo ──────────────────────────────────────────────────── */}
-      <section className="light">
-        <div className="wrap split">
-          <div className="rv">
-            <p className="eyebrow">Review</p>
-            <h2 className="h2 serif">
-              Blind rounds, real scorecards, and triage that saves the committee a weekend.
-            </h2>
-            <p className="lede">
-              Committees score against your criteria without seeing each other&rsquo;s marks.
-              Averages settle as reviews land, and AI triage flags the obvious duplicates and
-              off-topic submissions before a human spends time on them.
-            </p>
-            <div style={{ marginTop: 26 }}>{demoLink('See how review works')}</div>
-          </div>
-
-          <div className="card lite rv demo" style={vars({ '--d': '.15s' })}>
-            <div className="chead">
-              SESS-114 · Designing Trustworthy AI<span className="end">Round 2</span>
-            </div>
-            {REVIEW_ROUNDS.map(({ committee, width, score }, index) => (
-              <div key={committee} className="rev">
-                <b>{committee}</b>
-                <span className="track" style={vars({ '--d': `${index * 0.15}s` })}>
-                  <i style={vars({ '--w': width })} />
-                </span>
-                <span className="score">{score}</span>
-              </div>
-            ))}
-            <div className="avgrow">
-              <div className="avg">3.38</div>
-              <div className="avglab">
-                weighted average
-                <br />4 of 4 reviews in
-              </div>
-              <div className="flip">
-                <span className="a dotted d-pend">Pending review</span>
-                <span className="b dotted d-q">Moved to accept queue</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── agenda demo ──────────────────────────────────────────────────── */}
-      <section className="wrap sect">
-        <div className="split">
-          <div className="card rv demo">
-            <div className="chead">
-              Agenda builder · Saturday<span className="end">auto-place</span>
-            </div>
-            <div className="board">
-              <div />
-              <div className="bh">Main Hall</div>
-              <div className="bh">Track A</div>
-              <div className="bh">Workshop</div>
-              {AGENDA_ROWS.map(([time, ...cells], row) => (
-                <Row
-                  key={time}
-                  time={time}
-                  cells={cells}
-                  firstTile={AGENDA_ROWS.slice(0, row).reduce(
-                    (count, [, ...prior]) => count + prior.filter(Boolean).length,
-                    0
-                  )}
-                />
-              ))}
-            </div>
-            <div className="conflict dotted d-warn">
-              Wei Zhang was double-booked at 11:30 — moved to Track A
-            </div>
-          </div>
-
-          <div className="rv" style={vars({ '--d': '.15s' })}>
-            <p className="eyebrow">Agenda builder</p>
-            <h2 className="h2 serif">Drag a session anywhere. It tells you what breaks.</h2>
-            <p className="lede">
-              Auto-place fills rooms and slots from accepted sessions, and every move is checked
-              live against speaker availability, room capacity, and track spread. Publish when
-              it&rsquo;s right — the public schedule, embeds, and iCal feeds all follow.
-            </p>
-            <div style={{ marginTop: 26 }}>{demoLink('Open the demo agenda')}</div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── live public example ──────────────────────────────────────────── */}
-      <section className="wrap sect">
-        <div className="rv">
-          <p className="eyebrow">Live public example</p>
-          <h2 className="h2 serif">Explore the AI Builders Summit.</h2>
+          screens actually switch — driven either from the tabs, which name what
+          the visitor gets, or from the app's own rail. */}
+      <section className="wrap sect" data-testid="app-window-section">
+        <div className="rv" style={{ maxWidth: '58ch' }}>
+          <p className="eyebrow">Inside the workspace</p>
+          <h2 className="h2 serif">Run the whole program without leaving one tab.</h2>
           <p className="lede">
-            Every event publishes a schedule, a speaker gallery, embeds, and iCal feeds from the
-            same program data — no second CMS to keep in sync.
+            This is the real interface, seeded with the AI Builders Summit. Pick what you want to
+            see — or click straight into it.
           </p>
         </div>
 
-        <div className="sched rv" style={vars({ '--d': '.1s' })}>
-          <div className="now" aria-hidden="true" />
-          {SCHEDULE_PREVIEW.map(([time, title, room]) => (
-            <div key={title} className="sess">
-              <time>{time}</time>
-              <b>{title}</b>
-              <span>{room}</span>
-            </div>
-          ))}
-        </div>
-
-        <nav className="proglinks rv" aria-label="Explore the AI Builders Summit">
-          {EXPLORE.map(({ label, to }) => (
-            <Link key={label} to={to}>
-              {label} →
-            </Link>
-          ))}
-        </nav>
+        <AdminTour onEnter={enterDemo} loading={loading} />
       </section>
 
-      {/* ── speaker portal demo ──────────────────────────────────────────── */}
-      <section className="light">
-        <div className="wrap split">
-          <div className="card lite rv demo">
-            <div className="chead">
-              Speaker portal · Priya Raman<span className="end">4 of 6 complete</span>
-            </div>
-            {PORTAL_TASKS.map(([task, when, done], index) => (
-              <div key={task} className="chk">
-                <i
-                  className={done ? 'on' : ''}
-                  style={vars({ '--d': `${index * 0.12}s` })}
-                  aria-hidden="true"
-                >
-                  {done ? '✓' : ''}
-                </i>
-                <b>{task}</b>
-                <span>{when}</span>
-              </div>
-            ))}
-            <div className="meter">
-              <i />
-            </div>
-          </div>
-
-          <div className="rv" style={vars({ '--d': '.15s' })}>
-            <p className="eyebrow">Speaker portal</p>
-            <h2 className="h2 serif">Speakers see one checklist. You see all eleven.</h2>
+      {/* ── what attendees see ───────────────────────────────────────────── */}
+      {/* The section above is the workspace; this is the other half of the same
+          program data — what everybody who is not an organizer actually looks
+          at. Same seeded event, published. */}
+      <section className="light" data-testid="attendee-section">
+        <div className="wrap">
+          <div className="rv" style={{ maxWidth: '58ch' }}>
+            <p className="eyebrow">What your attendees see</p>
+            <h2 className="h2 serif">Your attendees get a program site you never have to build.</h2>
             <p className="lede">
-              Bios, headshots, versioned content, and approvals live in one place, with every
-              revision kept. Chase what&rsquo;s missing from the content matrix, or let scheduled
-              reminders do it — each email naming only what that person still owes.
+              Publish once and the schedule, the speaker gallery and every calendar feed update
+              themselves — from the same data you just reviewed.
             </p>
-            <div style={{ marginTop: 26 }}>{demoLink('See the speaker experience')}</div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── open source + stack ──────────────────────────────────────────── */}
-      <section className="wrap sect">
-        <div className="split top">
-          <div className="rv" data-testid="open-source-section">
-            <p className="eyebrow">Community built</p>
-            <h2 className="h2 serif sm">Open source</h2>
-            <p className="lede" style={{ fontSize: 15 }}>
-              SpeakerWeave is open source, so organizers and builders can inspect it, extend it, and
-              help shape what comes next. MIT licensed from end to end. Fork it, self-host it, or
-              contribute upstream.
-            </p>
-            <div style={{ marginTop: 22 }}>
-              <a href={REPO_URL} aria-label="SpeakerWeave source repository" className="arrowlink">
-                View the repository →
-              </a>
-            </div>
           </div>
 
-          <div
-            className="rv"
-            data-testid="stack-section"
-            style={vars({ '--d': '.1s' })}
-          >
-            <p className="eyebrow">Bring your own</p>
-            <h2 className="h2 serif sm">The stack</h2>
-            <dl className="stack">
-              {STACK.map(({ name, role }) => (
-                <div key={name} className="strow">
-                  <dt>{name}</dt>
-                  <dd>{role}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="note">
-              Swap auth, email, hosting, or data providers without touching the domain core.
-            </p>
+          <AttendeeTour />
+
+          <div className="rv proglinks" style={{ marginTop: 26 }}>
+            {EXPLORE.map(({ label, to }) => (
+              <Link key={label} to={to}>
+                {label} →
+              </Link>
+            ))}
           </div>
         </div>
       </section>
 
       {/* ── closing CTA ──────────────────────────────────────────────────── */}
-      <section className="wrap" style={{ paddingBottom: 96 }}>
+      {/* The page ends on the one thing left to do. What the project is made of
+          belongs to people who are already interested — it lives on the
+          open-source page and in the docs, a click away from here. */}
+      <section className="wrap sect">
         <div className="cta rv">
           <div className="glow" aria-hidden="true" />
-          <h2 className="serif">Running your own conference?</h2>
+          <h2 className="serif">Run your next conference on it.</h2>
           <p>
-            Organizers with an account can sign in to manage their events, review teams, and speaker
-            program.
+            Start in a fully seeded workspace, or sign in and set up your own event. No credit card,
+            and it&rsquo;s open source either way.
           </p>
           <div className="ctas">
+            <button type="button" className="btn p" onClick={enterDemo} disabled={loading}>
+              {loading ? 'Starting the demo…' : 'Enter the demo workspace →'}
+            </button>
             <Link to="/sign-in" className="btn d">
               Sign in with your account →
             </Link>
           </div>
+          <p className="note" data-testid="open-source-section">
+            <Link to="/open-source">Open source</Link> and MIT licensed —{' '}
+            <a href={REPO_URL} aria-label="SpeakerWeave source repository">
+              view the repository
+            </a>
+            .
+          </p>
         </div>
       </section>
     </SiteShell>
   )
 }
 
-/**
- * One time row of the agenda demo: the label, then a tile or an empty slot.
- * Tiles fly in on a 0.1s ladder counted over tiles, not cells, so the slots
- * don't leave gaps in the rhythm.
- */
-function Row({
-  time,
-  cells,
-  firstTile,
-}: {
-  time: string
-  cells: Array<{ title: string; tone: string } | null>
-  firstTile: number
-}) {
-  let tile = firstTile
-  return (
-    <>
-      <div className="time">{time}</div>
-      {cells.map((cell, column) => {
-        if (!cell) return <div key={column} className="slot" />
-        tile += 1
-        return (
-          <div
-            key={column}
-            className={`stile ${cell.tone}`}
-            style={vars({ '--d': `${(tile * 0.2 - 0.1).toFixed(1)}s` })}
-          >
-            {cell.title}
-          </div>
-        )
-      })}
-    </>
-  )
-}

@@ -138,21 +138,39 @@ export function CodeBlock({ code, label = 'Copy code' }: { code: string; label?:
   )
 }
 
+/** Every live surface a visitor can open without an account, newest-visitor
+ *  first: the workspace itself, then what its audiences see. */
+const PRODUCT_MENU = [
+  { label: 'Organizer workspace', to: '/demo', hint: 'The seeded admin demo' },
+  ...EXPLORE,
+]
+
+/** Everything for people who want to read, extend, or self-host it. */
+const RESOURCE_MENU = [
+  { label: 'Developers', to: DEVELOPERS_URL, hint: 'API, MCP tools, webhooks' },
+  { label: 'Docs', to: DOCS_URL, hint: 'Guides and reference', external: true },
+  { label: 'Open source', to: '/open-source', hint: 'MIT, end to end' },
+]
+
 /**
- * Sticky site nav. `badge` labels a sub-surface (e.g. the API reference).
- *
- * The three attendee-facing pages used to sit loose in the nav, which said
- * nothing about who they were for. They now live under one "Attendee portal"
- * menu, so the top level reads as audiences — attendees, developers, people who
- * want to self-host — rather than as a list of routes.
+ * One nav menu: a trigger and a drop, closing on outside click, Escape, or the
+ * pointer leaving. Deliberately not hover-to-open — with both, moving the
+ * pointer onto the trigger opened the menu and the click that followed closed
+ * it again.
  */
-export function SiteNav({ badge }: { badge?: string }) {
+function NavMenu({
+  label,
+  items,
+  cta,
+}: {
+  label: string
+  items: Array<{ label: string; to: string; hint?: string; external?: boolean }>
+  /** The sign-in menu is the nav's one action, so its trigger is the button. */
+  cta?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const menu = useRef<HTMLDivElement | null>(null)
 
-  // Click opens and closes; outside click, Escape, or the pointer leaving all
-  // close it. Deliberately not hover-to-open: with both, moving the pointer onto
-  // the trigger opened the menu and the click that followed closed it again.
   useEffect(() => {
     if (!open) return
     const onDown = (event: MouseEvent) => {
@@ -170,6 +188,45 @@ export function SiteNav({ badge }: { badge?: string }) {
   }, [open])
 
   return (
+    <div className="navmenu" ref={menu} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        className={cta ? 'navtrigger navcta' : 'navtrigger'}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((was) => !was)}
+      >
+        {label}
+        <ChevronDown aria-hidden="true" />
+      </button>
+      <div className={cta ? 'navdrop right' : 'navdrop'} hidden={!open}>
+        {items.map(({ label: item, to, hint, external }) =>
+          external ? (
+            <a key={item} href={to} onClick={() => setOpen(false)}>
+              <b>{item}</b>
+              {hint && <span>{hint}</span>}
+            </a>
+          ) : (
+            <Link key={item} to={to} onClick={() => setOpen(false)}>
+              <b>{item}</b>
+              {hint && <span>{hint}</span>}
+            </Link>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Sticky site nav. `badge` labels a sub-surface (e.g. the API reference).
+ *
+ * Three menus, no loose links: what you can go and look at, what you can read,
+ * and the way in. A nav of eight routes made the visitor read the sitemap
+ * before they could find either of the two things they came for.
+ */
+export function SiteNav({ badge }: { badge?: string }) {
+  return (
     <nav className="nav" aria-label="Site">
       <Link to="/" className="brand" aria-label="SpeakerWeave home">
         <BrandMark tone="gradient" className="mark" />
@@ -177,51 +234,20 @@ export function SiteNav({ badge }: { badge?: string }) {
       </Link>
       {badge && <span className="eyebrow">{badge}</span>}
       <div className="navlinks">
-        <div
-          className="navmenu"
-          ref={menu}
-          onMouseLeave={() => setOpen(false)}
-        >
-          <button
-            type="button"
-            className="navtrigger"
-            aria-expanded={open}
-            aria-haspopup="true"
-            onClick={() => setOpen((was) => !was)}
-          >
-            Attendee portal
-            <ChevronDown aria-hidden="true" />
-          </button>
-          <div className="navdrop" hidden={!open}>
-            {EXPLORE.map(({ label, to, hint }) => (
-              <Link key={label} to={to} onClick={() => setOpen(false)}>
-                <b>{label}</b>
-                <span>{hint}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-        <Link to={DEVELOPERS_URL} className="navmore">
-          Developers
-        </Link>
-        <Link to="/open-source" className="navmore">
-          Open source
-        </Link>
-        <a href={DOCS_URL} className="navmore">
-          Docs
-        </a>
-        <Link to="/killmysaas" className="navflag">
-          Kill My SaaS
-        </Link>
-        <Link to="/speaker-signin" className="navmore">
-          Speaker sign in
-        </Link>
-        <Link to={ORGANIZER_SIGNIN_URL} className="navcta">
-          {/* "Organizer" disambiguates it from the speaker link beside it; on a
-              phone that link is hidden, so the qualifier is dead weight. */}
-          <span className="navcta-full">Organizer sign in</span>
-          <span className="navcta-short">Sign in</span>
-        </Link>
+        <NavMenu label="Product" items={PRODUCT_MENU} />
+        <NavMenu label="Resources" items={RESOURCE_MENU} />
+        <NavMenu
+          label="Sign in"
+          cta
+          items={[
+            { label: 'Speaker sign in', to: '/speaker-signin', hint: 'Your talk and content' },
+            {
+              label: 'Organizer sign in',
+              to: ORGANIZER_SIGNIN_URL,
+              hint: 'Run your program',
+            },
+          ]}
+        />
       </div>
     </nav>
   )
