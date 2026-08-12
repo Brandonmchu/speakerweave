@@ -575,7 +575,7 @@ export function Home() {
       {/* The hero and the section under it share a ground, so the page needs a
           seam of its own — a hairline that fades out at both ends. */}
       <div className="wrap">
-        <hr className="seam rv" />
+        <hr className="hairline rv" />
       </div>
 
       {/* ── agentic ──────────────────────────────────────────────────────── */}

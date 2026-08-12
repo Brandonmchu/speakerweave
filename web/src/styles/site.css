@@ -510,11 +510,12 @@ body.sw-site-active {
   color: var(--sw-ink2);
 }
 
-/* A seam, not a rule: full-bleed inside the wrap, one pixel, fading to nothing
-   at both ends so it separates two sections without drawing a line across the
-   page. Used where the ground does not change and the sections would otherwise
-   run together. */
-.sw-site .seam {
+/* A hairline, not a rule: one pixel inside the wrap, fading to nothing at both
+   ends, so it separates two sections without drawing a line across the page.
+   Used where the ground does not change and the sections would otherwise run
+   together. Named for what it is: `seam` was already taken as a marker class on
+   the competition page, and styling it there collapsed a whole section. */
+.sw-site .hairline {
   height: 1px;
   border: 0;
   /* The agentic section below opens with ~110px of visual air; match it above
@@ -2358,10 +2359,10 @@ body.sw-site-active {
     font-size: 28px;
   }
   .sw-site .sect {
-    padding: 64px 0;
+    padding-block: 64px;
   }
   .sw-site .light {
-    padding: 64px 0;
+    padding-block: 64px;
   }
   /* The wall drops to a 2-column strip. */
   .sw-site .cols {
@@ -2453,6 +2454,17 @@ body.sw-site-active {
 }
 
 @media (max-width: 620px) {
+  /* The lifecycle rail keeps its shape and scrolls sideways instead of
+     crushing seven columns into a phone. */
+  .sw-site .flow {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(132px, 1fr);
+    overflow-x: auto;
+    padding-bottom: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .sw-site .surftabs,
   .sw-site .facts,
   .sw-site .grid3,
