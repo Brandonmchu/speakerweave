@@ -192,9 +192,15 @@ export function SiteNav({ badge }: { badge?: string }) {
             ))}
           </div>
         </div>
-        <Link to={DEVELOPERS_URL}>Developers</Link>
-        <Link to="/open-source">Open source</Link>
-        <a href={DOCS_URL}>Docs</a>
+        <Link to={DEVELOPERS_URL} className="navmore">
+          Developers
+        </Link>
+        <Link to="/open-source" className="navmore">
+          Open source
+        </Link>
+        <a href={DOCS_URL} className="navmore">
+          Docs
+        </a>
         <Link to="/killmysaas" className="navflag">
           Kill My SaaS
         </Link>

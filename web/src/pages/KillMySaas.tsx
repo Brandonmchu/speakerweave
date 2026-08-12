@@ -104,21 +104,21 @@ const PARITY: ParityRow[] = [
     asked: 'Custom submission forms with conditional logic and category routing',
     ships:
       'Multi-page builder over reusable contact and session fields, with show/hide/require rules on all-or-any matching plus routing rules. The rule engine ships twice — Python and TypeScript — against shared fixtures, so the live preview and the server enforcement cannot drift.',
-    where: CFP_PATH,
+    where: 'Call for Speakers',
     href: CFP_PATH,
   },
   {
     asked: 'Speaker portal for bios, headshots, slides, and documents',
     ships:
       'Cookie-scoped portal with no client-supplied identity: profile, headshot, socials, logistics fields, assigned tasks with due dates, file requests, immutable versions, approve / needs-changes review, and per-item comment threads.',
-    where: '/speaker-signin',
+    where: 'Speaker portal',
     href: '/speaker-signin',
   },
   {
     asked: 'Automated communications including calendar invites (Gmail, Outlook, iCal)',
     ships:
       'Outbox-backed sending with retries and idempotency, templates with merge tags, audience targeting with a live recipient count, and one log row per recipient. Native calendar invitations, plus a subscribable feed of the whole published program.',
-    where: 'calendar.ics',
+    where: 'Calendar feed',
     href: CALENDAR_FEED,
   },
   {
@@ -143,7 +143,7 @@ const PARITY: ParityRow[] = [
     asked: 'Accelevents integration to prevent manual data re-entry',
     ships:
       'No vendor connector, and no re-entry either: an accepted submission is the session, in one table, with its metadata intact. Everything else leaves through a stable /v1 REST API with organization-scoped tokens, read-only JSON program feeds, iCal, speaker CSV import and export, and Airtable sync.',
-    where: '/developers',
+    where: 'Developers',
     href: '/developers',
   },
   {
@@ -156,7 +156,7 @@ const PARITY: ParityRow[] = [
     asked: 'Embeddable speaker gallery and schedule for websites',
     ships:
       'Public schedule and speaker pages, script and iframe snippets generated in Settings with track, accent-colour and compact-layout options, an auto-resizing embed loader, and the same data as read-only JSON feeds.',
-    where: SCHEDULE_PATH,
+    where: 'Public schedule',
     href: SCHEDULE_PATH,
   },
   {

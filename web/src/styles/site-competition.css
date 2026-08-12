@@ -84,10 +84,10 @@
   color: var(--sw-ink);
   font-weight: 500;
 }
+/* Where to go and look, named as a place rather than as a route. These were
+   raw paths in mono, which wrapped mid-URL ("/e/ai-builders-summit/sched|ule")
+   and made the reader parse a string instead of reading a destination. */
 .sw-site table.doctable td.where {
-  font-family: var(--sw-mono);
-  font-size: 12px;
-  /* Routes have no spaces to break at, and the wrapper scrolls rather than
-     letting the page do it — so break inside the path on narrow screens. */
-  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  white-space: nowrap;
 }

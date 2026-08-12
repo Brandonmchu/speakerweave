@@ -1649,7 +1649,11 @@ body.sw-site-active {
 }
 .sw-site .doclayout {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  /* `minmax(0, 1fr)`, not `1fr`: a grid track's automatic minimum is its
+     content's min-content width, so a wide table blows the column — and the
+     page — out to the table's own width instead of letting `.tablewrap`
+     scroll. Capping the minimum at 0 hands the overflow back to the wrapper. */
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: 56px;
   align-items: start;
 }
@@ -1997,8 +2001,20 @@ body.sw-site-active {
     padding-left: 24px;
     padding-right: 24px;
   }
+  /* The nav keeps the two links a phone visitor actually needs — the
+     competition entry and sign-in. Everything else is one scroll away in the
+     footer, which is a better trade than a nav with nothing in it. */
   .sw-site .navlinks {
+    gap: 14px;
+    font-size: 12.5px;
+  }
+  .sw-site .navmore,
+  .sw-site .navmenu {
     display: none;
+  }
+  .sw-site .navlinks a.navflag {
+    font-size: 11.5px;
+    padding: 3px 8px;
   }
   .sw-site .hero {
     grid-template-columns: 1fr;
@@ -2036,10 +2052,6 @@ body.sw-site-active {
   .sw-site .statline,
   .sw-site .linkgrid {
     grid-template-columns: 1fr 1fr;
-  }
-  /* The menu collapses with the rest of the nav links. */
-  .sw-site .navmenu {
-    display: none;
   }
   /* Demo cards go full width; the demo always leads its section. */
   .sw-site .split {
@@ -2091,7 +2103,8 @@ body.sw-site-active {
     margin-left: 0;
   }
   .sw-site .doclayout {
-    grid-template-columns: 1fr;
+    /* Same automatic-minimum trap as the two-column layout above. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .sw-site .docnav {
     display: none;
