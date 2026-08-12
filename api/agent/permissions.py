@@ -26,6 +26,7 @@ PERMISSION_REQUIRED_TOOLS: dict[str, str] = {
     "set_event_branding": "UPDATE_BRANDING",
     "queue_portal_invite": "SEND_EMAIL",
     "invite_speaker_to_portal": "SEND_EMAIL",
+    "reviewer_links": "ISSUE_REVIEWER_LINKS",
     "remind_outstanding_content": "SEND_EMAIL",
     "send_communication": "SEND_EMAIL",
     "send_session_invites": "SEND_EMAIL",
@@ -215,6 +216,8 @@ def permission_description(
             return f"Queue a portal invitation email for {display}?"
         display = tool_input.get("_person_display")
         return f"Send or queue this email{f' for {display}' if display else ''}?"
+    if action == "ISSUE_REVIEWER_LINKS":
+        return "Mint a fresh review link for every reviewer on this plan?"
     if action == "DELETE":
         return f"Delete the item requested by {tool_name}?"
     if action == "EXTERNAL_MCP_ACTION":

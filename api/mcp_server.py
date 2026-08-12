@@ -245,6 +245,17 @@ async def remind_outstanding_content(ctx: Context, event: str) -> dict[str, Any]
 
 
 @mcp_server.tool()
+async def reviewer_links(ctx: Context, plan: str) -> dict[str, Any]:
+    """Mint a fresh review link for every reviewer on an evaluation plan.
+
+    For handing a committee member back into their scorecard when they have lost
+    the email. Links are scoped to one reviewer, expire, and can be revoked;
+    previously issued links keep working, so this never locks anyone out.
+    """
+    return {"data": await integration_api.reviewer_links(_org_id(ctx), plan)}
+
+
+@mcp_server.tool()
 async def evaluation_summary(
     ctx: Context,
     plan: str | None = None,

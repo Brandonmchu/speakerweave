@@ -92,6 +92,7 @@ def test_mcp_handshake_lists_tools_and_round_trips_org_scoped(client, mcp_db):
         "content_status",
         "remind_outstanding_content",
         "evaluation_summary",
+        "reviewer_links",
         "ai_triage",
         "get_event_branding",
         "set_event_branding",

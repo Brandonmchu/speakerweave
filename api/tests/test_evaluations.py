@@ -1767,3 +1767,68 @@ def test_reviewer_home_closed_state_matches_what_saving_enforces(evaluation_clie
     assert client.put(
         "/public/review/submissions/assignment-owned", json=SCORE_PAYLOAD
     ).status_code == 403
+
+
+def test_agent_reviewer_links_returns_plan_and_every_reviewer(evaluation_client, monkeypatch):
+    """The organizer's agent can do what the organizer's screen can.
+
+    `invite_speaker_to_portal` already existed, so the tool layer could hand a
+    speaker back into their portal but not a reviewer back into their scorecard
+    — a gap with no reason behind it. Same underlying mint, wrapped for the
+    agent with the plan it belongs to.
+    """
+    import asyncio
+
+    from services import integration_api
+
+    _client, fake_db, _reviewer = evaluation_client
+    _seed_plan(fake_db, status="open")
+    fake_db.seed(
+        "evaluators",
+        {
+            "id": OWNER_ID,
+            "org_id": TEST_ORG_ID,
+            "plan_id": PLAN_ID,
+            "email": "owner@test.dev",
+            "name": "Grace Hopper",
+        },
+    )
+    monkeypatch.setenv("FRONTEND_URL", "https://dais.test")
+
+    result = asyncio.run(integration_api.reviewer_links(TEST_ORG_ID, PLAN_ID))
+
+    assert result["plan"]["id"] == PLAN_ID
+    assert result["plan"]["status"] == "open"
+    assert [row["evaluator_id"] for row in result["reviewers"]] == [OWNER_ID]
+    assert result["reviewers"][0]["review_url"].startswith("https://dais.test/review/")
+    # Minting only; nothing is emailed on the organizer's behalf.
+    assert fake_db.rows("email_outbox") == []
+
+
+def test_agent_reviewer_links_refuses_another_orgs_plan(evaluation_client):
+    """Same org scoping as every other tool: a foreign plan is simply absent."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from services import integration_api
+
+    _client, fake_db, _reviewer = evaluation_client
+    fake_db.seed(
+        "evaluation_plans",
+        {"id": "foreign-plan", "org_id": "org-someone-else", "event_id": "evt", "name": "Theirs"},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(integration_api.reviewer_links(TEST_ORG_ID, "foreign-plan"))
+    assert raised.value.status_code == 404
+    assert fake_db.rows("magic_link_tokens") == []
+
+
+def test_agent_reviewer_links_stops_at_an_approval_gate():
+    """Minting credentials is a write, so it takes the Approve/Deny card."""
+    from agent.permissions import PERMISSION_REQUIRED_TOOLS, permission_description
+
+    assert PERMISSION_REQUIRED_TOOLS["reviewer_links"] == "ISSUE_REVIEWER_LINKS"
+    assert permission_description("ISSUE_REVIEWER_LINKS", "reviewer_links", {}) == (
+        "Mint a fresh review link for every reviewer on this plan?"
+    )

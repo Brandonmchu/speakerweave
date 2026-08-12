@@ -1307,6 +1307,32 @@ async def evaluation_summary(org_id: str, plan_id: str) -> dict:
     }
 
 
+async def reviewer_links(org_id: str, plan_id: str) -> dict:
+    """Fresh review links for every evaluator on a plan.
+
+    The organizer UI has had this button since reviewer-invite email was
+    deferred: a committee member who lost their link asks the chair, and the
+    chair grabs a new one. The agent could already do the equivalent for a
+    speaker (`invite_speaker_to_portal`) and not for a reviewer, which made the
+    tool layer narrower than the screens for no reason anyone chose.
+
+    Minting is deliberate rather than a lookup — links are stored hashed, so
+    there is nothing to read back. Previously issued links keep working until
+    they expire, so this cannot lock a reviewer out.
+    """
+    plan = await evaluations.fetch_plan(plan_id, org_id)
+    links = await evaluations.reviewer_links(org_id, plan_id)
+    return {
+        "plan": {
+            "id": plan.get("id"),
+            "event_id": plan.get("event_id"),
+            "name": plan.get("name"),
+            "status": plan.get("status"),
+        },
+        "reviewers": links,
+    }
+
+
 async def remind_outstanding_content(org_id: str, event_id: str) -> dict:
     event = await fetch_event(event_id, org_id)
     groups = await content_pipeline.outstanding_by_contact(org_id, event_id)

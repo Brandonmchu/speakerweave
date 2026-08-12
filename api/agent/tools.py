@@ -217,6 +217,21 @@ NEW_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "reviewer_links",
+        "description": (
+            "Mint a fresh review link for every reviewer on an evaluation plan, "
+            "for handing a committee member back into their scorecard when they "
+            "have lost the email. Previously issued links keep working. Use the "
+            "evaluation summary first to get the plan id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"plan_id": {"type": "string"}},
+            "required": ["plan_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "remind_outstanding_content",
         "description": (
             "Queue reminder emails to every speaker on an event who still has "
@@ -411,6 +426,10 @@ async def _invite_speaker_to_portal(
     )
 
 
+async def _reviewer_links(org_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return await integration_api.reviewer_links(org_id, str(arguments["plan_id"]))
+
+
 async def _remind_outstanding_content(
     org_id: str, arguments: dict[str, Any]
 ) -> dict[str, Any]:
@@ -429,6 +448,7 @@ LOCAL_TOOL_HANDLERS: dict[
     "get_event_branding": _get_event_branding,
     "set_event_branding": _set_event_branding,
     "invite_speaker_to_portal": _invite_speaker_to_portal,
+    "reviewer_links": _reviewer_links,
     "remind_outstanding_content": _remind_outstanding_content,
 }
 

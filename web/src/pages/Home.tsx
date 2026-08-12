@@ -639,7 +639,12 @@ export function Home() {
       {/* A year of program work reads as a track, not a list: the line draws
           itself left to right and the stops land on it in order, which is the
           one thing a stack of cards could never say. */}
-      <section className="light">
+      <section className="light hasbleed">
+        {/* The room before the doors open, which is where a call for papers
+            starts. Blurred to atmosphere and masked to nothing at both edges:
+            it is texture behind the track, never a photograph of an event we
+            are claiming to have run. */}
+        <img className="bleed" src="/venue/venue-04.jpg" alt="" aria-hidden="true" loading="lazy" decoding="async" />
         <div className="wrap">
           <div className="rv" style={{ maxWidth: '54ch' }}>
             <p className="eyebrow">The whole program lifecycle</p>
@@ -756,6 +761,15 @@ export function Home() {
       <section className="wrap sect">
         <div className="cta rv">
           <div className="glow" aria-hidden="true" />
+          {/* The full room, under the card that asks you to go and fill one. */}
+          <img
+            className="ctableed"
+            src="/venue/venue-01.jpg"
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+          />
           <h2 className="serif">Run your next conference on it.</h2>
           <p>
             Create your workspace and set up your first event, or look around the seeded one first.
