@@ -25,7 +25,7 @@ export function BrandMark({
       )}
       style={
         tone === 'gradient'
-          ? { backgroundImage: 'linear-gradient(145deg, #D9A38A, #A97FA8)' }
+          ? { backgroundImage: 'linear-gradient(145deg, #C97A54, #A85E3E)' }
           : undefined
       }
       aria-hidden="true"
