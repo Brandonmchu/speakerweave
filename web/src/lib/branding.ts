@@ -266,6 +266,12 @@ export function brandingStyle(
     style['--secondary-foreground'] = inkHsl(0.78)
     style['--accent'] = inkHsl(0.06)
     style['--accent-foreground'] = inkHsl(1)
+    // The inverted chip (selected day, selected track) is a solid block of ink
+    // with its own contrasting label. Both halves have to move together: pin
+    // only the block and a dark canvas gives a white pill with white text.
+    const inkHex = readableInk(background, resolved.ink)
+    style['--status-solid'] = hsl(inkHex)
+    style['--status-solid-foreground'] = hsl(contrastForeground(inkHex))
   }
 
   return style as CSSProperties

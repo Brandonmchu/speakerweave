@@ -413,7 +413,9 @@ function SpeakerTrackChip({ label, active, onClick }: { label: string; active: b
       onClick={onClick}
       className={cn(
         'rounded-full px-3 py-1 text-xs transition-colors',
-        active ? 'bg-foreground text-white' : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07]'
+        active
+          ? 'bg-status-solid text-status-solid-foreground'
+          : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07]'
       )}
     >
       {label}

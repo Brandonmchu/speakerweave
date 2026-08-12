@@ -438,7 +438,7 @@ describe('PublicSchedule', () => {
 
     expect(await screen.findByText('Vector Databases')).toBeInTheDocument()
     expect(screen.queryByText('Opening Keynote')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Research' })).toHaveClass('bg-foreground')
+    expect(screen.getByRole('button', { name: 'Research' })).toHaveClass('bg-status-solid')
   })
 
   it('scopes a validated accent query parameter to the public page', async () => {

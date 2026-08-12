@@ -293,7 +293,7 @@ export function PublicSchedule() {
                 <TabsTrigger
                   key={day.date}
                   value={day.date}
-                  className="rounded-full bg-foreground/[0.045] px-3 py-1 text-xs data-[state=active]:bg-foreground data-[state=active]:text-white"
+                  className="rounded-full bg-foreground/[0.045] px-3 py-1 text-xs data-[state=active]:bg-status-solid data-[state=active]:text-status-solid-foreground"
                 >
                   {formatDayLabel(day.date)}
                 </TabsTrigger>
@@ -1085,7 +1085,7 @@ function TrackChip({
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-normal transition-colors',
         active
-          ? 'bg-foreground text-white'
+          ? 'bg-status-solid text-status-solid-foreground'
           : 'bg-foreground/[0.045] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground'
       )}
     >

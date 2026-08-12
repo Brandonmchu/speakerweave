@@ -125,10 +125,16 @@ describe('branding tokens', () => {
     expect(dark['--muted-foreground']).toBe('0 0% 100% / 0.68')
     expect(dark['--border']).toBe('0 0% 100% / 0.14')
 
+    // The inverted chip must move as a PAIR. Pinning only the block is how a
+    // dark canvas ends up with a white pill carrying white text.
+    expect(dark['--status-solid']).toBe('0 0% 100%')
+    expect(dark['--status-solid-foreground']).toBe('36 10% 10%')
+
     // An unbranded event keeps the hand-tuned palette untouched.
     const plain = brandingStyle({ ...BRANDING, background: null, surface: null, ink: null })
     expect(plain).not.toHaveProperty('--muted-foreground')
     expect(plain).not.toHaveProperty('--border')
+    expect(plain).not.toHaveProperty('--status-solid')
   })
 
   it('keeps the embed accent override above stored branding', () => {
