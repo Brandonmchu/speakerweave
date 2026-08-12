@@ -39,7 +39,7 @@ export function SpeakerSignin() {
           className="mb-6 inline-flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground"
         >
           <BrandMark className="h-7 w-7" />
-          dais
+          SpeakerWeave
         </Link>
 
         <main className="rounded-2xl bg-card p-6 shadow-raised sm:p-9">
@@ -94,7 +94,7 @@ export function SpeakerSignin() {
             className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to dais
+            Back to SpeakerWeave
           </Link>
         </main>
       </div>

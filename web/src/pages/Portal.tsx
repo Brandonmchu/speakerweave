@@ -869,7 +869,7 @@ function PortalShell({
           )}
         </div>
         {children}
-        <p className="mt-8 text-center text-xs text-muted-foreground">Powered by dais</p>
+        <p className="mt-8 text-center text-xs text-muted-foreground">Powered by SpeakerWeave</p>
       </div>
     </div>
   )

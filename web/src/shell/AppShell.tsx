@@ -559,12 +559,29 @@ export function AppShell() {
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card">
         <header className="flex h-[50px] shrink-0 items-center gap-3 bg-transparent px-4 md:px-7">
           <div className="relative flex w-full max-w-[300px] items-center">
+            {/* This field IS the Ask entrance — typing here would be a dead
+                end (there is no separate search index), so any focus or
+                keypress hands off to the Ask pane instead of eating input. */}
             <input
               ref={searchInputRef}
               aria-label="Find or ask"
               readOnly
               placeholder="Find or ask"
-              className="h-[30px] w-full rounded-lg border-0 bg-foreground/[0.04] pl-3 pr-12 text-[12.5px] text-foreground outline-none placeholder:text-placeholder focus-visible:ring-2 focus-visible:ring-primary/15"
+              className="h-[30px] w-full cursor-pointer rounded-lg border-0 bg-foreground/[0.04] pl-3 pr-12 text-[12.5px] text-foreground outline-none placeholder:text-placeholder focus-visible:ring-2 focus-visible:ring-primary/15"
+              onClick={() => {
+                if (agentEnabled) {
+                  setAgentOpen(true)
+                  searchInputRef.current?.blur()
+                }
+              }}
+              onKeyDown={(keyEvent) => {
+                if (!agentEnabled) return
+                if (keyEvent.key === 'Enter' || keyEvent.key.length === 1) {
+                  keyEvent.preventDefault()
+                  setAgentOpen(true)
+                  searchInputRef.current?.blur()
+                }
+              }}
             />
             <kbd className="pointer-events-none absolute right-2.5 hidden select-none font-mono text-[10px] text-placeholder sm:block">
               /

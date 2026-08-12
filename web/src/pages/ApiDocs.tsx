@@ -95,7 +95,7 @@ export function ApiDocs() {
             <section id="base-url" className="docsect">
               <h2>Base URL</h2>
               <p>
-                REST endpoints are relative to your dais host and live under{' '}
+                REST endpoints are relative to your SpeakerWeave host and live under{' '}
                 <code className="m">{API_BASE_PATH}</code>.
               </p>
               <CodeBlock code={`https://your-dais-host${API_BASE_PATH}`} />

@@ -808,7 +808,7 @@ function PublicShell({ children, eyebrow }: { children: ReactNode; eyebrow?: str
             Speaker sign in
           </Link>
           <span aria-hidden> · </span>
-          Powered by dais
+          Powered by SpeakerWeave
         </p>
       </div>
     </div>

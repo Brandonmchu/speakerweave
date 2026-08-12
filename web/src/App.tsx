@@ -130,6 +130,39 @@ function PublicHome() {
 }
 
 /**
+ * /demo is linked from the judge page and the docs as "one click into the
+ * seeded workspace" — so it must actually enter, not land on the marketing
+ * page and ask for a second click. Mint the demo token on mount and go.
+ */
+function DemoEntry() {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { fetchDemoToken } = await import('@/lib/demoApi')
+        const { setToken } = await import('@/lib/api')
+        const token = await fetchDemoToken()
+        if (cancelled) return
+        setToken(token)
+        window.location.replace('/dashboard')
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  if (failed) return <Home />
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+      Starting the demo workspace…
+    </div>
+  )
+}
+
+/**
  * Gate for the admin surface. Today it only checks that a dev token exists —
  * the backend is the real authority and 401s anything invalid (which clears the
  * token in lib/api.ts, re-running this guard). Swapping in Clerk means
@@ -210,9 +243,9 @@ export default function App() {
         <Route path="/speaker-signin" element={<DeferredPage fullPage><LazySpeakerSignin /></DeferredPage>} />
         {/* Submitter self-service: magic-link, token in the query, no Clerk. */}
         <Route path="/submit/:slug/manage" element={<DeferredPage fullPage><LazySubmitterDashboard /></DeferredPage>} />
-        {/* /demo is the one-click demo entrance — always the landing, even when
-            already signed in, so re-entering the demo stays possible. */}
-        <Route path="/demo" element={<PublicHome />} />
+        {/* /demo is the one-click demo entrance: mint the demo token and land
+            in the workspace directly (falls back to the landing on failure). */}
+        <Route path="/demo" element={<DemoEntry />} />
         <Route
           path="/developers"
           element={

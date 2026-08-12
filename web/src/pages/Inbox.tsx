@@ -50,6 +50,7 @@ import {
 import { listTaxonomy, type TaxonomyRow } from '@/lib/adminApi'
 import { looseEquals, type AnswerValue } from '@/lib/rules'
 import { cn } from '@/lib/utils'
+import { plainTextFromHtml } from '@/lib/sanitize'
 import { GradientAvatar } from '@/ui/avatar'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -240,7 +241,7 @@ function formatAnswer(value: unknown, fieldType?: string): string {
   }
   if (Array.isArray(value)) return value.length ? value.map((item) => String(item)).join(', ') : '—'
   if (typeof value === 'object') return JSON.stringify(value)
-  const text = String(value)
+  const text = plainTextFromHtml(String(value))
   return text.trim() === '' ? '—' : text
 }
 
@@ -1742,7 +1743,7 @@ function SubmissionDetail({
         <section>
           <PanelHeading title="Description" />
           <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground">
-            {description}
+            {plainTextFromHtml(description)}
           </p>
         </section>
       )}

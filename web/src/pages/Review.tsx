@@ -16,6 +16,7 @@ import {
   type ReviewerSpeaker,
 } from '@/lib/evaluationApi'
 import { fetchMe, redeemToken, scrubTokenFromUrl } from '@/lib/portalAuth'
+import { plainTextFromHtml } from '@/lib/sanitize'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/ui/badge'
 import { Button } from '@/ui/button'
@@ -323,7 +324,7 @@ function Scorecard({
           <p className="mt-2 text-sm text-muted-foreground">Presented by {speakerNames.join(', ')}</p>
         )}
         <div className="mt-5 whitespace-pre-wrap text-sm leading-7 text-foreground/90">
-          {session.description || 'No description was provided.'}
+          {plainTextFromHtml(session.description || '') || 'No description was provided.'}
         </div>
         <SubmissionMetadata values={session.form_answers} />
       </div>
@@ -623,7 +624,7 @@ function formatMetadata(value: unknown): string {
   if (Array.isArray(value)) return value.map(String).join(', ')
   if (typeof value === 'object' && value !== null) return JSON.stringify(value)
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  return String(value)
+  return plainTextFromHtml(String(value))
 }
 
 function nextAssignmentId(assignments: ReviewerAssignment[], currentId: string): string {

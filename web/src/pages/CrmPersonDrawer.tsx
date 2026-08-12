@@ -387,7 +387,7 @@ export function CrmPersonDrawer({
 
                 {data.custom_fields.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No custom fields yet. Add one to record anything dais doesn't ask for.
+                    No custom fields yet. Add one to record anything SpeakerWeave doesn't ask for.
                   </p>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">

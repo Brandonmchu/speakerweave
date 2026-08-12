@@ -76,7 +76,7 @@ export function Onboarding() {
             Create your event
           </h1>
           <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-            Everything in dais — forms, submissions, the agenda — hangs off one event. You can change
+            Everything in SpeakerWeave — forms, submissions, the agenda — hangs off one event. You can change
             all of this later in Settings.
           </p>
         </div>

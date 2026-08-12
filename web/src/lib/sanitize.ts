@@ -18,3 +18,19 @@ export function stripUnsafeHtml(html: string): string {
     .replace(/\s+on[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\s+(href|src)\s*=\s*(["']?)\s*javascript:[^"'>\s]*/gi, ' $1=$2#')
 }
+
+/**
+ * Rich-text answers arrive as HTML (the public form's editor stores it), but
+ * several organizer/reviewer surfaces display them as plain text — which used
+ * to show literal `<p>` tags. This converts HTML to readable text: block ends
+ * and <br> become newlines, tags go away, entities decode. Plain text passes
+ * through unchanged. DOMParser documents are inert (nothing loads or runs).
+ */
+export function plainTextFromHtml(value: string): string {
+  if (!value || !/[<&]/.test(value)) return value
+  const withBreaks = value
+    .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, '\n')
+    .replace(/<(br|hr)\s*\/?>/gi, '\n')
+  const doc = new DOMParser().parseFromString(withBreaks, 'text/html')
+  return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim()
+}

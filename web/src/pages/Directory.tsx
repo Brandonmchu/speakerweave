@@ -587,14 +587,20 @@ export function Directory() {
                     <td className="truncate whitespace-nowrap px-3 py-2">
                       <div className="flex min-w-0 items-center gap-2.5">
                         <GradientAvatar id={person.id} name={person.name} size={24} />
+                        {/* min-w keeps the name clickable when the duplicate
+                            badge (shrink-0) would otherwise crush it to 0px */}
                         <button
                           type="button"
-                          className="min-w-0 truncate text-left font-medium text-foreground hover:text-primary hover:underline"
+                          className="min-w-[6rem] flex-1 truncate text-left font-medium text-foreground hover:text-primary hover:underline"
                           onClick={() => setOpenPerson(person.id)}
                         >
                           {person.name}
                         </button>
-                        {person.is_duplicate && <Badge variant="muted">Possible duplicate</Badge>}
+                        {person.is_duplicate && (
+                          <Badge variant="muted" className="shrink-0">
+                            Possible duplicate
+                          </Badge>
+                        )}
                       </div>
                     </td>
                     <td className="truncate whitespace-nowrap px-3 py-2 text-muted-foreground">{person.email}</td>

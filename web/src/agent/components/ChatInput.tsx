@@ -96,6 +96,12 @@ export function ChatInput({
     const textBeforeCursor = before.toString()
 
     if (atMode && contextStart !== null) {
+      // The "@" that opened the popover can itself be deleted — without this
+      // check atMode never exits and the popover keeps swallowing keystrokes.
+      if (textBeforeCursor.length <= contextStart || textBeforeCursor[contextStart] !== '@') {
+        closeAtMode()
+        return
+      }
       const nextQuery = textBeforeCursor.slice(contextStart + 1)
       setContextQuery(nextQuery)
       return

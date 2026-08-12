@@ -580,7 +580,7 @@ function SubmitterShell({ children, eyebrow }: { children: ReactNode; eyebrow?: 
         <div className="rounded-2xl bg-card p-6 shadow-raised sm:p-9">
           {children}
         </div>
-        <p className="mt-6 text-center text-xs text-muted-foreground">Powered by dais</p>
+        <p className="mt-6 text-center text-xs text-muted-foreground">Powered by SpeakerWeave</p>
       </div>
     </div>
   )
