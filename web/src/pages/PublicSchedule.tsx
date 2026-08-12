@@ -678,7 +678,10 @@ function SessionCard({
       }}
       className={cn(
         'cursor-pointer bg-card text-left transition-colors hover:bg-foreground/[0.028] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        compact ? 'py-3' : 'py-6'
+        // The row paints a surface (bg-card + hover), so it needs its own
+        // horizontal padding — flush edges read as broken once the canvas and
+        // card tokens diverge under per-event branding.
+        compact ? 'px-4 py-3' : 'px-5 py-6 sm:px-6'
       )}
     >
       <div className={cn('grid gap-3', compact ? 'grid-cols-[92px_minmax(0,1fr)]' : 'sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-5')}>
