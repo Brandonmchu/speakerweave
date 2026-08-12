@@ -124,7 +124,7 @@ const SURFACES: Array<{
       'Mention or DM the same agent that powers in-app Ask — the same built-in and connected MCP tools, with Approve/Deny buttons in Slack and shared Ask thread history.',
   },
   {
-    title: 'sw CLI',
+    title: 'CLI',
     kicker: 'Terminal',
     icon: SquareTerminal,
     tone: 'cli',

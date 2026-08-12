@@ -21,8 +21,10 @@
  * Slack chrome is deliberately light (white surface, #1D1C1D ink) even inside a
  * paper band — it is a screenshot of someone else's product, not our palette.
  */
-import { useEffect, useRef, type CSSProperties, type JSX, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 
+import chatgptLogo from '../assets/logos/chatgpt.svg'
+import claudeLogo from '../assets/logos/claude.svg'
 import slackLogo from '../assets/logos/slack.svg'
 import '../styles/site-agentdemos.css'
 
@@ -254,13 +256,38 @@ function InAppDemo() {
 
 /* ── MCP connector ──────────────────────────────────────────────────────── */
 
+/** The two clients people actually add the connector to. Switching between them
+ *  is the point: the same server, the same tools, whichever client you use. */
+const MCP_CLIENTS = [
+  { id: 'claude', name: 'Claude', logo: claudeLogo },
+  { id: 'chatgpt', name: 'ChatGPT', logo: chatgptLogo },
+] as const
+
 function McpDemo() {
+  const [client, setClient] = useState<(typeof MCP_CLIENTS)[number]['id']>('claude')
+  const active = MCP_CLIENTS.find((c) => c.id === client) ?? MCP_CLIENTS[0]
+
   return (
-    <div className="swd-mcp">
-      <div className="swd-mc-bar" aria-hidden="true">
-        <i className="swd-mc-dots" />
-        <span>New chat</span>
-        <em>MCP</em>
+    <div className={`swd-mcp swd-mc-${client}`}>
+      <div className="swd-mc-bar">
+        <span className="swd-mc-brand">
+          <img src={active.logo} alt="" />
+          {active.name}
+        </span>
+        <span className="swd-mc-tabs" role="group" aria-label="MCP client">
+          {MCP_CLIENTS.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={c.id === client ? 'on' : undefined}
+              aria-pressed={c.id === client}
+              onClick={() => setClient(c.id)}
+            >
+              <img src={c.logo} alt="" aria-hidden="true" />
+              {c.name}
+            </button>
+          ))}
+        </span>
       </div>
 
       <div className="swd-mc-body">

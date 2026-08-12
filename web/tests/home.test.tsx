@@ -200,7 +200,7 @@ describe('Home landing', () => {
     )
     // The hero closes with where the agent runs, not with project statistics.
     const where = screen.getByRole('region', { name: 'Where SpeakerWeave runs' })
-    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'sw CLI']) {
+    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'CLI']) {
       expect(within(where).getByText(surface)).toBeInTheDocument()
     }
     expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
@@ -233,7 +233,7 @@ describe('Home landing', () => {
     expect(
       within(agentic).getByRole('heading', { name: 'Built for the future, and fully agentic.' })
     ).toBeInTheDocument()
-    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'sw CLI']) {
+    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'CLI']) {
       expect(within(agentic).getByRole('heading', { name: surface })).toBeInTheDocument()
     }
     expect(agentic).toHaveTextContent(`${window.location.origin}/mcp`)
