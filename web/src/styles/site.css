@@ -47,7 +47,8 @@
   --sw-overdue: #c87f3c;
 
   --sw-sans: 'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif;
-  --sw-serif: 'Instrument Serif', Georgia, serif;
+  /* Display face — JetBrains Mono site-wide (historical var name kept). */
+  --sw-serif: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
   --sw-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
 
   --sw-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -86,8 +87,8 @@ body.sw-site-active {
 
 .sw-site .serif {
   font-family: var(--sw-serif);
-  font-weight: 400;
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
 .sw-site .mono {
   font-family: var(--sw-mono);
@@ -348,15 +349,15 @@ body.sw-site-active {
   margin-top: 14px;
 }
 .sw-site .h1 {
-  font-size: 70px;
-  line-height: 1.01;
+  font-size: 50px;
+  line-height: 1.1;
   margin: 22px 0 0;
   color: #fdfbf8;
   font-weight: 400;
 }
 .sw-site .h2 {
-  font-size: 44px;
-  line-height: 1.06;
+  font-size: 33px;
+  line-height: 1.14;
   margin: 14px 0 0;
   max-width: 18ch;
   color: var(--sw-dbright);
@@ -516,7 +517,9 @@ body.sw-site-active {
 .sw-site .seam {
   height: 1px;
   border: 0;
-  margin: 0;
+  /* The agentic section below opens with ~110px of visual air; match it above
+     so the hairline sits centered between the hero wall and the next act. */
+  margin: 76px 0 0;
   background: linear-gradient(
     90deg,
     transparent,
@@ -1879,7 +1882,7 @@ body.sw-site-active {
   animation: sw-drift 20s ease-in-out infinite;
 }
 .sw-site .cta h2 {
-  font-size: 46px;
+  font-size: 34px;
   margin: 0;
   font-weight: 400;
   color: var(--sw-ink);
@@ -1931,9 +1934,9 @@ body.sw-site-active {
 }
 .sw-site .doc h1 {
   font-family: var(--sw-serif);
-  font-weight: 400;
-  font-size: 52px;
-  line-height: 1.04;
+  font-weight: 500;
+  font-size: 38px;
+  line-height: 1.12;
   letter-spacing: -0.015em;
   margin: 14px 0 0;
   color: var(--sw-ink);
@@ -2308,7 +2311,7 @@ body.sw-site-active {
     gap: 40px;
   }
   .sw-site .h1 {
-    font-size: 56px;
+    font-size: 40px;
   }
   .sw-site .split {
     gap: 40px;
