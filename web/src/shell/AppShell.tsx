@@ -532,12 +532,16 @@ export function AppShell() {
 
   const signOut = () => {
     clearToken()
-    // The public site, for everyone. `/demo` mints a token and walks straight
-    // back in, so it made "sign out" a no-op for demo visitors; `/dev-login` is
-    // a token-paste form that means nothing to an organizer who just left. The
-    // landing page offers both ways back in and is the only page that makes
-    // sense to a person who has just signed out.
-    navigate('/')
+    // The public site, for everyone — and by leaving the SPA rather than
+    // routing inside it. `/demo` mints a token and walks straight back in, so
+    // it made "sign out" a no-op for demo visitors; `/dev-login` is a
+    // token-paste form that means nothing to an organizer. A client-side
+    // navigate is not enough either: the auth guard re-runs the instant the
+    // token clears and wins the race, sending them to the token form or, under
+    // Clerk, to a hosted sign-in they never asked for. A full load of `/` lands
+    // on the landing page with no guard in the way, and drops every cache and
+    // in-memory scrap of the session on the way out.
+    window.location.assign('/')
   }
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)

@@ -207,15 +207,18 @@ describe('Rail-foot workspace switcher', () => {
   it('signs out to the public site, not to a token-paste form', async () => {
     window.localStorage.setItem('dais.token', 'alpha-token')
     stubApi([SOLO_ORG])
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign })
 
     renderApp('/submissions')
     const menu = await openAccountMenu()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Sign out' }))
 
-    // `/dev-login` means nothing to an organizer who just left, and `/demo`
-    // mints a fresh token and walks demo visitors straight back in — which made
-    // signing out of the demo a no-op.
-    await waitFor(() => expect(pathname()).toBe('/'))
+    // A full load of `/`, deliberately: `/dev-login` means nothing to an
+    // organizer who just left, `/demo` mints a fresh token and walks demo
+    // visitors straight back in, and a client-side navigate loses the race with
+    // the auth guard the moment the token clears.
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'))
     expect(window.localStorage.getItem('dais.token')).toBeNull()
   })
 
