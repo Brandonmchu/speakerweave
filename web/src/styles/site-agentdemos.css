@@ -7,8 +7,10 @@
  * Scoped under `.sw-site` and prefixed `swd-` throughout so nothing here can
  * collide with `site.css`, the app, or Tailwind's `important: '#root'`
  * utilities. Tokens come from `.sw-site`; only the borrowed chrome (Slack's
- * white/#1D1C1D, the terminal's near-black) uses literal colours, because those
- * are screenshots of someone else's product rather than our palette.
+ * white/#1D1C1D, claude.ai's #FAF9F5, ChatGPT's white, the terminal's
+ * near-black) uses literal colours, because those are screenshots of someone
+ * else's product rather than our palette. The MCP frame keeps its two clients
+ * in `--mc-*` tokens so one set of markup wears either skin.
  *
  * Motion contract: every animated element has `swd-st` and an inline `--t`
  * delay, and nothing starts until `.in` lands on the `.swd` root — from the
@@ -42,6 +44,19 @@
 }
 .sw-site .swd.in .swd-st {
   animation: swd-rise 0.5s var(--sw-ease) var(--t, 0s) forwards;
+}
+
+/* Three window dots from one element — no throwaway spans in the markup. */
+.sw-site .swd .swd-dots {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 26px;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    13px 0 0 rgba(255, 255, 255, 0.16),
+    26px 0 0 rgba(255, 255, 255, 0.16);
 }
 
 /* Machine-generated values are mono everywhere, at whatever size they sit in. */
@@ -454,39 +469,69 @@
 
 /* ── mcp client ───────────────────────────────────────────────────────────── */
 
-/* Deliberately a dark, unbranded client: this is someone else's app, and the
-   contrast keeps it from reading as a second copy of the in-app pane. */
+/* Borrowed chrome, same as Slack above: this frame is a screenshot of Claude
+   or ChatGPT, so it wears their palette rather than ours — both of which are
+   light. Everything below reads from `--mc-*`, and the only thing the two
+   client classes do is set those tokens, so the markup stays single-sourced.
+   The system font stack is part of the impression: neither product renders in
+   Instrument Sans. */
 .sw-site .swd-mcp {
-  background: var(--sw-dsurf);
-  color: var(--sw-dtext);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  --mc-shadow: rgba(28, 26, 23, 0.16);
+  background: var(--mc-bg);
+  color: var(--mc-ink);
+  border: 1px solid var(--mc-edge, var(--mc-line));
   border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+  box-shadow:
+    0 1px 2px rgba(28, 26, 23, 0.06),
+    0 22px 54px var(--mc-shadow);
   overflow: hidden;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
+
+/* claude.ai: warm off-white ground, near-black ink, a soft ecru user bubble,
+   and the serif wordmark. */
+.sw-site .swd-mc-claude {
+  --mc-bg: #faf9f5;
+  --mc-ink: #141413;
+  --mc-ink2: #46443e;
+  --mc-faint: #7d7a71;
+  --mc-line: rgba(20, 20, 19, 0.1);
+  --mc-edge: rgba(20, 20, 19, 0.13);
+  --mc-you: #f0eee6;
+  --mc-you-ink: #141413;
+  --mc-tool: #fffefb;
+  --mc-tab: rgba(20, 20, 19, 0.06);
+  --mc-input: #fff;
+  --mc-radius: 14px;
+}
+
+/* ChatGPT: pure white ground and the dark user pill it ships today. */
+.sw-site .swd-mc-chatgpt {
+  --mc-bg: #fff;
+  --mc-ink: #0d0d0d;
+  --mc-ink2: #3c3c3c;
+  --mc-faint: #8f8f8f;
+  --mc-line: rgba(0, 0, 0, 0.08);
+  --mc-edge: rgba(0, 0, 0, 0.11);
+  --mc-you: #0d0d0d;
+  --mc-you-ink: #fff;
+  --mc-tool: #f7f7f7;
+  --mc-tab: rgba(0, 0, 0, 0.05);
+  --mc-input: #fff;
+  --mc-radius: 999px;
+}
+
 .sw-site .swd-mc-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 11px 14px;
-  border-bottom: 1px solid var(--sw-dline);
+  border-bottom: 1px solid var(--mc-line);
   flex: 0 0 auto;
-}
-/* Three window dots from one element — no throwaway spans in the markup. */
-.sw-site .swd-mc-dots {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 26px;
-  flex: 0 0 auto;
-  background: rgba(255, 255, 255, 0.16);
-  box-shadow:
-    13px 0 0 rgba(255, 255, 255, 0.16),
-    26px 0 0 rgba(255, 255, 255, 0.16);
-}
-.sw-site .swd-mc-bar span {
-  font-size: 12px;
-  color: var(--sw-dmute);
 }
 
 /* The connector's whole point is that it is the same server in whichever client
@@ -496,9 +541,16 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--sw-dbright);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mc-ink);
+}
+.sw-site .swd-mc-claude .swd-mc-brand {
+  font-family: var(--sw-serif);
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 0;
 }
 .sw-site .swd-mc-brand img {
   width: 16px;
@@ -510,7 +562,7 @@
   gap: 3px;
   padding: 3px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--mc-tab);
 }
 .sw-site .swd-mc-tabs button {
   display: inline-flex;
@@ -523,7 +575,7 @@
   border-radius: 7px;
   cursor: pointer;
   background: none;
-  color: var(--sw-dfaint);
+  color: var(--mc-faint);
   transition:
     background 0.18s ease,
     color 0.18s ease;
@@ -531,33 +583,20 @@
 .sw-site .swd-mc-tabs button img {
   width: 12px;
   height: 12px;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 .sw-site .swd-mc-tabs button:hover {
-  color: var(--sw-dmute);
+  color: var(--mc-ink2);
 }
 .sw-site .swd-mc-tabs button.on {
-  background: rgba(255, 255, 255, 0.11);
-  color: var(--sw-dbright);
+  background: #fff;
+  color: var(--mc-ink);
+  box-shadow:
+    0 1px 2px rgba(28, 26, 23, 0.14),
+    0 0 0 1px rgba(28, 26, 23, 0.04);
 }
 .sw-site .swd-mc-tabs button.on img {
   opacity: 1;
-}
-
-/* Each client's own accent on the user's message bubble. */
-.sw-site .swd-mc-claude .swd-mc-you {
-  background: rgba(217, 119, 87, 0.16);
-}
-.sw-site .swd-mc-chatgpt .swd-mc-you {
-  background: rgba(255, 255, 255, 0.08);
-}
-.sw-site .swd-mc-bar em {
-  margin-left: auto;
-  font-style: normal;
-  font-family: var(--sw-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.11em;
-  color: var(--sw-dfaint);
 }
 .sw-site .swd-mc-body {
   display: flex;
@@ -568,34 +607,36 @@
 .sw-site .swd-mc-you {
   align-self: flex-end;
   max-width: 84%;
-  background: rgba(255, 255, 255, 0.07);
-  border-radius: 13px 13px 4px 13px;
-  padding: 8px 12px;
+  background: var(--mc-you);
+  border-radius: 16px;
+  padding: 9px 14px;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--sw-dtext);
+  color: var(--mc-you-ink);
 }
 .sw-site .swd-mc-tool {
   margin-top: 14px;
   padding: 9px 11px;
-  border: 1px solid var(--sw-dline);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.16);
+  background: var(--mc-tool);
 }
 .sw-site .swd-mc-trow {
   display: flex;
   align-items: center;
   gap: 9px;
 }
+/* Our mark inside their frame: the connector chip keeps the product's terracotta
+   in both clients, since it is the one thing on screen that is ours. */
 .sw-site .swd-mc-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
   font-size: 11px;
-  color: var(--sw-dtext);
-  background: rgba(216, 153, 111, 0.14);
-  border: 1px solid rgba(216, 153, 111, 0.3);
+  color: var(--sw-accent);
+  background: rgba(168, 94, 62, 0.09);
+  border: 1px solid rgba(168, 94, 62, 0.24);
   border-radius: 999px;
   padding: 2px 9px 2px 6px;
 }
@@ -603,11 +644,11 @@
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--sw-accent-lite);
+  background: var(--sw-accent);
 }
 .sw-site .swd-mc-name {
   font-size: 11.5px;
-  color: var(--sw-dtext);
+  color: var(--mc-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -624,13 +665,13 @@
   align-items: center;
   gap: 6px;
   font-size: 10.5px;
-  color: var(--sw-dfaint);
+  color: var(--mc-faint);
 }
 .sw-site .swd-mc-run i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--sw-dfaint);
+  background: var(--mc-faint);
   animation: swd-breathe 2.1s ease-in-out infinite;
 }
 .sw-site .swd.in .swd-mc-run {
@@ -645,7 +686,7 @@
   opacity: 0;
   font-family: var(--sw-mono);
   font-size: 10.5px;
-  color: #8fb08f;
+  color: #47784f;
 }
 .sw-site .swd.in .swd-mc-ran {
   animation: swd-fade 0.3s var(--sw-ease) 2.12s forwards;
@@ -655,7 +696,7 @@
   font-family: var(--sw-mono);
   font-size: 10.5px;
   line-height: 1.5;
-  color: var(--sw-dfaint);
+  color: var(--mc-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -664,19 +705,21 @@
   margin: 14px 0 0;
   font-size: 13px;
   line-height: 1.6;
-  color: var(--sw-dtext);
+  color: var(--mc-ink);
 }
 .sw-site .swd-mc-say + .swd-mc-say {
   margin-top: 9px;
-  color: var(--sw-dmute);
+  color: var(--mc-ink2);
 }
+/* Each client's composer: Claude's rounded rectangle, ChatGPT's pill. */
 .sw-site .swd-mc-input {
   margin-top: auto;
-  padding: 9px 12px;
-  border: 1px solid var(--sw-dline);
-  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--mc-input);
+  border: 1px solid var(--mc-edge);
+  border-radius: var(--mc-radius);
   font-size: 12.5px;
-  color: var(--sw-dfaint);
+  color: var(--mc-faint);
   flex: 0 0 auto;
 }
 .sw-site .swd-mc-foot {
@@ -685,13 +728,13 @@
   gap: 10px;
   margin-top: 13px;
   padding-top: 12px;
-  border-top: 1px solid var(--sw-dline);
+  border-top: 1px solid var(--mc-line);
   font-size: 11px;
-  color: var(--sw-dfaint);
+  color: var(--mc-faint);
   flex: 0 0 auto;
 }
 .sw-site .swd-mc-conn {
-  color: var(--sw-dmute);
+  color: var(--mc-ink2);
 }
 .sw-site .swd-mc-foot > span + span {
   margin-left: auto;
@@ -699,6 +742,9 @@
 
 /* ── cli ──────────────────────────────────────────────────────────────────── */
 
+/* A terminal running Claude Code, which is running `sw` — so the chrome is
+   Claude Code's transcript (turn bullets, result elbows, composer, status line)
+   and the only colour that carries meaning is what `sw` returned. */
 .sw-site .swd-cli {
   background: #100e0c;
   border-radius: 14px;
@@ -706,7 +752,7 @@
   overflow: hidden;
   font-family: var(--sw-mono);
   font-size: 12px;
-  line-height: 1.9;
+  line-height: 1.65;
   color: #c6bfb5;
 }
 .sw-site .swd-cl-bar {
@@ -740,7 +786,7 @@
   max-width: 0;
 }
 .sw-site .swd.in .swd-cl-cmd {
-  animation: swd-type 1.9s steps(44, end) 0.35s forwards;
+  animation: swd-type 1.15s steps(37, end) 0.35s forwards;
 }
 .sw-site .swd-cl-cur,
 .sw-site .swd-cl-cur2 {
@@ -756,22 +802,136 @@
 .sw-site .swd.in .swd-cl-cur {
   animation:
     swd-caret 1.2s step-end infinite,
-    swd-hide 0.01s linear 2.4s forwards;
+    swd-hide 0.01s linear 1.55s forwards;
 }
 .sw-site .swd.in .swd-cl-cur2 {
   animation: swd-caret 1.2s step-end infinite;
 }
-.sw-site .swd-cl-end {
+
+/* Claude Code's spinner: held while the first `sw` call runs, then collapsed
+   out of flow so the transcript closes over it — same wrapper/inner split as
+   the Slack thinking row, for the same reason. */
+.sw-site .swd-cl-thinkwrap {
+  height: 26px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.sw-site .swd.in .swd-cl-thinkwrap {
+  animation: swd-collapse 0.35s var(--sw-ease) 1.95s forwards;
+}
+.sw-site .swd-cl-think {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 7px;
+  opacity: 0;
+}
+.sw-site .swd.in .swd-cl-think {
+  animation: swd-fade 0.3s var(--sw-ease) 1.55s forwards;
+}
+.sw-site .swd-cl-star {
+  width: 11px;
+  height: 11px;
+}
+.sw-site .swd-cl-think b {
+  font-weight: 400;
+  color: #d8996f;
+}
+.sw-site .swd-cl-think span {
+  color: #6f6a61;
+  animation: swd-breathe 2.2s ease-in-out infinite;
+}
+
+/* One turn: a bullet in the gutter, the tool call or the reply beside it. */
+.sw-site .swd-cl-turn,
+.sw-site .swd-cl-res {
+  display: flex;
+  gap: 8px;
+}
+.sw-site .swd-cl-turn {
+  margin-top: 11px;
+  color: #ded7cc;
+}
+.sw-site .swd-cl-say {
+  color: #c6bfb5;
+}
+.sw-site .swd-cl-dot {
+  width: 7px;
+  height: 7px;
   margin-top: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #d8996f;
 }
-.sw-site .swd-cl-out {
-  color: #8fb08f;
+/* The command itself is the point of the demo, so it is the brightest ink on
+   screen; the Bash() wrapper around it stays a shade back. */
+.sw-site .swd-cl-lit {
+  color: #f4efe7;
 }
-.sw-site .swd-cl-dim {
+.sw-site .swd-cl-res {
+  margin-top: 3px;
+  padding-left: 15px;
   color: #8a8378;
 }
-.sw-site .swd-cl-lit {
-  color: #c6bfb5;
+/* `⎿`, drawn: a corner, so no mono face has to own the glyph. */
+.sw-site .swd-cl-elbow {
+  width: 7px;
+  height: 8px;
+  margin-top: 4px;
+  flex: 0 0 auto;
+  border-left: 1px solid #5f5a52;
+  border-bottom: 1px solid #5f5a52;
+  border-bottom-left-radius: 2px;
+}
+.sw-site .swd-cl-cont {
+  padding-left: 30px;
+}
+.sw-site .swd-cl-more {
+  color: #635e56;
+}
+.sw-site .swd-cl-ok {
+  color: #8fb08f;
+}
+
+/* The composer, and the status line Claude Code parks underneath it. */
+.sw-site .swd-cl-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  flex: 0 0 auto;
+}
+.sw-site .swd-cl-status {
+  display: flex;
+  gap: 12px;
+  margin-top: 7px;
+  padding: 0 2px;
+  font-size: 10.5px;
+  color: #635e56;
+  flex: 0 0 auto;
+}
+.sw-site .swd-cl-status > span + span {
+  margin-left: auto;
+}
+.sw-site .swd-cl-mode {
+  display: inline-flex;
+  align-items: center;
+  color: #7f9a7f;
+}
+/* `⏵⏵` as two triangles: same reason as the elbow. */
+.sw-site .swd-cl-mode i {
+  width: 0;
+  height: 0;
+  margin-right: 3px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+}
+.sw-site .swd-cl-mode i + i {
+  margin-right: 6px;
 }
 
 /* ── narrow ───────────────────────────────────────────────────────────────── */
@@ -801,6 +961,7 @@
     animation: none !important;
   }
   .sw-site .swd-sk-thinkwrap,
+  .sw-site .swd-cl-thinkwrap,
   .sw-site .swd-mc-run {
     display: none;
   }
@@ -808,6 +969,9 @@
   .sw-site .swd .swd-sk-think span,
   .sw-site .swd.in .swd-sk-think,
   .sw-site .swd.in .swd-sk-thinkwrap,
+  .sw-site .swd .swd-cl-think span,
+  .sw-site .swd.in .swd-cl-think,
+  .sw-site .swd.in .swd-cl-thinkwrap,
   .sw-site .swd .swd-mc-run i,
   .sw-site .swd.in .swd-mc-run,
   .sw-site .swd.in .swd-mc-ran,

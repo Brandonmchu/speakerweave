@@ -1,23 +1,80 @@
 ---
 title: Hosted MCP server
-description: Connect Claude, ChatGPT, or any MCP client to your SpeakerWeave organization.
+description: Connect ChatGPT, Claude, or any MCP client to your SpeakerWeave organization.
 ---
 
 Every deployment hosts a remote MCP server at `/mcp` (Streamable HTTP) exposing 14 organization-scoped tools and 3 resources: events, submissions, decisions, speakers, portal invitations, scheduling, content status, reminders, evaluation summaries, and AI triage.
 
-## Connector UIs (OAuth)
-
-In claude.ai, Claude for Work, or ChatGPT, add a custom connector with just the URL:
+There is one thing to paste into any client:
 
 ```
 https://speakerweave.com/mcp
 ```
 
-The client discovers `/.well-known/oauth-protected-resource`, registers dynamically, and runs authorization-code + PKCE. SpeakerWeave's approval page exchanges an API token (from **Settings → API tokens**) for short-lived OAuth access with rotating refresh tokens — the raw API token is never stored by the client.
+Self-hosting? Use your own origin with the same `/mcp` path.
+
+## Set it up in ChatGPT
+
+Custom MCP connectors are available on ChatGPT Plus, Pro, Business, Enterprise, and Edu; on Business and above a workspace owner may need to allow custom connectors first.
+
+<Steps>
+  <Step title="Open connector settings">
+    **Settings → Connectors** (some plans label this **Apps & connectors**), then **Create** / **Add custom connector**.
+  </Step>
+  <Step title="Point it at SpeakerWeave">
+    Name it `SpeakerWeave`, paste `https://speakerweave.com/mcp` as the MCP server URL, and choose **OAuth** as the authentication method. No headers, no client ID, no secret — the server publishes its own metadata and registers the client for you.
+  </Step>
+  <Step title="Authorize">
+    ChatGPT opens SpeakerWeave's approval page. Sign in, pick the organization, and approve. You will need an API token from **Settings → API tokens** in SpeakerWeave; the approval page exchanges it for short-lived OAuth access, so the raw token never reaches the client.
+  </Step>
+  <Step title="Use it in a chat">
+    Start a new chat, enable **SpeakerWeave** from the tools/connectors picker, and ask something real:
+
+    ```
+    What's still pending review for the AI Builders Summit?
+    ```
+
+    ChatGPT calls `list_submissions` and answers from your live program.
+  </Step>
+</Steps>
+
+## Set it up in Claude
+
+Works in claude.ai, Claude Desktop, and Claude for Work. On a Team or Enterprise plan, a primary owner adds the connector for the whole organization from the same screen.
+
+<Steps>
+  <Step title="Open connector settings">
+    **Settings → Connectors → Add custom connector**.
+  </Step>
+  <Step title="Point it at SpeakerWeave">
+    Name it `SpeakerWeave` and paste `https://speakerweave.com/mcp`. Leave the advanced OAuth fields empty — discovery fills them in.
+  </Step>
+  <Step title="Authorize">
+    Click **Connect**. SpeakerWeave's approval page opens; approve with an API token from **Settings → API tokens**. Claude stores a rotating refresh token, not your API token.
+  </Step>
+  <Step title="Use it in a chat">
+    Open the tools menu in a new chat, switch **SpeakerWeave** on, and ask:
+
+    ```
+    Who still owes content before Aug 27?
+    ```
+  </Step>
+</Steps>
+
+### Claude Code
+
+Claude Code adds the same server from the terminal:
+
+```bash
+claude mcp add --transport http speakerweave https://speakerweave.com/mcp
+claude mcp list        # confirms the connection
+```
+
+Then `/mcp` inside a session runs the OAuth flow. The [`sw` CLI](/ai/cli) is the other way to work from a terminal — it wraps the same tool layer as a command, which is what coding agents usually reach for.
 
 ## Header-capable clients (bearer)
 
-For Claude Code/Desktop or any client that supports custom headers:
+For any client that supports custom headers, skip OAuth entirely:
 
 ```json
 {
@@ -31,4 +88,21 @@ For Claude Code/Desktop or any client that supports custom headers:
 }
 ```
 
+## How the OAuth flow works
+
+The client discovers `/.well-known/oauth-protected-resource`, registers dynamically, and runs authorization-code + PKCE. SpeakerWeave's approval page exchanges an API token (from **Settings → API tokens**) for short-lived OAuth access with rotating refresh tokens — the raw API token is never stored by the client.
+
 Tool calls are scoped to the organization that owns the token; cross-organization access is structurally impossible.
+
+<Note>
+  Connectors run the other way too: bring your own MCP servers *into* the SpeakerWeave agent under **Settings → Integrations → MCP connectors** ([details](/integrations/mcp-connectors)).
+</Note>
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Client rejects the URL | Include the scheme and the `/mcp` path, with no trailing slash |
+| Authorization page never loads | The deployment must be reachable over HTTPS on a public origin — `localhost` works only for clients running on the same machine |
+| Connected, but no tools listed | Re-run the connection: the token behind it was revoked or belongs to a deleted organization |
+| Tools return another organization's data | Not possible — every call is scoped to the token's organization. Check which organization you approved |

@@ -364,6 +364,53 @@ body.sw-site-active {
 .sw-site .h2.sm {
   font-size: 36px;
 }
+/* The agentic section speaks in the machine's voice: mono, terminal green, and
+   a caret. Different enough from the serif headlines that the two never compete
+   for the same job, and the only place on the site that gets this treatment. */
+/* Sized off the viewport so the line holds together down to a phone: mono is
+   wide, and this headline is written to be read in one breath. */
+.sw-site .h2.mono {
+  font-family: var(--sw-mono);
+  font-size: clamp(19px, 4.4vw, 38px);
+  font-weight: 500;
+  line-height: 1.24;
+  letter-spacing: -0.035em;
+  color: #96c9a3;
+}
+.sw-site .h2.mono i {
+  display: inline-block;
+  width: 0.46em;
+  height: 0.92em;
+  margin-left: 0.16em;
+  vertical-align: -0.09em;
+  background: currentColor;
+  animation: swcaret 1.15s step-end infinite;
+}
+@keyframes swcaret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+/* Centred header: the tabs below are a full-width row, and a left-ragged
+   header over a centred grid read as two different sections. */
+.sw-site .aghead {
+  max-width: 76ch;
+  margin: 0 auto;
+  text-align: center;
+}
+.sw-site .aghead .h2 {
+  max-width: none;
+}
+.sw-site .aghead .lede {
+  max-width: 60ch;
+  margin-left: auto;
+  margin-right: auto;
+}
 .sw-site .sect {
   padding: 96px 0;
 }
@@ -794,85 +841,16 @@ body.sw-site-active {
 
 /* ── facts ────────────────────────────────────────────────────────────────── */
 
-/* The facts row closes the hero. In the reference a dark section followed it,
-   so the next section's own padding carried the gap; here a paper band starts
-   immediately below, making the seam visible — so the row owns its bottom
-   space rather than borrowing it from a neighbour. */
-.sw-site .factsect {
-  padding-top: 70px;
-  padding-bottom: 72px;
-}
-
 /* A section that ends where the ground changes must close itself. Sections on
    the ink ground normally borrow their bottom gap from the next section's top
    padding, which works until the next thing is a full-bleed paper band — then
    the colour changes right under the last line and the section reads as
    clipped. This is a floor, not an override: sections that already pad
-   themselves (`.sect`, `.factsect`) keep their own larger value. */
+   themselves (`.sect`) keep their own larger value. */
 .sw-site main > section:not(.light):not(.doc):has(+ .light),
 .sw-site main > section:not(.light):not(.doc):has(+ .doc) {
   padding-bottom: max(72px, var(--sw-close, 0px));
 }
-/* Where the agent runs, as a row of cards directly under the hero. This replaced
-   a strip of project statistics: true, but the wrong first thing to say. */
-.sw-site .wherelede {
-  font-size: 13.5px;
-  color: var(--sw-dmute);
-  margin: 0 0 18px;
-  text-align: center;
-}
-.sw-site .wherecards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.sw-site .wherecards li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.028);
-  box-shadow: inset 0 0 0 1px var(--sw-dline);
-  transition: background 0.2s ease;
-}
-.sw-site .wherecards li:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-.sw-site .wherecards b {
-  display: block;
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--sw-dbright);
-}
-.sw-site .wherecards em {
-  display: block;
-  margin-top: 2px;
-  font-style: normal;
-  font-size: 12px;
-  color: var(--sw-dfaint);
-}
-.sw-site .wherecards .ico {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--sw-dtext);
-}
-.sw-site .wherecards .ico svg,
-.sw-site .wherecards .ico img {
-  width: 17px;
-  height: 17px;
-}
-
 .sw-site .facts {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1250,7 +1228,8 @@ body.sw-site-active {
    ~130px and the copy shreds. Same rhythm and hairlines, legible measure. */
 .sw-site .srow {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  /* The mark column grows for the two-logo tile rather than clipping it. */
+  grid-template-columns: minmax(34px, auto) 1fr auto;
   column-gap: 14px;
   align-items: center;
   padding: 20px 0;
@@ -1449,28 +1428,159 @@ body.sw-site-active {
   margin-left: calc((100% - var(--aw)) / 2);
 }
 
-/* One surface per band — claim on one side, the surface doing it on the other,
-   alternating so the eye zigzags rather than running down a single column. */
-.sw-site .surfrow {
+/* One stage, four surfaces — the tabs pick which one is on it. Four stacked
+   bands made a visitor scroll past three surfaces to reach the one they cared
+   about; these share the space instead, and the stage advances on its own until
+   someone picks for themselves. */
+.sw-site .surftabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 40px 0 30px;
+}
+.sw-site .surftabs button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 13px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: var(--sw-dmute);
+  background: rgba(255, 255, 255, 0.028);
+  box-shadow: inset 0 0 0 1px var(--sw-dline);
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.sw-site .surftabs button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.sw-site .surftabs button[aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.45);
+}
+.sw-site .surftabs b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--sw-dmute);
+  transition: color 0.2s ease;
+}
+.sw-site .surftabs button[aria-selected='true'] b {
+  color: var(--sw-dbright);
+}
+.sw-site .surftabs em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--sw-dfaint);
+}
+.sw-site .surftabs .ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sw-dtext);
+}
+.sw-site .surftabs .ico svg,
+.sw-site .surftabs .ico img {
+  width: 17px;
+  height: 17px;
+}
+/* How long this surface has left on stage. Mounted only while the carousel is
+   actually running, so it never promises a move that will not come. */
+.sw-site .surftick {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 2px;
+  transform-origin: left;
+  background: var(--sw-accent-lite);
+  animation: surfsweep 9s linear forwards;
+}
+@keyframes surfsweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* The stage holds its height across a switch: the demos differ by ~100px, and
+   letting the page jump under the tabs is worse than a little empty ground. */
+.sw-site .surfstage {
+  min-height: 520px;
+}
+.sw-site .surfpanel {
   /* Tops align: the demos are much taller than their copy, and centring left
      the claim floating in the middle of an empty column. */
   align-items: start;
-  padding: 40px 0;
-  border-top: 1px solid var(--sw-line2);
+  animation: surfin 0.45s var(--sw-ease) both;
 }
-.sw-site .surfrow:first-child {
-  border-top: 0;
-  padding-top: 0;
+@keyframes surfin {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
-.sw-site .surfrow.mirror .surfcopy {
-  order: 2;
-}
-.sw-site .surfrow .srow {
+.sw-site .surfpanel .srow {
   border-top: 0;
   padding: 6px 0 0;
 }
 .sw-site .surfdemo {
   min-width: 0;
+}
+/* The one surface that needs setting up says where to read how. */
+.sw-site .srow .slink {
+  grid-row: 3;
+  grid-column: 2 / -1;
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--sw-accent-lite);
+}
+.sw-site .srow .slink:hover {
+  color: var(--sw-accent-hover);
+}
+
+/* Two marks in one tile, for the surface that is really two clients — read as
+   "ChatGPT / Claude", so the tile carries the slash too. It is wider than a
+   single-glyph tile, which is why `.srow`'s mark column is `minmax()`. */
+.sw-site .ico.duo {
+  width: auto;
+  min-width: 34px;
+  gap: 7px;
+  padding: 0 12px;
+}
+.sw-site .ico.duo img {
+  width: 15px;
+  height: 15px;
+}
+.sw-site .ico.duo b {
+  font-family: var(--sw-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--sw-dfaint);
+}
+/* Marks that ship black — ChatGPT's — have to flip on the ink ground. */
+.sw-site .ico img.inv {
+  filter: invert(1);
+}
+.sw-site .light .ico img.inv {
+  filter: none;
 }
 
 /* ── public schedule preview ──────────────────────────────────────────────── */
@@ -1998,6 +2108,7 @@ body.sw-site-active {
   .sw-site .cur,
   .sw-site .term .cmd,
   .sw-site .conflict,
+  .sw-site .surfpanel,
   .sw-site .cta .glow {
     animation: none !important;
   }
@@ -2105,7 +2216,6 @@ body.sw-site-active {
     display: none;
   }
   .sw-site .facts,
-  .sw-site .wherecards,
   .sw-site .grid3,
   .sw-site .grid2,
   .sw-site .statline,
@@ -2131,7 +2241,7 @@ body.sw-site-active {
     display: none;
   }
   .sw-site .srow {
-    grid-template-columns: 34px 1fr;
+    grid-template-columns: minmax(34px, auto) 1fr;
   }
   .sw-site .srow em {
     grid-row: 2;
@@ -2142,6 +2252,18 @@ body.sw-site-active {
   .sw-site .srow p {
     grid-row: 3;
     grid-column: 1 / -1;
+  }
+  .sw-site .srow .slink {
+    grid-row: 4;
+    grid-column: 1 / -1;
+    margin-top: 10px;
+  }
+  /* Two tabs a row, and the stage takes whatever height it needs. */
+  .sw-site .surftabs {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sw-site .surfstage {
+    min-height: 0;
   }
   .sw-site .sess {
     grid-template-columns: 76px 1fr;
@@ -2175,8 +2297,8 @@ body.sw-site-active {
 }
 
 @media (max-width: 620px) {
+  .sw-site .surftabs,
   .sw-site .facts,
-  .sw-site .wherecards,
   .sw-site .grid3,
   .sw-site .grid2,
   .sw-site .statline,

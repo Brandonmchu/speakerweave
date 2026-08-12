@@ -18,8 +18,10 @@
  * shared observer never picked up would sit at `opacity: 0` forever. It adds the
  * same class the shared sweep does, so the two are idempotent.
  *
- * Slack chrome is deliberately light (white surface, #1D1C1D ink) even inside a
- * paper band — it is a screenshot of someone else's product, not our palette.
+ * Borrowed chrome wears its own palette even inside a paper band — Slack's
+ * white/#1D1C1D, claude.ai's warm off-white, ChatGPT's plain white, Claude
+ * Code's near-black terminal. Each is a screenshot of someone else's product,
+ * not our surface.
  */
 import { useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
 
@@ -257,10 +259,12 @@ function InAppDemo() {
 /* ── MCP connector ──────────────────────────────────────────────────────── */
 
 /** The two clients people actually add the connector to. Switching between them
- *  is the point: the same server, the same tools, whichever client you use. */
+ *  is the point: the same server, the same tools, whichever client you use. Each
+ *  carries the small details that make its chrome recognisable — the wordmark's
+ *  typeface and the composer's own placeholder. */
 const MCP_CLIENTS = [
-  { id: 'claude', name: 'Claude', logo: claudeLogo },
-  { id: 'chatgpt', name: 'ChatGPT', logo: chatgptLogo },
+  { id: 'claude', name: 'Claude', logo: claudeLogo, placeholder: 'Write a message…' },
+  { id: 'chatgpt', name: 'ChatGPT', logo: chatgptLogo, placeholder: 'Ask ChatGPT' },
 ] as const
 
 function McpDemo() {
@@ -326,7 +330,7 @@ function McpDemo() {
         </p>
 
         <div className="swd-mc-input swd-st" style={at(3.3)} aria-hidden="true">
-          Send a message…
+          {active.placeholder}
         </div>
 
         <div className="swd-mc-foot swd-st" style={at(3.05)}>
@@ -342,33 +346,91 @@ function McpDemo() {
 
 /* ── CLI ────────────────────────────────────────────────────────────────── */
 
+/**
+ * A coding agent driving `sw`, because that is how the CLI actually gets used:
+ * the person asks in English, Claude Code shells out to `sw`, and the approval
+ * gate still lands in SpeakerWeave rather than in the terminal.
+ *
+ * The chrome is Claude Code's own — `⏺` turn bullets, `⎿` result elbows, the
+ * rounded composer, the status line — but both glyphs are drawn in CSS rather
+ * than typed, since neither is guaranteed to exist in the loaded mono face.
+ */
 function CliDemo() {
   return (
     <div className="swd-cli">
       <div className="swd-cl-bar" aria-hidden="true">
-        <i className="swd-mc-dots" />
-        <span className="swd-id">sw — zsh</span>
+        <i className="swd-dots" />
+        <span className="swd-id">~/speakerweave — claude</span>
       </div>
 
       <div className="swd-cl-body">
         <div className="swd-cl-line">
           <span className="swd-cl-p" aria-hidden="true">
-            $
+            &gt;
           </span>{' '}
-          <span className="swd-cl-cmd">{'sw ask "who still owes content before Aug 27?"'}</span>
+          <span className="swd-cl-cmd">who still owes content before Aug 27?</span>
           <span className="swd-cl-cur" aria-hidden="true" />
         </div>
-        <div className="swd-cl-out swd-st" style={at(2.55)}>
-          → 6 speakers outstanding · 4 missing headshot only
+
+        {/* Claude Code's spinner, held ~1s and then collapsed by the first call. */}
+        <div className="swd-cl-thinkwrap" aria-hidden="true">
+          <div className="swd-cl-think">
+            <img src={claudeLogo} alt="" className="swd-cl-star" />
+            <b>Weaving…</b>
+            <span>(4s · esc to interrupt)</span>
+          </div>
         </div>
-        <div className="swd-cl-dim swd-st" style={at(2.9)}>
-          → raj.patel · marco.bianchi · aisha.bello · omar.haddad
+
+        <div className="swd-cl-turn swd-st" style={at(2.15)}>
+          <i className="swd-cl-dot" aria-hidden="true" />
+          <span>
+            Bash(
+            <span className="swd-cl-lit">sw ask &quot;who still owes content before Aug 27?&quot;</span>)
+          </span>
         </div>
-        <div className="swd-cl-dim swd-st" style={at(3.25)}>
-          → run <span className="swd-cl-lit">sw remind --deadline 2026-08-27</span> to queue emails
+        <div className="swd-cl-res swd-st" style={at(2.4)}>
+          <i className="swd-cl-elbow" aria-hidden="true" />
+          <span>
+            <span className="swd-cl-ok">6 speakers outstanding</span> · 4 missing headshot only
+          </span>
         </div>
-        <div className="swd-cl-line swd-cl-end swd-st" style={at(3.6)} aria-hidden="true">
-          <span className="swd-cl-p">$</span> <span className="swd-cl-cur2" />
+        <div className="swd-cl-res swd-cl-cont swd-st" style={at(2.55)}>
+          raj.patel · marco.bianchi · aisha.bello · omar.haddad
+        </div>
+        <div className="swd-cl-res swd-cl-cont swd-cl-more swd-st" style={at(2.7)}>
+          +2 lines (ctrl+o to expand)
+        </div>
+
+        <div className="swd-cl-turn swd-cl-say swd-st" style={at(3)}>
+          <i className="swd-cl-dot" aria-hidden="true" />
+          <span>Four need only a headshot, so one reminder clears most of it. Queuing them.</span>
+        </div>
+
+        <div className="swd-cl-turn swd-st" style={at(3.35)}>
+          <i className="swd-cl-dot" aria-hidden="true" />
+          <span>
+            Bash(<span className="swd-cl-lit">sw remind --deadline 2026-08-27</span>)
+          </span>
+        </div>
+        <div className="swd-cl-res swd-st" style={at(3.6)}>
+          <i className="swd-cl-elbow" aria-hidden="true" />
+          <span>
+            <span className="swd-cl-ok">queued 6</span> · awaiting approval in SpeakerWeave
+          </span>
+        </div>
+
+        <div className="swd-cl-prompt swd-st" style={at(3.9)} aria-hidden="true">
+          <span className="swd-cl-p">&gt;</span>
+          <span className="swd-cl-cur2" />
+        </div>
+        <div className="swd-cl-status swd-st" style={at(4.05)} aria-hidden="true">
+          <span className="swd-cl-mode">
+            {/* Claude Code's ⏵⏵, drawn rather than typed. */}
+            <i />
+            <i />
+            accept edits on
+          </span>
+          <span>sw · 14 tools</span>
         </div>
       </div>
     </div>

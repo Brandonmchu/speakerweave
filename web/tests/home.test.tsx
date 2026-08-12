@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Home, REPO_URL } from '@/pages/Home'
+import { DOCS_URL, Home, REPO_URL } from '@/pages/Home'
 
 const calls: string[] = []
 
@@ -146,13 +146,16 @@ describe('Home landing', () => {
     expect(summary).toHaveTextContent('1 tracks live')
   })
 
-  it('gives every agentic surface a mark', () => {
+  it('gives every agentic surface a mark on its tab', () => {
     const { container } = renderHome()
 
     const agentic = screen.getByTestId('ai-apps-section')
-    // Three glyphs plus Slack's real brand mark, which ships as an <img>.
-    expect(agentic.querySelectorAll('.srow .ico svg, .srow .ico img')).toHaveLength(4)
-    expect(agentic.querySelectorAll('.srow .ico img')).toHaveLength(1)
+    // Two glyphs plus real brand marks, which ship as <img>: Slack's, and the
+    // ChatGPT + Claude pair on the connector tab.
+    expect(agentic.querySelectorAll('.surftabs .ico svg, .surftabs .ico img')).toHaveLength(5)
+    expect(agentic.querySelectorAll('.surftabs .ico img')).toHaveLength(3)
+    // ChatGPT's mark ships black, so it is flipped for the ink ground.
+    expect(agentic.querySelectorAll('.surftabs .ico img.inv')).toHaveLength(1)
     expect(container.querySelectorAll('.tile.artifact')).toHaveLength(1)
   })
 
@@ -223,11 +226,6 @@ describe('Home landing', () => {
     expect(stack).toHaveTextContent(
       'Swap auth, email, hosting, or data providers without touching the domain core'
     )
-    // The hero closes with where the agent runs, not with project statistics.
-    const where = screen.getByRole('region', { name: 'Where SpeakerWeave runs' })
-    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'CLI']) {
-      expect(within(where).getByText(surface)).toBeInTheDocument()
-    }
     expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
       'href',
       `${REPO_URL}/blob/main/LICENSE`
@@ -251,20 +249,49 @@ describe('Home landing', () => {
     }
   })
 
-  it('leads with the agentic surfaces and the MCP endpoint for this origin', () => {
+  it('puts every agentic surface on one stage, a tab at a time', () => {
     renderHome()
 
     const agentic = screen.getByTestId('ai-apps-section')
     expect(
-      within(agentic).getByRole('heading', { name: 'Built for the future, and fully agentic.' })
+      within(agentic).getByRole('heading', { name: 'Built for the Agentic Future' })
     ).toBeInTheDocument()
-    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'CLI']) {
-      expect(within(agentic).getByRole('heading', { name: surface })).toBeInTheDocument()
-    }
+    expect(agentic).toHaveTextContent('organization-scoped tool layer')
+
+    // Every surface has a tab; the in-app agent opens on stage. Labels are read
+    // off the label element, since the mark beside it carries a slash of its own.
+    const tabs = within(agentic).getAllByRole('tab')
+    expect(tabs.map((tab) => tab.querySelector('span:not([aria-hidden]) b')?.textContent)).toEqual([
+      'In-app agent',
+      'ChatGPT / Claude / MCP',
+      'Slack',
+      'CLI',
+    ])
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(
+      within(agentic).getByRole('heading', { name: 'In-app agent' })
+    ).toBeInTheDocument()
+
+    // Each tab swaps the panel for its own claim and its own demo.
+    fireEvent.click(tabs[1])
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'false')
+    expect(
+      within(agentic).getByRole('heading', {
+        name: 'Work in ChatGPT & Claude using our MCP server',
+      })
+    ).toBeInTheDocument()
     expect(agentic).toHaveTextContent(`${window.location.origin}/mcp`)
     expect(agentic).toHaveTextContent('Claude or ChatGPT')
+    // The connector is the one surface with setup, so it points at the docs.
+    expect(
+      within(agentic).getByRole('link', { name: /Set it up in ChatGPT or Claude/i })
+    ).toHaveAttribute('href', `${DOCS_URL}/ai/mcp`)
+
+    fireEvent.click(tabs[3])
+    expect(within(agentic).getByRole('heading', { name: 'CLI' })).toBeInTheDocument()
     expect(agentic).toHaveTextContent('Codex and Claude Code')
-    expect(agentic).toHaveTextContent('organization-scoped tool layer')
+
     expect(within(agentic).getByRole('link', { name: /full MCP tool list/i })).toHaveAttribute(
       'href',
       '/developers'

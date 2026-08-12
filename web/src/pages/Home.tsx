@@ -11,11 +11,13 @@
  * demo token. Public program links stay real anchors for people, crawlers, and
  * browser agents, while real organizers can still use Clerk at /sign-in.
  */
-import { useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Plug, Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { Sparkles, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import chatgptLogo from '../assets/logos/chatgpt.svg'
+import claudeLogo from '../assets/logos/claude.svg'
 import slackLogo from '../assets/logos/slack.svg'
 import { setToken } from '@/lib/api'
 import { fetchDemoToken } from '@/lib/demoApi'
@@ -29,7 +31,7 @@ import {
 import { avatarGradient, stableHash } from '@/ui/avatar'
 import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
 import { AppWindow } from '@/pages/appWindow'
-import { EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
+import { DOCS_URL, EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
 
@@ -79,34 +81,36 @@ const LIFECYCLE = [
  */
 const SURFACES: Array<{
   title: string
+  /** Compact label for the card row and the tab, when the title is a sentence. */
+  short?: string
   kicker: string
   icon?: LucideIcon
-  /** Brand mark, when the surface has one people recognise faster than a glyph. */
-  logo?: string
+  /** Brand marks, when the surface has ones people recognise faster than a glyph. */
+  logos?: Array<{ src: string; invert?: boolean }>
   /** Ink tile is the default; `tone` gives a surface its own colour. */
   tone?: string
-  /** One-line "where you work" label for the card row under the hero. */
-  where: string
   /** Which mocked conversation illustrates this surface. */
   demo: AgentSurfaceId
   body: (endpoint: string) => ReactNode
+  /** Where to read the setup, when the surface takes any setting up. */
+  link?: { href: string; label: string }
 }> = [
   {
     title: 'In-app agent',
     kicker: 'Built in',
     icon: Sparkles,
     tone: 'brand',
-    where: 'Ask inside the app',
     demo: 'in-app',
     body: () =>
       'Runs the program, not just the search box: streaming threads, @-mention any submission or speaker as context, clickable entity badges that navigate the app, and approve/deny gates before anything sensitive happens.',
   },
   {
-    title: 'MCP server + connectors',
+    title: 'Work in ChatGPT & Claude using our MCP server',
+    // The two marks say "your client" faster than the word connector does.
+    short: 'ChatGPT / Claude / MCP',
     kicker: 'Any client',
-    icon: Plug,
+    logos: [{ src: chatgptLogo, invert: true }, { src: claudeLogo }],
     tone: 'mcp',
-    where: 'Add the connector',
     demo: 'mcp',
     body: (endpoint) => (
       <>
@@ -114,12 +118,12 @@ const SURFACES: Array<{
         Connectors run the other way too, bringing your own MCP servers into the agent.
       </>
     ),
+    link: { href: `${DOCS_URL}/ai/mcp`, label: 'Set it up in ChatGPT or Claude' },
   },
   {
     title: 'Slack',
     kicker: 'Team surface',
-    logo: slackLogo,
-    where: 'Ask in the channel',
+    logos: [{ src: slackLogo }],
     demo: 'slack',
     body: () =>
       'Mention or DM the same agent that powers in-app Ask — the same built-in and connected MCP tools, with Approve/Deny buttons in Slack and shared Ask thread history.',
@@ -129,7 +133,6 @@ const SURFACES: Array<{
     kicker: 'Terminal',
     icon: SquareTerminal,
     tone: 'cli',
-    where: 'Work in Codex or Claude Code',
     demo: 'cli',
     body: () => (
       <>
@@ -138,8 +141,159 @@ const SURFACES: Array<{
         included.
       </>
     ),
+    link: { href: `${DOCS_URL}/ai/cli`, label: 'Read the CLI reference' },
   },
 ]
+
+type Surface = (typeof SURFACES)[number]
+
+/**
+ * A surface's mark: brand logos when it has them, a glyph when it doesn't.
+ * Two logos are separated by a slash, the same way the label reads.
+ */
+function SurfaceMark({ icon: Icon, logos, tone }: Pick<Surface, 'icon' | 'logos' | 'tone'>) {
+  const classes = ['ico', logos && logos.length > 1 ? 'duo' : '', tone ?? ''].filter(Boolean)
+
+  return (
+    <span className={classes.join(' ')} aria-hidden="true">
+      {logos
+        ? logos.map(({ src, invert }, mark) => (
+            <Fragment key={src}>
+              {mark > 0 && <b>/</b>}
+              <img src={src} alt="" className={invert ? 'inv' : undefined} />
+            </Fragment>
+          ))
+        : Icon
+          ? <Icon strokeWidth={1.75} />
+          : null}
+    </span>
+  )
+}
+
+/**
+ * The agentic section: one tab per surface, one demo on stage.
+ *
+ * Four stacked bands made a visitor scroll past three surfaces to reach the one
+ * they cared about, so the surfaces share a stage instead. It advances on its
+ * own — the demos are the argument, and most people will not click — but only
+ * while the stage is actually on screen, it stops for good the moment someone
+ * picks a tab themselves, and reduced motion never advances at all. The panel is
+ * keyed by surface so switching remounts the demo and replays its sequence.
+ */
+const SURFACE_DWELL_MS = 9000
+
+function AgentSurfaces({ endpoint }: { endpoint: string }) {
+  const [index, setIndex] = useState(0)
+  const [auto, setAuto] = useState(true)
+  const [onScreen, setOnScreen] = useState(false)
+  const [reduced, setReduced] = useState(false)
+  const stage = useRef<HTMLDivElement | null>(null)
+  const cycling = auto && onScreen && !reduced
+
+  useEffect(() => {
+    setReduced(
+      typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
+
+    const node = stage.current
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setOnScreen(true)
+      return
+    }
+    const observer = new IntersectionObserver(
+      (entries) => setOnScreen(entries.some((entry) => entry.isIntersecting)),
+      { threshold: 0.25 }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!cycling) return
+    const timer = window.setTimeout(
+      () => setIndex((current) => (current + 1) % SURFACES.length),
+      SURFACE_DWELL_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [cycling, index])
+
+  /** Picking a surface — by click or by keyboard — ends the carousel. */
+  function choose(next: number) {
+    setAuto(false)
+    setIndex((next + SURFACES.length) % SURFACES.length)
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (!step) return
+    event.preventDefault()
+    choose(index + step)
+    const tabs = event.currentTarget.querySelectorAll('button')
+    tabs[(index + step + SURFACES.length) % SURFACES.length]?.focus()
+  }
+
+  const active = SURFACES[index]
+
+  return (
+    <>
+      <div
+        className="surftabs rv"
+        role="tablist"
+        aria-label="Agent surfaces"
+        onKeyDown={onKeyDown}
+        style={vars({ '--d': '.05s' })}
+      >
+        {SURFACES.map(({ title, short, kicker, icon, logos, tone, demo }, tab) => (
+          <button
+            key={title}
+            type="button"
+            role="tab"
+            id={`surftab-${demo}`}
+            aria-selected={tab === index}
+            aria-controls={`surfpanel-${demo}`}
+            tabIndex={tab === index ? 0 : -1}
+            onClick={() => choose(tab)}
+          >
+            <SurfaceMark icon={icon} logos={logos} tone={tone} />
+            <span>
+              <b>{short ?? title}</b>
+              <em>{kicker}</em>
+            </span>
+            {cycling && tab === index && <i className="surftick" />}
+          </button>
+        ))}
+      </div>
+
+      <div className="surfstage rv" ref={stage} style={vars({ '--d': '.1s' })}>
+        <div
+          key={active.demo}
+          className="split surfpanel"
+          role="tabpanel"
+          id={`surfpanel-${active.demo}`}
+          aria-labelledby={`surftab-${active.demo}`}
+        >
+          <div className="surfcopy">
+            <div className="srow">
+              <SurfaceMark icon={active.icon} logos={active.logos} tone={active.tone} />
+              <h3>{active.title}</h3>
+              <em>{active.kicker}</em>
+              <p>{active.body(endpoint)}</p>
+              {active.link && (
+                <a className="slink" href={active.link.href} target="_blank" rel="noreferrer">
+                  {active.link.label} →
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="surfdemo demo">
+            <AgentSurfaceDemo surface={active.demo} />
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
 
 const STACK = [
   { name: 'FastAPI', role: 'Typed API + hosted MCP' },
@@ -362,68 +516,30 @@ export function Home() {
         <SpeakerWall />
       </section>
 
-      {/* ── where it runs ────────────────────────────────────────────────── */}
-      <section className="wrap factsect" aria-label="Where SpeakerWeave runs">
-        <p className="wherelede rv">Run your conference from wherever you already work</p>
-        <ul className="wherecards rv" style={vars({ '--d': '.1s' })}>
-          {SURFACES.map(({ title, icon: Icon, logo, tone, where }) => (
-            <li key={title}>
-              <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
-                {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
-              </span>
-              <span>
-                <b>{title}</b>
-                <em>{where}</em>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
       {/* ── agentic ──────────────────────────────────────────────────────── */}
-      <section className="light" data-testid="ai-apps-section">
-        <div className="wrap">
-          <div className="rv">
-            <p className="eyebrow">One brain, every surface</p>
-            <h2 className="h2 serif">Built for the future, and fully agentic.</h2>
-            <p className="lede" style={{ maxWidth: '66ch' }}>
-              Every surface dispatches through the same organization-scoped tool layer, so the agent
-              can run the program wherever you already work — in the app, in your MCP client, in the
-              channel, or in a terminal. Permissions and program data stay consistent, and anything
-              sensitive stops at an approval gate first.
-            </p>
-          </div>
+      {/* The surface tabs below say "wherever you already work" better than a
+          card row under the hero did, so this section carries that claim alone.
+          Centred and set in mono: the section is about machines doing the work,
+          and the serif headline upstairs should stay the page's only voice. */}
+      <section className="wrap sect" data-testid="ai-apps-section">
+        <div className="rv aghead">
+          <p className="eyebrow">One brain, every surface</p>
+          <h2 className="h2 mono">
+            Built for the Agentic Future
+            <i aria-hidden="true" />
+          </h2>
+          <p className="lede">
+            One organization-scoped tool layer behind every surface — same permissions, same program
+            data, same approval gate before anything sensitive.
+          </p>
+        </div>
 
-          {/* One surface per band: the claim on the left, the surface actually
-              doing it on the right, alternating sides down the section. */}
-          <div style={{ marginTop: 44 }}>
-            {SURFACES.map(({ title, kicker, icon: Icon, logo, tone, demo, body }, index) => (
-              <div
-                key={title}
-                className={`split surfrow rv${index % 2 ? ' mirror' : ''}`}
-                style={vars({ '--d': `${index * 0.05}s` })}
-              >
-                <div className="surfcopy">
-                  <div className="srow">
-                    <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
-                      {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
-                    </span>
-                    <h3>{title}</h3>
-                    <em>{kicker}</em>
-                    <p>{body(mcpEndpoint)}</p>
-                  </div>
-                </div>
-                <div className="surfdemo demo">
-                  <AgentSurfaceDemo surface={demo} />
-                </div>
-              </div>
-            ))}
-            <div style={{ marginTop: 30 }} className="rv">
-              <Link to="/developers" className="arrowlink">
-                See the full MCP tool list →
-              </Link>
-            </div>
-          </div>
+        <AgentSurfaces endpoint={mcpEndpoint} />
+
+        <div style={{ marginTop: 30 }} className="rv">
+          <Link to="/developers" className="arrowlink">
+            See the full MCP tool list →
+          </Link>
         </div>
       </section>
 
