@@ -11,7 +11,9 @@ import { cn } from '@/lib/utils'
  */
 export function BrandMark({
   className,
-  tone = 'ink',
+  // The terracotta gradient is the brand tile everywhere now; 'ink' remains
+  // for any surface that deliberately wants the monochrome version.
+  tone = 'gradient',
 }: {
   className?: string
   tone?: 'ink' | 'gradient'
