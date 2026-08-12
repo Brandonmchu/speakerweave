@@ -204,6 +204,21 @@ describe('Rail-foot workspace switcher', () => {
     await waitFor(() => expect(window.localStorage.getItem('dais.token')).toBe('token-for-org-beta'))
   })
 
+  it('signs out to the public site, not to a token-paste form', async () => {
+    window.localStorage.setItem('dais.token', 'alpha-token')
+    stubApi([SOLO_ORG])
+
+    renderApp('/submissions')
+    const menu = await openAccountMenu()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Sign out' }))
+
+    // `/dev-login` means nothing to an organizer who just left, and `/demo`
+    // mints a fresh token and walks demo visitors straight back in — which made
+    // signing out of the demo a no-op.
+    await waitFor(() => expect(pathname()).toBe('/'))
+    expect(window.localStorage.getItem('dais.token')).toBeNull()
+  })
+
   it('adds no workspace list when there is only one membership', async () => {
     window.localStorage.setItem('dais.token', 'alpha-token')
     stubApi([SOLO_ORG])

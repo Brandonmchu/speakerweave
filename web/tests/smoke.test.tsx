@@ -31,9 +31,15 @@ describe('app shell smoke', () => {
     vi.unstubAllGlobals()
   })
 
-  it('sends a tokenless visitor to /dev-login', async () => {
+  it('sends a tokenless visitor to the public site, not to the token form', async () => {
     renderApp('/submissions')
-    expect(await screen.findByText('Developer sign-in')).toBeInTheDocument()
+    // `/dev-login` is for developers pasting a token; a stranger — or an
+    // organizer who just signed out — gets the landing page, which carries the
+    // one-click demo and both sign-in doors.
+    expect(
+      await screen.findByRole('heading', { name: 'Every speaker, from submission to stage.' })
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Developer sign-in')).not.toBeInTheDocument()
   })
 
   it('renders the submissions inbox once a token exists', async () => {

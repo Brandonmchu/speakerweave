@@ -8,7 +8,7 @@
  */
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Judge } from '@/pages/Judge'
@@ -22,6 +22,19 @@ function json(payload: unknown) {
   })
 }
 
+/** A landed surface that can walk back, the way a browser's Back button does. */
+function Landed({ label }: { label: string }) {
+  const navigate = useNavigate()
+  return (
+    <div>
+      {label}
+      <button type="button" onClick={() => navigate(-1)}>
+        Browser back
+      </button>
+    </div>
+  )
+}
+
 function renderJudge() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
@@ -29,9 +42,9 @@ function renderJudge() {
       <MemoryRouter initialEntries={['/judge']}>
         <Routes>
           <Route path="/judge" element={<Judge />} />
-          <Route path="/dashboard" element={<div>Dashboard reached</div>} />
-          <Route path="/review/:token" element={<div>Review reached</div>} />
-          <Route path="/portal/:token" element={<div>Portal reached</div>} />
+          <Route path="/dashboard" element={<Landed label="Dashboard reached" />} />
+          <Route path="/review/:token" element={<Landed label="Review reached" />} />
+          <Route path="/portal/:token" element={<Landed label="Portal reached" />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -95,6 +108,21 @@ describe('Judge access page', () => {
     expect(await screen.findByText('Review reached')).toBeInTheDocument()
     expect(calls).toContain('/public/demo-entry/reviewer')
     expect(window.localStorage.getItem('dais.token')).toBeNull()
+  })
+
+  it('leaves the page in history, so Back comes back', async () => {
+    renderJudge()
+
+    // Entering a role used to REPLACE this page, which meant Back from a portal
+    // or a scorecard left the site entirely — and trying one role then another
+    // is the whole point of this page.
+    for (const role of [/Reviewer/, /Speaker/, /Organizer/]) {
+      fireEvent.click(
+        within(screen.getByLabelText('Open the demo as')).getByRole('button', { name: role })
+      )
+      fireEvent.click(await screen.findByRole('button', { name: 'Browser back' }))
+      expect(screen.getByLabelText('Open the demo as')).toBeInTheDocument()
+    }
   })
 
   it('is honest about what a judge changes in a shared workspace', () => {

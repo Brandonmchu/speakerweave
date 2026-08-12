@@ -54,6 +54,9 @@ export function useDemoEntry() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Pushed, never replaced. Replacing dropped the page the visitor came from
+  // out of history, so Back from a portal or a scorecard went nowhere — and
+  // trying one role then another is exactly what this is for.
   async function enterDemo() {
     if (loading) return
     setError(null)
@@ -61,7 +64,7 @@ export function useDemoEntry() {
     try {
       const token = await fetchDemoToken()
       setToken(token)
-      navigate('/dashboard', { replace: true })
+      navigate('/dashboard')
     } catch {
       setError("Couldn't start the demo. Give it a moment and try again.")
       setLoading(false)
@@ -76,7 +79,7 @@ export function useDemoEntry() {
     try {
       const entry = await fetchDemoEntry(persona)
       if (entry.kind !== 'path') throw new Error('Unexpected demo entry')
-      navigate(entry.path, { replace: true })
+      navigate(entry.path)
     } catch {
       setError("Couldn't open that view of the demo. Give it a moment and try again.")
       setLoading(false)

@@ -188,7 +188,14 @@ function DemoEntry() {
  */
 function RequireToken({
   children,
-  redirectTo = '/dev-login',
+  // The public site. `/dev-login` is a token-paste form that means nothing to
+  // anyone but a developer — and it is where signing out used to land, because
+  // the guard re-runs the moment the token clears and wins the race with
+  // whatever the sign-out handler navigated to. The landing page carries both
+  // ways in (sign in, and the one-click demo), so it is the right answer for a
+  // stranger, a signed-out organizer, and an eval agent alike. `/dev-login`
+  // stays reachable directly, and self-hosted sign-in still points at it.
+  redirectTo = '/',
 }: {
   children: ReactNode
   redirectTo?: string

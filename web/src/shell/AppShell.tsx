@@ -496,7 +496,6 @@ export function AppShell() {
   const events = data ?? []
   const event = events.find((candidate) => candidate.id === activeEventId) ?? events[0]
   const claims = readSessionClaims()
-  const isDemo = claims.org_id === 'org_dev'
   const currentUser = sessionIdentity(claims)
   const countdown = eventCountdown(event)
 
@@ -533,8 +532,12 @@ export function AppShell() {
 
   const signOut = () => {
     clearToken()
-    // Demo visitors came in through /demo; send them back there, not /dev-login.
-    navigate(isDemo ? '/demo' : '/dev-login')
+    // The public site, for everyone. `/demo` mints a token and walks straight
+    // back in, so it made "sign out" a no-op for demo visitors; `/dev-login` is
+    // a token-paste form that means nothing to an organizer who just left. The
+    // landing page offers both ways back in and is the only page that makes
+    // sense to a person who has just signed out.
+    navigate('/')
   }
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
