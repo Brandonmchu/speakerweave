@@ -99,7 +99,40 @@ describe('Home landing', () => {
     expect(screen.getByText(/SpeakerWeave runs your whole conference/)).toBeInTheDocument()
     // The same entry point opens the page and closes it.
     expect(screen.getAllByRole('button', { name: /Enter the demo workspace/i })).toHaveLength(2)
-    expect(screen.getByText('No sign-up. Jump into a fully seeded workspace.')).toBeInTheDocument()
+    expect(
+      screen.getByText('No sign-up for the demo. Jump into a fully seeded workspace.')
+    ).toBeInTheDocument()
+  })
+
+  // Clerk is off in tests, so the hero falls back to the attendee link and the
+  // closing CTA leads with the demo. The signup route only exists with Clerk.
+  it('offers a way in for someone without an account yet', () => {
+    renderHome()
+
+    expect(screen.getByRole('link', { name: /See what attendees will see/i })).toHaveAttribute(
+      'href',
+      '/e/ai-builders-summit/schedule'
+    )
+    expect(screen.queryByRole('link', { name: /Create your account/i })).toBeNull()
+    // Signing in stays reachable either way, for organizers who already have one.
+    expect(screen.getByRole('link', { name: /Sign in with your account/i })).toHaveAttribute(
+      'href',
+      '/sign-in'
+    )
+  })
+
+  it('sends a new organizer to Clerk signup when Clerk is configured', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_configured')
+    const shared = await import('@/pages/siteShared')
+    expect(shared.ORGANIZER_SIGNUP_URL).toBe('/sign-up')
+    expect(shared.ORGANIZER_SIGNIN_URL).toBe('/sign-in')
+
+    // Self-hosted without Clerk there is no signup flow to link into.
+    vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', '')
+    vi.resetModules()
+    const selfHosted = await import('@/pages/siteShared')
+    expect(selfHosted.ORGANIZER_SIGNUP_URL).toBeNull()
   })
 
   it('fills the hero wall from the featured event roster, with the gradient fallback', async () => {

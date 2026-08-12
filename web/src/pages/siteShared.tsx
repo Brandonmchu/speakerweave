@@ -36,6 +36,13 @@ export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
  */
 export const ORGANIZER_SIGNIN_URL = CLERK_ENABLED ? '/sign-in' : '/dev-login'
 
+/**
+ * Where a new organizer creates an account. Null on a self-hosted instance
+ * without Clerk: there is no sign-up flow to send them to, and every surface
+ * that offers one has to fall back rather than link into a 404.
+ */
+export const ORGANIZER_SIGNUP_URL = CLERK_ENABLED ? '/sign-up' : null
+
 /** Crawlable links to the public conference surfaces. Plain in-app routes so a
  *  browser agent reading `href`s can discover every public page. */
 export const EXPLORE = [
@@ -246,6 +253,17 @@ export function SiteNav({ badge }: { badge?: string }) {
               to: ORGANIZER_SIGNIN_URL,
               hint: 'Run your program',
             },
+            // A first-time organizer arrives here too, and used to find no way in
+            // that did not already assume an account.
+            ...(ORGANIZER_SIGNUP_URL
+              ? [
+                  {
+                    label: 'Create an account',
+                    to: ORGANIZER_SIGNUP_URL,
+                    hint: 'Set up your first event',
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
@@ -268,6 +286,7 @@ export function SiteFooter() {
           <Link to={DEVELOPERS_URL}>Developers</Link>
           <Link to="/speaker-signin">Speaker sign in</Link>
           <Link to={ORGANIZER_SIGNIN_URL}>Organizer sign in</Link>
+          {ORGANIZER_SIGNUP_URL && <Link to={ORGANIZER_SIGNUP_URL}>Create an account</Link>}
           <Link to="/open-source">Open source</Link>
           <a href={LICENSE_URL}>License</a>
           <a href={DOCS_URL}>Docs</a>

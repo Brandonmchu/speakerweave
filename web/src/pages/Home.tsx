@@ -32,7 +32,14 @@ import { avatarGradient, stableHash } from '@/ui/avatar'
 import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
 import { AppWindow, type ScreenKey } from '@/pages/appWindow'
 import { AttendeeWindow, type AttendeeViewKey } from '@/pages/attendeeWindow'
-import { DOCS_URL, EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
+import {
+  DOCS_URL,
+  EXPLORE,
+  ORGANIZER_SIGNUP_URL,
+  REPO_URL,
+  SiteShell,
+  vars,
+} from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
 
@@ -563,15 +570,17 @@ export function Home() {
             SpeakerWeave runs your whole conference — submissions, reviews, speakers, and the
             schedule they&rsquo;ll stand on.
           </p>
+          {/* The demo leads because it costs nothing, but the page has to offer
+              the other thing an organizer came for: a way to start their own. */}
           <div className="ctas">
             <button type="button" className="btn p" onClick={enterDemo} disabled={loading}>
               {loading ? 'Starting the demo…' : 'Enter the demo workspace →'}
             </button>
-            <Link to={featuredScheduleUrl} className="btn t">
-              See what attendees will see →
+            <Link to={ORGANIZER_SIGNUP_URL ?? featuredScheduleUrl} className="btn t">
+              {ORGANIZER_SIGNUP_URL ? 'Create your account →' : 'See what attendees will see →'}
             </Link>
           </div>
-          <p className="note">No sign-up. Jump into a fully seeded workspace.</p>
+          <p className="note">No sign-up for the demo. Jump into a fully seeded workspace.</p>
           {error && <p className="err">{error}</p>}
         </div>
         <SpeakerWall />
@@ -691,17 +700,29 @@ export function Home() {
           <div className="glow" aria-hidden="true" />
           <h2 className="serif">Run your next conference on it.</h2>
           <p>
-            Start in a fully seeded workspace, or sign in and set up your own event. No credit card,
-            and it&rsquo;s open source either way.
+            Create your workspace and set up your first event, or look around the seeded one first.
+            No credit card, and it&rsquo;s open source either way.
           </p>
+          {/* Last word on the page, so the account comes first here — the demo
+              is the way in for anyone not ready to make one. */}
           <div className="ctas">
-            <button type="button" className="btn p" onClick={enterDemo} disabled={loading}>
+            {ORGANIZER_SIGNUP_URL && (
+              <Link to={ORGANIZER_SIGNUP_URL} className="btn p">
+                Create your account →
+              </Link>
+            )}
+            <button
+              type="button"
+              className={ORGANIZER_SIGNUP_URL ? 'btn d' : 'btn p'}
+              onClick={enterDemo}
+              disabled={loading}
+            >
               {loading ? 'Starting the demo…' : 'Enter the demo workspace →'}
             </button>
-            <Link to="/sign-in" className="btn d">
-              Sign in with your account →
-            </Link>
           </div>
+          <p className="note">
+            Already have an account? <Link to="/sign-in">Sign in with your account</Link>.
+          </p>
           <p className="note" data-testid="open-source-section">
             <Link to="/open-source">Open source</Link> and MIT licensed —{' '}
             <a href={REPO_URL} aria-label="SpeakerWeave source repository">
