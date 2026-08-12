@@ -28,6 +28,7 @@ import {
 } from '@/lib/programApi'
 import { avatarGradient, stableHash } from '@/ui/avatar'
 import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
+import { AppWindow } from '@/pages/appWindow'
 import { EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
@@ -450,6 +451,31 @@ export function Home() {
               <span>{kicker}</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ── the app itself ───────────────────────────────────────────────── */}
+      {/* The lifecycle above says what the product does; this is the product
+          doing it. Real DOM rather than a screenshot, so it stays crisp and the
+          rail actually switches screens. */}
+      <section className="light" data-testid="app-window-section">
+        <div className="wrap">
+          <div className="rv" style={{ maxWidth: '58ch' }}>
+            <p className="eyebrow">Inside the workspace</p>
+            <h2 className="h2 serif">The actual product, not a screenshot.</h2>
+            <p className="lede">
+              Seeded with the AI Builders Summit — twenty submissions, a scored review round, a
+              scheduled agenda with a real double-booking. Click through the rail.
+            </p>
+          </div>
+          <div className="appframe rv" style={vars({ '--d': '.1s' })}>
+            <AppWindow />
+          </div>
+          <div className="rv" style={{ marginTop: 26 }}>
+            <button type="button" className="arrowlink" onClick={enterDemo} disabled={loading}>
+              Open the real thing →
+            </button>
+          </div>
         </div>
       </section>
 

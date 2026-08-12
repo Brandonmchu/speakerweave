@@ -1402,6 +1402,20 @@ body.sw-site-active {
   width: 64%;
 }
 
+/* The app frame bleeds wider than the 1180 reading column. The submissions
+   table needs ~940px next to a 220px rail; inside the text measure its last
+   column is cut off, which reads as a broken screenshot rather than as a table
+   that scrolls. */
+.sw-site .appframe {
+  margin-top: 40px;
+  /* Centred with margin, not `translateX(-50%)`: this element also carries
+     `.rv`, whose reveal animates `transform` — the two would fight, and the
+     reveal wins, leaving the frame hanging off the right edge. */
+  --aw: min(1268px, calc(100vw - 40px));
+  width: var(--aw);
+  margin-left: calc((100% - var(--aw)) / 2);
+}
+
 /* One surface per band — claim on one side, the surface doing it on the other,
    alternating so the eye zigzags rather than running down a single column. */
 .sw-site .surfrow {

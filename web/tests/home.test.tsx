@@ -156,6 +156,31 @@ describe('Home landing', () => {
     expect(container.querySelectorAll('.tile.artifact')).toHaveLength(1)
   })
 
+  it('shows the real admin UI, and lets you click through its rail', () => {
+    renderHome()
+
+    const section = screen.getByTestId('app-window-section')
+    // The desktop rail; the component also renders a mobile strip of the same
+    // four screens, which is why this is scoped rather than queried by role.
+    const rail = [...section.querySelectorAll<HTMLButtonElement>('.swa-rail button')]
+    expect(rail.map((b) => b.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Submissions',
+      'Agenda',
+      'Speakers',
+      'Content',
+    ])
+
+    // Submissions is the landing screen, and it carries real seeded rows.
+    expect(section).toHaveTextContent('SESS-114')
+    expect(rail[0]).toHaveAttribute('aria-current', 'page')
+
+    // The rail genuinely switches screens rather than decorating one.
+    fireEvent.click(rail[1])
+    expect(rail[1]).toHaveAttribute('aria-current', 'page')
+    expect(rail[0]).not.toHaveAttribute('aria-current')
+    expect(section).toHaveTextContent(/Unscheduled|Main Stage/)
+  })
+
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
     renderHome()
     const href = (name: RegExp) =>
