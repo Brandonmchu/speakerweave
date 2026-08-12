@@ -304,7 +304,12 @@ export function AttendeeWindow({
   onViewChange?: (next: ViewKey) => void
 } = {}): JSX.Element {
   const [own, setOwn] = useState<ViewKey>('schedule')
-  const [brand, setBrand] = useState<Brand>(BRANDS[0])
+  // Opening the branding view on the canonical look would land on the page the
+  // visitor is already looking at, and read as a dead pill. It opens on the one
+  // preset that could not be mistaken for ours.
+  const [brand, setBrand] = useState<Brand>(
+    BRANDS.find((entry) => entry.key === 'nightfall') ?? BRANDS[0]
+  )
   const view = controlled ?? own
   // Branding is an organiser capability, not a page in the attendee's nav, so
   // it borrows the schedule's tab and address — it IS the schedule, restyled.

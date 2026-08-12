@@ -203,10 +203,9 @@ describe('Home landing', () => {
       'Signal',
     ])
 
+    // It opens on Nightfall rather than on the canonical look: landing on the
+    // page the visitor is already reading would make the pill look dead.
     const frame = section.querySelector('.swp-frame') as HTMLElement
-    expect(frame.style.getPropertyValue('--swp-paper')).toBe('')
-
-    fireEvent.click(swatches[1])
     expect(frame.style.getPropertyValue('--swp-paper')).toBe('#14131c')
     expect(frame).toHaveAttribute('data-dark', 'true')
     // Both halves of the inverted chip move together, or a light-ink brand
@@ -216,8 +215,12 @@ describe('Home landing', () => {
     // Branding is an organiser capability, not a page in the attendee's nav.
     expect(section.textContent).not.toContain('speakerweave.com/e/ai-builders-summit/branding')
 
+    // And every other preset is one click away, ours included.
     fireEvent.click(swatches[0])
     expect(frame.style.getPropertyValue('--swp-paper')).toBe('')
+
+    fireEvent.click(swatches[2])
+    expect(frame.style.getPropertyValue('--swp-paper')).toBe('#fbf8f0')
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {
