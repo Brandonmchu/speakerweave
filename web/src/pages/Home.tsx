@@ -20,7 +20,7 @@ import chatgptLogo from '../assets/logos/chatgpt.svg'
 import claudeLogo from '../assets/logos/claude.svg'
 import slackLogo from '../assets/logos/slack.svg'
 import { setToken } from '@/lib/api'
-import { fetchDemoToken } from '@/lib/demoApi'
+import { fetchDemoEntry, fetchDemoToken, type DemoPersona } from '@/lib/demoApi'
 import { FEATURED_EVENT_SLUG, featuredScheduleUrl } from '@/lib/featuredEvent'
 import {
   dedupeProgramSpeakers,
@@ -42,6 +42,31 @@ import {
 } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
+
+/**
+ * The year an organizer already knows, and the answer to each line of it.
+ *
+ * Paired by index: read across and the second column answers the first. Every
+ * line on the right is a shipped surface you can open from this page — nothing
+ * here is a roadmap.
+ */
+const PAINS = [
+  'Reviewers score alone, in silos, and never see each other’s reasoning',
+  'Committee work escapes into Slack threads, a spreadsheet and three Google Docs',
+  'Speakers re-type the same bio into a form, an email and a slide template',
+  'Accept, notify and onboard are three tools that do not know about each other',
+  'The program lives in a schedule tool your data cannot leave',
+  'Somebody rebuilds last year’s chase list by hand, every year',
+]
+
+const FIXES = [
+  'One shared page per submission: every score, every comment, attributed',
+  'The same agent in the app, in Slack, in ChatGPT or Claude, and in your terminal',
+  'Speakers keep one portal, with versions, approvals and a single checklist',
+  'One decision sends the email, opens the portal and starts the content clock',
+  'Public schedule, embeds, iCal, JSON, a REST API and 16 MCP tools — all yours',
+  'A cross-event speaker CRM that remembers who was good, and who owes you',
+]
 
 /**
  * The lifecycle, in the order a program runs — a left-to-right track rather
@@ -548,6 +573,28 @@ export function Home() {
     }
   }
 
+  /**
+   * Open the demo as somebody other than the organizer.
+   *
+   * A reviewer's scorecard and a speaker's portal are real, shipped surfaces
+   * that nobody could reach without an emailed link — so a visitor never saw
+   * two thirds of the product. This asks the API for the same link an organizer
+   * would have sent, and follows it.
+   */
+  async function enterAs(persona: Exclude<DemoPersona, 'organizer'>) {
+    if (loading) return
+    setError(null)
+    setLoading(true)
+    try {
+      const entry = await fetchDemoEntry(persona)
+      if (entry.kind !== 'path') throw new Error('Unexpected demo entry')
+      navigate(entry.path, { replace: true })
+    } catch {
+      setError("Couldn't open that view of the demo. Give it a moment and try again.")
+      setLoading(false)
+    }
+  }
+
   return (
     <SiteShell>
       {/* ── hero ─────────────────────────────────────────────────────────── */}
@@ -582,15 +629,72 @@ export function Home() {
           </div>
           <p className="note">No sign-up for the demo. Jump into a fully seeded workspace.</p>
           {error && <p className="err">{error}</p>}
+
+          {/* Three products live in here and only one of them had a door. A
+              reviewer's scorecard and a speaker's portal are entered by emailed
+              link, so nobody could see them without being invited — these ask
+              the API for the same link an organizer would have sent. */}
+          <div className="doors" aria-label="Open the demo as">
+            <button type="button" onClick={enterDemo} disabled={loading}>
+              <b>Organizer</b>
+              <span>Run the whole program</span>
+            </button>
+            <button type="button" onClick={() => enterAs('reviewer')} disabled={loading}>
+              <b>Reviewer</b>
+              <span>Score an open round</span>
+            </button>
+            <button type="button" onClick={() => enterAs('speaker')} disabled={loading}>
+              <b>Speaker</b>
+              <span>Your talk and content</span>
+            </button>
+          </div>
         </div>
         <SpeakerWall />
       </section>
 
-      {/* The hero and the section under it share a ground, so the page needs a
-          seam of its own — a hairline that fades out at both ends. */}
-      <div className="wrap">
-        <hr className="hairline rv" />
-      </div>
+      {/* ── the problem ──────────────────────────────────────────────────── */}
+      {/* Said before any feature is: an organizer recognises their own year in
+          the left column, and the right column is the answer to that exact
+          line rather than a list of capabilities. The ground changes here, so
+          this band is also the seam between the hero and everything after. */}
+      <section className="light" data-testid="problem-section">
+        <div className="wrap">
+          <div className="rv" style={{ maxWidth: '54ch' }}>
+            <p className="eyebrow">Why this exists</p>
+            <h2 className="h2 serif">You have run this conference before.</h2>
+          </div>
+          <div className="ledger rv" style={vars({ '--d': '.08s' })}>
+            <div>
+              <p className="eyebrow">What the year usually costs</p>
+              <ul className="pains">
+                {PAINS.map((pain) => (
+                  <li key={pain}>{pain}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="eyebrow">What this does instead</p>
+              <ul className="fixes">
+                {FIXES.map((fix) => (
+                  <li key={fix}>{fix}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* The claim above is ours; this is somebody else's. */}
+          <div className="proof rv" style={vars({ '--d': '.12s' })}>
+            <b>100 / 100</b>
+            <p>
+              on the independent SessionBoard evaluation — all seven areas, 96 rubric items, 197
+              weighted points, graded by a browser agent with no help from us.
+            </p>
+            <Link to="/killmysaas" className="arrowlink">
+              Read the scorecard →
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* ── agentic ──────────────────────────────────────────────────────── */}
       {/* The surface tabs below say "wherever you already work" better than a

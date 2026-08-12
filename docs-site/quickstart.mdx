@@ -36,6 +36,18 @@ description: Self-host SpeakerWeave in about fifteen minutes.
   </Step>
 </Steps>
 
+## Open the demo as anyone
+
+The seeded workspace has three audiences, and each one has a public door — no account, no email code:
+
+| Persona | Door | What it opens |
+|---|---|---|
+| Organizer | `GET /public/demo-entry/organizer` | A short-lived session token for the demo org (the same one `/public/demo-token` returns) |
+| Reviewer | `GET /public/demo-entry/reviewer` | A review magic link — `{"kind":"path","path":"/review/…"}` — for a seeded evaluator with assignments in the open round |
+| Speaker | `GET /public/demo-entry/speaker` | A portal magic link for a seeded speaker who still owes content |
+
+The landing page offers the same three doors as buttons. Links are minted with the real magic-link machinery (scoped to the demo org, 8-hour expiry, revocable), so what a visitor sees is what an invited reviewer or speaker sees. A deployment whose demo workspace was never seeded answers `404` rather than handing out a link into an empty portal.
+
 ## Optional layers
 
 Each activates with configuration alone and stays dormant otherwise:

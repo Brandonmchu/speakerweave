@@ -390,6 +390,134 @@ body.sw-site-active {
 .sw-site .h2.sm {
   font-size: 36px;
 }
+/* ── demo doors ───────────────────────────────────────────────────────────── */
+
+/* One door per audience. The product has three front doors and only one of them
+   was ever visible; these open the same seeded workspace as the organizer, the
+   reviewer whose round is open, or the speaker who still owes slides. */
+.sw-site .doors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 22px;
+  max-width: 520px;
+}
+.sw-site .doors button {
+  padding: 11px 13px;
+  border: 0;
+  border-radius: 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px var(--sw-dline);
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.sw-site .doors button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.4);
+}
+.sw-site .doors button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.sw-site .doors b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--sw-dbright);
+}
+.sw-site .doors span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--sw-dfaint);
+}
+
+/* ── the problem, and somebody else's verdict ─────────────────────────────── */
+
+/* Two columns read across: the left is the year an organizer already had, the
+   right is what replaces that exact line. Same order, same count. */
+.sw-site .ledger {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  margin-top: 36px;
+}
+.sw-site .ledger ul {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.sw-site .ledger li {
+  position: relative;
+  padding: 11px 0 11px 26px;
+  border-top: 1px solid var(--sw-line2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.sw-site .ledger li:first-child {
+  border-top: 0;
+}
+.sw-site .pains li {
+  color: var(--sw-ink2);
+}
+/* Drawn, not typed: a struck-through cross and a check, so no font has to own
+   the glyphs and the two columns stay legible at any size. */
+.sw-site .pains li::before,
+.sw-site .fixes li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 18px;
+}
+.sw-site .pains li::before {
+  width: 11px;
+  height: 1.5px;
+  background: #b06a4a;
+  border-radius: 1px;
+}
+.sw-site .fixes li {
+  color: var(--sw-ink);
+}
+.sw-site .fixes li::before {
+  width: 5px;
+  height: 9px;
+  margin-top: -4px;
+  border-right: 1.5px solid #4f7a58;
+  border-bottom: 1.5px solid #4f7a58;
+  transform: rotate(42deg);
+}
+
+/* The one claim on this page that is not ours to make. */
+.sw-site .proof {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 22px;
+  margin-top: 40px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: rgba(28, 26, 23, 0.035);
+  box-shadow: inset 0 0 0 1px var(--sw-line2);
+}
+.sw-site .proof b {
+  font-family: var(--sw-mono);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--sw-ink);
+}
+.sw-site .proof p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--sw-ink2);
+  max-width: 72ch;
+}
+
 /* ── benefit tabs over a demo ─────────────────────────────────────────────── */
 
 /* Named by what the visitor gets, not by what the screen is called: the tab is
@@ -2440,6 +2568,16 @@ body.sw-site-active {
     grid-column: 1 / -1;
     margin-top: 10px;
   }
+  /* The two columns become one list, still in pain/answer order. */
+  .sw-site .ledger {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+  .sw-site .proof {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    text-align: left;
+  }
   /* Two tabs a row, and the stage takes whatever height it needs. */
   .sw-site .surftabs {
     grid-template-columns: 1fr 1fr;
@@ -2479,6 +2617,10 @@ body.sw-site-active {
 }
 
 @media (max-width: 620px) {
+  /* Three doors stack rather than shrink — each one is a different product. */
+  .sw-site .doors {
+    grid-template-columns: 1fr;
+  }
   /* The lifecycle rail keeps its shape and scrolls sideways instead of
      crushing seven columns into a phone. */
   .sw-site .flow {

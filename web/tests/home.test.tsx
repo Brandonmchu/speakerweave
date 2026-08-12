@@ -65,6 +65,9 @@ function renderHome() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/dashboard" element={<div>Dashboard reached</div>} />
+          {/* The two link-authenticated surfaces the demo doors open. */}
+          <Route path="/review/:token" element={<div>Review reached</div>} />
+          <Route path="/portal/:token" element={<div>Portal reached</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -80,6 +83,11 @@ beforeEach(() => {
       calls.push(String(url))
       if (String(url).includes('/speakers')) return json(SPEAKERS)
       if (String(url).includes('/schedule')) return json(SCHEDULE)
+      // The reviewer and speaker doors get a magic-link path, not a session.
+      if (String(url).includes('/demo-entry/reviewer'))
+        return json({ persona: 'reviewer', kind: 'path', path: '/review/demo-review-token' })
+      if (String(url).includes('/demo-entry/speaker'))
+        return json({ persona: 'speaker', kind: 'path', path: '/portal/demo-portal-token' })
       return json({ token: 'demo.jwt.token' })
     })
   )
@@ -254,6 +262,65 @@ describe('Home landing', () => {
 
     fireEvent.click(swatches[2])
     expect(frame.style.getPropertyValue('--swp-paper')).toBe('#fbf8f0')
+  })
+
+  it('opens the demo as any of its three audiences', async () => {
+    renderHome()
+
+    const doors = screen.getByLabelText('Open the demo as')
+    expect(
+      [...doors.querySelectorAll('b')].map((entry) => entry.textContent)
+    ).toEqual(['Organizer', 'Reviewer', 'Speaker'])
+
+    // The reviewer door follows the magic link the API mints rather than
+    // storing a session token — that surface authenticates by link.
+    fireEvent.click(within(doors).getByRole('button', { name: /Reviewer/ }))
+    expect(await screen.findByText('Review reached')).toBeInTheDocument()
+    expect(calls).toContain('/public/demo-entry/reviewer')
+    expect(window.localStorage.getItem('dais.token')).toBeNull()
+  })
+
+  it('opens the speaker portal from its own door', async () => {
+    renderHome()
+
+    const doors = screen.getByLabelText('Open the demo as')
+    fireEvent.click(within(doors).getByRole('button', { name: /Speaker/ }))
+    expect(await screen.findByText('Portal reached')).toBeInTheDocument()
+    expect(calls).toContain('/public/demo-entry/speaker')
+  })
+
+  it('keeps the exact organizer entry the eval harness pre-auth clicks', () => {
+    renderHome()
+
+    // `sbek auth --persona organizer --at /demo --click "Enter the demo
+    // workspace"` depends on this literal label being a clickable button.
+    // Changing the string silently breaks the harness's organizer pre-auth,
+    // which is worth a test of its own.
+    const entries = screen.getAllByRole('button', { name: 'Enter the demo workspace →' })
+    expect(entries.length).toBeGreaterThan(0)
+  })
+
+  it('states the problem before any feature, and cites the independent score', () => {
+    renderHome()
+
+    const problem = screen.getByTestId('problem-section')
+    expect(
+      within(problem).getByRole('heading', { name: 'You have run this conference before.' })
+    ).toBeInTheDocument()
+
+    // Read across: every pain has an answer, and the two columns stay paired.
+    const pains = problem.querySelectorAll('.pains li')
+    const fixes = problem.querySelectorAll('.fixes li')
+    expect(pains).toHaveLength(6)
+    expect(fixes).toHaveLength(pains.length)
+    expect(problem).toHaveTextContent('Reviewers score alone')
+
+    expect(problem).toHaveTextContent('100 / 100')
+    expect(problem).toHaveTextContent('96 rubric items')
+    expect(within(problem).getByRole('link', { name: /Read the scorecard/i })).toHaveAttribute(
+      'href',
+      '/killmysaas'
+    )
   })
 
   it('exposes crawlable links to every public page + Clerk sign-in', () => {

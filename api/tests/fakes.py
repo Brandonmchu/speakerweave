@@ -24,6 +24,7 @@ PATCH_TARGET_MODULES = (
     "routes.api_key_admin_routes",
     "routes.crm_routes",
     "routes.dashboard_routes",
+    "routes.demo_routes",
     "routes.field_routes",
     "routes.form_admin_routes",
     "routes.portal_admin_routes",
