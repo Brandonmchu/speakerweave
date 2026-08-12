@@ -10,7 +10,14 @@ interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
 const Table = React.forwardRef<HTMLTableElement, TableProps>(
   ({ className, wrapperClassName, ...props }, ref) => (
     <div className={cn('relative w-full overflow-auto scrollbar-app', wrapperClassName)}>
-      <table ref={ref} className={cn('w-full table-fixed caption-bottom bg-card text-[13px]', className)} {...props} />
+      {/* The mobile min-width makes narrow viewports scroll the table inside
+          this wrapper instead of compressing fixed column widths into
+          overlapping header text. */}
+      <table
+        ref={ref}
+        className={cn('w-full min-w-[640px] table-fixed caption-bottom bg-card text-[13px] sm:min-w-0', className)}
+        {...props}
+      />
     </div>
   )
 )

@@ -455,20 +455,24 @@ export function AppShell() {
     navigate(isDemo ? '/demo' : '/dev-login')
   }
 
-  return (
-    <div
-      className={cn(
-        'grid h-[100dvh] w-full grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background',
-        agentEnabled && assistantOpen
-          ? 'md:grid-cols-[220px_minmax(0,1fr)_420px]'
-          : 'md:grid-cols-[220px_minmax(0,1fr)]',
-      )}
-    >
-      <aside className="hidden h-full min-h-0 flex-col overflow-hidden bg-navigation md:flex">
-        <div className="flex h-[50px] shrink-0 items-center gap-2.5 px-5">
-          <BrandMark className="h-5 w-5 rounded-md" />
-          <span className="text-[14px] font-semibold tracking-[-0.02em] text-foreground">SpeakerWeave</span>
-        </div>
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key === 'Escape') setMobileNavOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mobileNavOpen])
+
+  // Shared between the desktop rail and the mobile drawer — same nav, same
+  // event switcher, same account foot, so the two can never drift apart.
+  const railContent = (
+    <>
+      <div className="flex h-[50px] shrink-0 items-center gap-2.5 px-5">
+        <BrandMark className="h-5 w-5 rounded-md" />
+        <span className="text-[14px] font-semibold tracking-[-0.02em] text-foreground">SpeakerWeave</span>
+      </div>
 
         {/* Event switcher — a static single-event dropdown today, but the chevron
             + colored square read as the Sessionboard multi-event switcher. */}
@@ -554,10 +558,51 @@ export function AppShell() {
         ) : (
           <RailAccount identity={currentUser} onSignOut={signOut} />
         )}
+    </>
+  )
+
+  return (
+    <div
+      className={cn(
+        'grid h-[100dvh] w-full grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-background',
+        agentEnabled && assistantOpen
+          ? 'md:grid-cols-[220px_minmax(0,1fr)_420px]'
+          : 'md:grid-cols-[220px_minmax(0,1fr)]',
+      )}
+    >
+      <aside className="hidden h-full min-h-0 flex-col overflow-hidden bg-navigation md:flex">
+        {railContent}
       </aside>
+
+      {/* Phones have no rail — the topbar Menu button opens this drawer. */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+          <div
+            className="absolute inset-0 bg-foreground/30"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div
+            className="absolute inset-y-0 left-0 flex w-[264px] flex-col overflow-hidden bg-navigation shadow-lifted"
+            onClickCapture={(clickEvent) => {
+              const target = clickEvent.target
+              if (target instanceof HTMLElement && target.closest('a')) setMobileNavOpen(false)
+            }}
+          >
+            {railContent}
+          </div>
+        </div>
+      )}
 
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card">
         <header className="flex h-[50px] shrink-0 items-center gap-3 bg-transparent px-4 md:px-7">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            className="inline-flex h-[30px] shrink-0 items-center rounded-lg px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground md:hidden"
+            onClick={() => setMobileNavOpen(true)}
+          >
+            Menu
+          </button>
           <div className="relative flex w-full max-w-[300px] items-center">
             {/* This field IS the Ask entrance — typing here would be a dead
                 end (there is no separate search index), so any focus or

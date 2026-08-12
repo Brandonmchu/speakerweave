@@ -950,7 +950,7 @@ export function Inbox() {
             />
           )
         ) : (
-          <Table>
+          <Table className="min-w-[920px] lg:min-w-0">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[44px] pr-0">
