@@ -27,6 +27,7 @@ import {
   initialsOf,
 } from '@/lib/programApi'
 import { avatarGradient, stableHash } from '@/ui/avatar'
+import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
 import { EXPLORE, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
 export { DOCS_URL, REPO_URL } from '@/pages/siteShared'
@@ -83,6 +84,10 @@ const SURFACES: Array<{
   logo?: string
   /** Ink tile is the default; `tone` gives a surface its own colour. */
   tone?: string
+  /** One-line "where you work" label for the card row under the hero. */
+  where: string
+  /** Which mocked conversation illustrates this surface. */
+  demo: AgentSurfaceId
   body: (endpoint: string) => ReactNode
 }> = [
   {
@@ -90,6 +95,8 @@ const SURFACES: Array<{
     kicker: 'Built in',
     icon: Sparkles,
     tone: 'brand',
+    where: 'Ask inside the app',
+    demo: 'in-app',
     body: () =>
       'Runs the program, not just the search box: streaming threads, @-mention any submission or speaker as context, clickable entity badges that navigate the app, and approve/deny gates before anything sensitive happens.',
   },
@@ -98,6 +105,8 @@ const SURFACES: Array<{
     kicker: 'Any client',
     icon: Plug,
     tone: 'mcp',
+    where: 'Add the connector',
+    demo: 'mcp',
     body: (endpoint) => (
       <>
         Add <code>{endpoint}</code> to Claude or ChatGPT as a connector — OAuth, no custom headers.
@@ -109,6 +118,8 @@ const SURFACES: Array<{
     title: 'Slack',
     kicker: 'Team surface',
     logo: slackLogo,
+    where: 'Ask in the channel',
+    demo: 'slack',
     body: () =>
       'Mention or DM the same agent that powers in-app Ask — the same built-in and connected MCP tools, with Approve/Deny buttons in Slack and shared Ask thread history.',
   },
@@ -117,6 +128,8 @@ const SURFACES: Array<{
     kicker: 'Terminal',
     icon: SquareTerminal,
     tone: 'cli',
+    where: 'Work in Codex or Claude Code',
+    demo: 'cli',
     body: () => (
       <>
         <code>pipx install</code>, authenticate with an API token, then <code>sw ask</code> — the
@@ -325,21 +338,21 @@ export function Home() {
       {/* ── hero ─────────────────────────────────────────────────────────── */}
       <section className="wrap hero">
         <div className="rv in">
-          <span className="badge">
+          <Link to="/open-source" className="badge">
             <i />
             Open-source conference operations
-          </span>
+          </Link>
           <h1 className="h1 serif">Every speaker, from submission to stage.</h1>
           <p className="lede">
-            From call for papers to a published, staffed, scheduled agenda — submissions, reviews,
-            speaker onboarding, content, and scheduling in one open-source workspace.
+            SpeakerWeave runs your whole conference — submissions, reviews, speakers, and the
+            schedule they&rsquo;ll stand on.
           </p>
           <div className="ctas">
             <button type="button" className="btn p" onClick={enterDemo} disabled={loading}>
               {loading ? 'Starting the demo…' : 'Enter the demo workspace →'}
             </button>
             <Link to={featuredScheduleUrl} className="btn t">
-              View the public program →
+              See what attendees will see →
             </Link>
           </div>
           <p className="note">No sign-up. Jump into a fully seeded workspace.</p>
@@ -348,20 +361,21 @@ export function Home() {
         <SpeakerWall />
       </section>
 
-      {/* ── facts ────────────────────────────────────────────────────────── */}
-      <section className="wrap factsect" aria-label="Project credibility">
-        <div className="rule" />
-        <ul className="facts rv" style={vars({ '--d': '.1s' })}>
-          <li>
-            <a href={REPO_URL}>
-              Open source · <b>MIT</b>
-            </a>
-          </li>
-          <li>
-            <b>982</b> backend + <b>603</b> frontend tests
-          </li>
-          <li>Built end-to-end by AI coding agents</li>
-          <li>REST API + MCP + webhooks-ready</li>
+      {/* ── where it runs ────────────────────────────────────────────────── */}
+      <section className="wrap factsect" aria-label="Where SpeakerWeave runs">
+        <p className="wherelede rv">Run your conference from wherever you already work</p>
+        <ul className="wherecards rv" style={vars({ '--d': '.1s' })}>
+          {SURFACES.map(({ title, icon: Icon, logo, tone, where }) => (
+            <li key={title}>
+              <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
+                {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
+              </span>
+              <span>
+                <b>{title}</b>
+                <em>{where}</em>
+              </span>
+            </li>
+          ))}
         </ul>
       </section>
 
@@ -379,36 +393,34 @@ export function Home() {
             </p>
           </div>
 
-          <div className="split top" style={{ marginTop: 44 }}>
-            <div className="term rv demo">
-              <div>
-                <span className="p">$</span>{' '}
-                <span className="cmd">sw ask &quot;who still owes content before Aug 27?&quot;</span>
-                <span className="cur" />
-              </div>
-              <div className="out">→ 6 speakers outstanding · 4 missing headshot only</div>
-              <div className="p">→ raj.patel · marco.bianchi · aisha.bello · omar.haddad</div>
-              <div className="p">
-                → run <span className="lit">sw remind --deadline 2026-08-27</span> to queue emails
-              </div>
-            </div>
-
-            <div className="rv" style={vars({ '--d': '.15s' })}>
-              {SURFACES.map(({ title, kicker, icon: Icon, logo, tone, body }) => (
-                <div key={title} className="srow">
-                  <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
-                    {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
-                  </span>
-                  <h3>{title}</h3>
-                  <em>{kicker}</em>
-                  <p>{body(mcpEndpoint)}</p>
+          {/* One surface per band: the claim on the left, the surface actually
+              doing it on the right, alternating sides down the section. */}
+          <div style={{ marginTop: 44 }}>
+            {SURFACES.map(({ title, kicker, icon: Icon, logo, tone, demo, body }, index) => (
+              <div
+                key={title}
+                className={`split surfrow rv${index % 2 ? ' mirror' : ''}`}
+                style={vars({ '--d': `${index * 0.05}s` })}
+              >
+                <div className="surfcopy">
+                  <div className="srow">
+                    <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
+                      {logo ? <img src={logo} alt="" /> : Icon ? <Icon strokeWidth={1.75} /> : null}
+                    </span>
+                    <h3>{title}</h3>
+                    <em>{kicker}</em>
+                    <p>{body(mcpEndpoint)}</p>
+                  </div>
                 </div>
-              ))}
-              <div style={{ marginTop: 26 }}>
-                <Link to="/developers" className="arrowlink">
-                  See the full MCP tool list →
-                </Link>
+                <div className="surfdemo demo">
+                  <AgentSurfaceDemo surface={demo} />
+                </div>
               </div>
+            ))}
+            <div style={{ marginTop: 30 }} className="rv">
+              <Link to="/developers" className="arrowlink">
+                See the full MCP tool list →
+              </Link>
             </div>
           </div>
         </div>

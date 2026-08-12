@@ -1,0 +1,768 @@
+/**
+ * Agent surface demos — the four faked product illustrations in the landing
+ * page's "fully agentic" section. Owned by `pages/agentDemos.tsx`, which
+ * imports this file directly (the style entry point `index.css` is shared, so
+ * the demos carry their own sheet rather than editing it).
+ *
+ * Scoped under `.sw-site` and prefixed `swd-` throughout so nothing here can
+ * collide with `site.css`, the app, or Tailwind's `important: '#root'`
+ * utilities. Tokens come from `.sw-site`; only the borrowed chrome (Slack's
+ * white/#1D1C1D, the terminal's near-black) uses literal colours, because those
+ * are screenshots of someone else's product rather than our palette.
+ *
+ * Motion contract: every animated element has `swd-st` and an inline `--t`
+ * delay, and nothing starts until `.in` lands on the `.swd` root — from the
+ * shared reveal observer in `siteShared`, or from the component's own fallback
+ * observer. Base states live in the un-prefixed rules and the keyframes run
+ * `forwards`, so an element sits at its start frame through its delay and stays
+ * at its end frame afterwards. One reduced-motion block at the bottom drops
+ * every sequence to its final frame.
+ */
+
+/* ── shell ────────────────────────────────────────────────────────────────── */
+
+.sw-site .swd {
+  /* Never inherit a reveal delay from a wrapper: stage timing is local. */
+  --d: 0s;
+  display: flex;
+  width: 100%;
+  max-width: 540px;
+}
+.sw-site .swd > * {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The one staging primitive. `--t` rides on the style attribute. */
+.sw-site .swd .swd-st {
+  opacity: 0;
+  transform: translateY(7px);
+}
+.sw-site .swd.in .swd-st {
+  animation: swd-rise 0.5s var(--sw-ease) var(--t, 0s) forwards;
+}
+
+/* Machine-generated values are mono everywhere, at whatever size they sit in. */
+.sw-site .swd .swd-id {
+  font-family: var(--sw-mono);
+  font-size: 0.93em;
+  letter-spacing: -0.01em;
+}
+
+@keyframes swd-rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes swd-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes swd-fadeout {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes swd-collapse {
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+@keyframes swd-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@keyframes swd-type {
+  to {
+    max-width: 100%;
+  }
+}
+@keyframes swd-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes swd-hide {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ── slack ────────────────────────────────────────────────────────────────── */
+
+/* Slack chrome stays light on any ground. It is a screenshot, not our surface. */
+.sw-site .swd-slack {
+  background: #fff;
+  color: #1d1c1d;
+  border: 1px solid rgba(29, 28, 29, 0.14);
+  border-radius: 10px;
+  box-shadow:
+    0 1px 2px rgba(28, 26, 23, 0.06),
+    0 22px 54px rgba(28, 26, 23, 0.16);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.46;
+}
+.sw-site .swd-sk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(29, 28, 29, 0.13);
+  flex: 0 0 auto;
+}
+.sw-site .swd-sk-logo {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.sw-site .swd-sk-bar b {
+  font-weight: 700;
+  font-size: 13px;
+}
+.sw-site .swd-sk-bar span {
+  font-size: 12.5px;
+  color: #616061;
+}
+.sw-site .swd-sk-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 14px 16px 13px;
+}
+.sw-site .swd-sk-msg {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.sw-site .swd-sk-col {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.sw-site .swd-sk-av {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.sw-site .swd-sk-human {
+  background: linear-gradient(150deg, #c07a52, #8c4a2e);
+}
+.sw-site .swd-sk-app {
+  background: #1c1a17;
+  font-size: 15px;
+}
+.sw-site .swd-sk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  line-height: 1.3;
+}
+.sw-site .swd-sk-head b {
+  font-weight: 700;
+  font-size: 13px;
+  color: #1d1c1d;
+}
+.sw-site .swd-sk-badge {
+  font-style: normal;
+  font-weight: 700;
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #616061;
+  background: rgba(29, 28, 29, 0.09);
+  border-radius: 3px;
+  padding: 1.5px 4px;
+  position: relative;
+  top: -1px;
+}
+.sw-site .swd-sk-ts {
+  font-size: 11.5px;
+  color: #616061;
+}
+.sw-site .swd-sk-text {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1c1d;
+}
+.sw-site .swd-sk-text b {
+  font-weight: 700;
+}
+.sw-site .swd-sk-mention {
+  color: #1264a3;
+  background: #e8f5fa;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+}
+
+/* Thinking state: held ~1.6s, then collapsed out of flow so the reply slides
+   up into the space it occupied — the wrapper owns the height, the inner row
+   owns the fade, so the two animations never fight over one property. */
+.sw-site .swd-sk-thinkwrap {
+  height: 26px;
+  overflow: hidden;
+  margin-left: 43px;
+  flex: 0 0 auto;
+}
+.sw-site .swd.in .swd-sk-thinkwrap {
+  animation: swd-collapse 0.4s var(--sw-ease) 2.45s forwards;
+}
+.sw-site .swd-sk-think {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding-top: 6px;
+  opacity: 0;
+  font-size: 13px;
+}
+.sw-site .swd.in .swd-sk-think {
+  animation: swd-fade 0.38s var(--sw-ease) 0.7s forwards;
+}
+.sw-site .swd-sk-think b {
+  font-weight: 700;
+  color: #4a154b;
+}
+.sw-site .swd-sk-think span {
+  color: #616061;
+  animation: swd-breathe 2.2s ease-in-out both;
+}
+.sw-site .swd-sk-div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 10px 0 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #616061;
+  flex: 0 0 auto;
+}
+.sw-site .swd-sk-div i {
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(29, 28, 29, 0.13);
+}
+.sw-site .swd-sk-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.sw-site .swd-sk-list li {
+  position: relative;
+  padding-left: 15px;
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.sw-site .swd-sk-list li::before {
+  content: '•';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  color: #616061;
+}
+.sw-site .swd-sk-list b {
+  font-weight: 700;
+  color: #1d1c1d;
+}
+/* The tail wraps as a unit: a bullet breaking after "— Nina Sorensen ·" reads
+   as a layout bug rather than a long title. */
+.sw-site .swd-sk-meta {
+  color: #616061;
+  white-space: nowrap;
+}
+.sw-site .swd-sk-reply {
+  margin-top: auto;
+  padding: 9px 12px;
+  border: 1px solid rgba(29, 28, 29, 0.2);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #868686;
+  flex: 0 0 auto;
+}
+
+/* ── in-app ask ───────────────────────────────────────────────────────────── */
+
+.sw-site .swd-app {
+  background: var(--sw-surface);
+  color: var(--sw-ink);
+  border: 1px solid var(--sw-line);
+  border-radius: 14px;
+  box-shadow:
+    0 1px 2px rgba(28, 26, 23, 0.07),
+    0 20px 50px rgba(28, 26, 23, 0.11);
+  overflow: hidden;
+}
+.sw-site .swd-ap-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--sw-line);
+  flex: 0 0 auto;
+}
+.sw-site .swd-ap-bar b {
+  font-weight: 600;
+  font-size: 13px;
+}
+.sw-site .swd-pill {
+  font-style: normal;
+  font-family: var(--sw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--sw-ink2);
+  background: rgba(28, 26, 23, 0.055);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.sw-site .swd-ap-bar span {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--sw-ink3);
+}
+.sw-site .swd-ap-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 14px;
+}
+.sw-site .swd-ap-you {
+  align-self: flex-end;
+  max-width: 80%;
+  background: var(--sw-accent-soft);
+  color: var(--sw-ink);
+  border-radius: 13px 13px 4px 13px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+/* Stands in for a spinner: what the agent read, not that it is thinking. */
+.sw-site .swd-ap-trace {
+  margin-top: 13px;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.015em;
+  color: var(--sw-ink3);
+}
+.sw-site .swd-ap-say {
+  margin: 9px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--sw-ink);
+}
+.sw-site .swd-ap-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.sw-site .swd-ap-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--sw-line);
+  font-size: 12.5px;
+}
+.sw-site .swd-ap-who {
+  color: var(--sw-ink);
+}
+.sw-site .swd-ap-owes {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--sw-ink3);
+}
+.sw-site .swd-ap-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 13px 0 14px;
+}
+.sw-site .swd-act {
+  display: inline-block;
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--sw-line2);
+  color: var(--sw-ink2);
+}
+.sw-site .swd-act-p {
+  background: var(--sw-accent);
+  border-color: var(--sw-accent);
+  color: #fff;
+}
+.sw-site .swd-ap-gate {
+  margin-top: auto;
+  border: 1px solid rgba(200, 155, 60, 0.38);
+  background: rgba(200, 155, 60, 0.09);
+  border-radius: 12px;
+  padding: 11px 12px;
+  flex: 0 0 auto;
+}
+.sw-site .swd-ap-gtop {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.sw-site .swd-ap-gtop b {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--sw-ink);
+}
+.sw-site .swd-ap-exp {
+  margin-left: auto;
+  font-family: var(--sw-mono);
+  font-size: 10px;
+  color: var(--sw-ink3);
+}
+.sw-site .swd-ap-gate p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sw-ink2);
+}
+.sw-site .swd-ap-gacts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+/* ── mcp client ───────────────────────────────────────────────────────────── */
+
+/* Deliberately a dark, unbranded client: this is someone else's app, and the
+   contrast keeps it from reading as a second copy of the in-app pane. */
+.sw-site .swd-mcp {
+  background: var(--sw-dsurf);
+  color: var(--sw-dtext);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+  overflow: hidden;
+}
+.sw-site .swd-mc-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--sw-dline);
+  flex: 0 0 auto;
+}
+/* Three window dots from one element — no throwaway spans in the markup. */
+.sw-site .swd-mc-dots {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 26px;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    13px 0 0 rgba(255, 255, 255, 0.16),
+    26px 0 0 rgba(255, 255, 255, 0.16);
+}
+.sw-site .swd-mc-bar span {
+  font-size: 12px;
+  color: var(--sw-dmute);
+}
+.sw-site .swd-mc-bar em {
+  margin-left: auto;
+  font-style: normal;
+  font-family: var(--sw-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  color: var(--sw-dfaint);
+}
+.sw-site .swd-mc-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 15px 15px 13px;
+}
+.sw-site .swd-mc-you {
+  align-self: flex-end;
+  max-width: 84%;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 13px 13px 4px 13px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--sw-dtext);
+}
+.sw-site .swd-mc-tool {
+  margin-top: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--sw-dline);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+.sw-site .swd-mc-trow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sw-site .swd-mc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--sw-dtext);
+  background: rgba(216, 153, 111, 0.14);
+  border: 1px solid rgba(216, 153, 111, 0.3);
+  border-radius: 999px;
+  padding: 2px 9px 2px 6px;
+}
+.sw-site .swd-mc-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--sw-accent-lite);
+}
+.sw-site .swd-mc-name {
+  font-size: 11.5px;
+  color: var(--sw-dtext);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-site .swd-mc-state {
+  position: relative;
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+.sw-site .swd-mc-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--sw-dfaint);
+}
+.sw-site .swd-mc-run i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sw-dfaint);
+  animation: swd-breathe 2.1s ease-in-out infinite;
+}
+.sw-site .swd.in .swd-mc-run {
+  animation: swd-fadeout 0.28s var(--sw-ease) 2s forwards;
+}
+.sw-site .swd-mc-ran {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  opacity: 0;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: #8fb08f;
+}
+.sw-site .swd.in .swd-mc-ran {
+  animation: swd-fade 0.3s var(--sw-ease) 2.12s forwards;
+}
+.sw-site .swd-mc-args {
+  margin-top: 7px;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--sw-dfaint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-site .swd-mc-say {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--sw-dtext);
+}
+.sw-site .swd-mc-say + .swd-mc-say {
+  margin-top: 9px;
+  color: var(--sw-dmute);
+}
+.sw-site .swd-mc-input {
+  margin-top: auto;
+  padding: 9px 12px;
+  border: 1px solid var(--sw-dline);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--sw-dfaint);
+  flex: 0 0 auto;
+}
+.sw-site .swd-mc-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sw-dline);
+  font-size: 11px;
+  color: var(--sw-dfaint);
+  flex: 0 0 auto;
+}
+.sw-site .swd-mc-conn {
+  color: var(--sw-dmute);
+}
+.sw-site .swd-mc-foot > span + span {
+  margin-left: auto;
+}
+
+/* ── cli ──────────────────────────────────────────────────────────────────── */
+
+.sw-site .swd-cli {
+  background: #100e0c;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  font-family: var(--sw-mono);
+  font-size: 12px;
+  line-height: 1.9;
+  color: #c6bfb5;
+}
+.sw-site .swd-cl-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+}
+.sw-site .swd-cl-bar span {
+  font-size: 10.5px;
+  color: #8a8378;
+}
+.sw-site .swd-cl-body {
+  flex: 1 1 auto;
+  padding: 16px 18px;
+}
+.sw-site .swd-cl-p {
+  color: #8a8378;
+}
+/* Types itself out by widening the clip, not the box: sized to its own text
+   (`max-content`) and revealed by animating `max-width`, so the prompt and the
+   command stay on one line instead of the box claiming the full row. */
+.sw-site .swd-cl-cmd {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: max-content;
+  max-width: 0;
+}
+.sw-site .swd.in .swd-cl-cmd {
+  animation: swd-type 1.9s steps(44, end) 0.35s forwards;
+}
+.sw-site .swd-cl-cur,
+.sw-site .swd-cl-cur2 {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  background: var(--sw-accent-lite);
+  vertical-align: -2px;
+}
+/* The caret rides the growing clip edge while the command types, then hands
+   off to the fresh prompt once the output has printed — two elements so the
+   blink and the hand-off never animate the same property. */
+.sw-site .swd.in .swd-cl-cur {
+  animation:
+    swd-caret 1.2s step-end infinite,
+    swd-hide 0.01s linear 2.4s forwards;
+}
+.sw-site .swd.in .swd-cl-cur2 {
+  animation: swd-caret 1.2s step-end infinite;
+}
+.sw-site .swd-cl-end {
+  margin-top: 6px;
+}
+.sw-site .swd-cl-out {
+  color: #8fb08f;
+}
+.sw-site .swd-cl-dim {
+  color: #8a8378;
+}
+.sw-site .swd-cl-lit {
+  color: #c6bfb5;
+}
+
+/* ── narrow ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 560px) {
+  .sw-site .swd {
+    min-height: 0;
+  }
+  .sw-site .swd-cli {
+    font-size: 11px;
+  }
+  .sw-site .swd-sk-body,
+  .sw-site .swd-mc-body {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+}
+
+/* ── reduced motion ───────────────────────────────────────────────────────── */
+
+/* Every sequence lands on its final frame immediately; nothing loops. */
+@media (prefers-reduced-motion: reduce) {
+  .sw-site .swd .swd-st,
+  .sw-site .swd.in .swd-st {
+    opacity: 1;
+    transform: none;
+    animation: none !important;
+  }
+  .sw-site .swd-sk-thinkwrap,
+  .sw-site .swd-mc-run {
+    display: none;
+  }
+  .sw-site .swd .swd-sk-think,
+  .sw-site .swd .swd-sk-think span,
+  .sw-site .swd.in .swd-sk-think,
+  .sw-site .swd.in .swd-sk-thinkwrap,
+  .sw-site .swd .swd-mc-run i,
+  .sw-site .swd.in .swd-mc-run,
+  .sw-site .swd.in .swd-mc-ran,
+  .sw-site .swd.in .swd-cl-cmd,
+  .sw-site .swd.in .swd-cl-cur,
+  .sw-site .swd.in .swd-cl-cur2 {
+    animation: none !important;
+  }
+  /* The command has finished typing, so the caret has already moved on. */
+  .sw-site .swd .swd-cl-cur {
+    display: none;
+  }
+  .sw-site .swd .swd-mc-ran {
+    position: static;
+    transform: none;
+    opacity: 1;
+  }
+  .sw-site .swd .swd-cl-cmd {
+    max-width: 100%;
+  }
+}

@@ -156,6 +156,96 @@ body.sw-site-active {
   color: var(--sw-accent-hover);
 }
 
+/* Attendee-portal menu. The three attendee pages sit under one label so the
+   top level reads as audiences rather than as a list of routes. */
+.sw-site .navmenu {
+  position: relative;
+}
+.sw-site .navtrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 13.5px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--sw-dmute);
+  transition: color 0.2s ease;
+}
+.sw-site .navtrigger:hover,
+.sw-site .navtrigger[aria-expanded='true'] {
+  color: var(--sw-dbright);
+}
+.sw-site .navtrigger svg {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.2s var(--sw-ease);
+}
+.sw-site .navtrigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.sw-site .navdrop {
+  position: absolute;
+  top: 100%;
+  left: -14px;
+  margin-top: 10px;
+  min-width: 244px;
+  padding: 7px;
+  border-radius: 13px;
+  background: #221f1b;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 18px 44px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+/* A hover bridge, so the pointer can cross the gap without closing the menu. */
+.sw-site .navdrop::before {
+  content: '';
+  position: absolute;
+  inset: -12px 0 100% 0;
+}
+.sw-site .navdrop a {
+  display: block;
+  padding: 8px 11px;
+  border-radius: 9px;
+  color: var(--sw-dtext);
+  transition: background 0.15s ease;
+}
+.sw-site .navdrop a:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sw-dbright);
+}
+.sw-site .navdrop b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.sw-site .navdrop span {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--sw-dfaint);
+}
+
+/* The competition entry is time-boxed, so it is flagged rather than ranked
+   alongside the permanent nav. */
+.sw-site .navlinks a.navflag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--sw-accent-lite);
+  background: rgba(168, 94, 62, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(216, 153, 111, 0.28);
+}
+.sw-site .navlinks a.navflag:hover {
+  color: #f2c39f;
+  background: rgba(168, 94, 62, 0.26);
+}
+
 /* Keyboard users get to the content without tabbing the whole nav. */
 .sw-site .skip {
   position: fixed;
@@ -185,8 +275,16 @@ body.sw-site-active {
   text-transform: uppercase;
   color: var(--sw-dfaint);
 }
+.sw-site a.badge,
+.sw-site a.badge:hover {
+  color: #cfc8be;
+}
+.sw-site a.badge:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
 .sw-site .badge {
   display: inline-flex;
+  transition: background 0.2s ease;
   align-items: center;
   gap: 8px;
   font-size: 12px;
@@ -671,6 +769,66 @@ body.sw-site-active {
   padding-top: 70px;
   padding-bottom: 72px;
 }
+/* Where the agent runs, as a row of cards directly under the hero. This replaced
+   a strip of project statistics: true, but the wrong first thing to say. */
+.sw-site .wherelede {
+  font-size: 13.5px;
+  color: var(--sw-dmute);
+  margin: 0 0 18px;
+  text-align: center;
+}
+.sw-site .wherecards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sw-site .wherecards li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.028);
+  box-shadow: inset 0 0 0 1px var(--sw-dline);
+  transition: background 0.2s ease;
+}
+.sw-site .wherecards li:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.sw-site .wherecards b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--sw-dbright);
+}
+.sw-site .wherecards em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--sw-dfaint);
+}
+.sw-site .wherecards .ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sw-dtext);
+}
+.sw-site .wherecards .ico svg,
+.sw-site .wherecards .ico img {
+  width: 17px;
+  height: 17px;
+}
+
 .sw-site .facts {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1231,6 +1389,30 @@ body.sw-site-active {
 }
 .sw-site .in .meter i {
   width: 64%;
+}
+
+/* One surface per band — claim on one side, the surface doing it on the other,
+   alternating so the eye zigzags rather than running down a single column. */
+.sw-site .surfrow {
+  /* Tops align: the demos are much taller than their copy, and centring left
+     the claim floating in the middle of an empty column. */
+  align-items: start;
+  padding: 40px 0;
+  border-top: 1px solid var(--sw-line2);
+}
+.sw-site .surfrow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.sw-site .surfrow.mirror .surfcopy {
+  order: 2;
+}
+.sw-site .surfrow .srow {
+  border-top: 0;
+  padding: 6px 0 0;
+}
+.sw-site .surfdemo {
+  min-width: 0;
 }
 
 /* ── public schedule preview ──────────────────────────────────────────────── */
@@ -1837,11 +2019,16 @@ body.sw-site-active {
     display: none;
   }
   .sw-site .facts,
+  .sw-site .wherecards,
   .sw-site .grid3,
   .sw-site .grid2,
   .sw-site .statline,
   .sw-site .linkgrid {
     grid-template-columns: 1fr 1fr;
+  }
+  /* The menu collapses with the rest of the nav links. */
+  .sw-site .navmenu {
+    display: none;
   }
   /* Demo cards go full width; the demo always leads its section. */
   .sw-site .split {
@@ -1906,6 +2093,7 @@ body.sw-site-active {
 
 @media (max-width: 620px) {
   .sw-site .facts,
+  .sw-site .wherecards,
   .sw-site .grid3,
   .sw-site .grid2,
   .sw-site .statline,

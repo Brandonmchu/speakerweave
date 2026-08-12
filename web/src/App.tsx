@@ -7,6 +7,7 @@ import {
   loadAgenda,
   loadApiDocs,
   loadKillMySaas,
+  loadOpenSource,
   loadComms,
   loadContentLibrary,
   loadDashboard,
@@ -43,6 +44,9 @@ const LazyAgenda = lazy(() => loadAgenda().then(({ Agenda }) => ({ default: Agen
 const LazyApiDocs = lazy(() => loadApiDocs().then(({ ApiDocs }) => ({ default: ApiDocs })))
 const LazyKillMySaas = lazy(() =>
   loadKillMySaas().then(({ KillMySaas }) => ({ default: KillMySaas })),
+)
+const LazyOpenSource = lazy(() =>
+  loadOpenSource().then(({ OpenSource }) => ({ default: OpenSource })),
 )
 const LazyComms = lazy(() => loadComms().then(({ Comms }) => ({ default: Comms })))
 const LazyContentLibrary = lazy(() =>
@@ -251,6 +255,14 @@ export default function App() {
           element={
             <DeferredPage fullPage>
               <LazyApiDocs />
+            </DeferredPage>
+          }
+        />
+        <Route
+          path="/open-source"
+          element={
+            <DeferredPage fullPage>
+              <LazyOpenSource />
             </DeferredPage>
           }
         />

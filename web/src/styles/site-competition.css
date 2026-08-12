@@ -1,0 +1,93 @@
+/**
+ * Competition page (route: /killmysaas) — additive only.
+ *
+ * Every colour, typeface and layout primitive on that page comes from
+ * `styles/site.css` under `.sw-site`. This file adds the four things a
+ * scoreboard needs that a marketing page never did: numeric table columns, a
+ * totals row that closes the table rather than continuing it, body copy on a
+ * paper band outside `.doc`, and a seam between two consecutive `.light`
+ * bands. It is imported by the page itself, so it ships in that route's chunk
+ * and never reaches the app.
+ */
+
+/* Two paper bands in a row read as one long document, which is what a judge
+   wants for the evidence half of the page — but without a rule the second
+   section's heading floats. One hairline restores the seam. */
+.sw-site .light.seam {
+  border-top: 1px solid var(--sw-line2);
+}
+
+/* `.doc p` sets the reading measure for long-form copy, but it only applies
+   inside a `.doc` band and this page uses `.light`. Same values, same measure. */
+.sw-site .light .btext {
+  font-size: 14.5px;
+  line-height: 1.68;
+  color: var(--sw-ink2);
+  margin: 12px 0 0;
+  max-width: 72ch;
+}
+
+/* Anything the harness counted is mono and right-aligned, so the columns can be
+   read down rather than across. */
+.sw-site table.doctable th.n,
+.sw-site table.doctable td.n {
+  text-align: right;
+  white-space: nowrap;
+}
+.sw-site table.doctable td.n {
+  font-family: var(--sw-mono);
+  font-size: 12.5px;
+  color: var(--sw-ink);
+}
+
+/* The score column carries its own status dot via `dotted d-acc` on the cell —
+   an inline `::before`, never a sibling element. */
+.sw-site table.doctable td.score {
+  font-family: var(--sw-mono);
+  font-size: 12.5px;
+  color: var(--sw-ink);
+  white-space: nowrap;
+}
+
+/* The first column names the thing being scored, so it reads as ink. */
+.sw-site table.doctable td.area {
+  color: var(--sw-ink);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.sw-site table.doctable td.area em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-weight: 400;
+  font-family: var(--sw-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a9a399;
+}
+
+/* The totals row closes the scoreboard. 2px because `border-collapse: collapse`
+   resolves same-width conflicts in favour of the earlier cell, so a 1px rule
+   here would lose to the previous row's bottom hairline. */
+.sw-site table.doctable tr.sum td {
+  border-top: 2px solid var(--sw-line2);
+  border-bottom: 0;
+  padding-top: 13px;
+  color: var(--sw-ink);
+  font-weight: 500;
+}
+
+/* Parity and bonus tables run long; give their prose columns a real measure and
+   stop the "where" column from stealing width. */
+.sw-site table.doctable td.said {
+  color: var(--sw-ink);
+  font-weight: 500;
+}
+.sw-site table.doctable td.where {
+  font-family: var(--sw-mono);
+  font-size: 12px;
+  /* Routes have no spaces to break at, and the wrapper scrolls rather than
+     letting the page do it — so break inside the path on narrow screens. */
+  overflow-wrap: anywhere;
+}

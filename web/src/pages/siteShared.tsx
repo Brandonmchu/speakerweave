@@ -7,7 +7,7 @@
  * these components own the structure, the routes, and the motion.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { Check, ChevronDown, Copy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -30,10 +30,9 @@ export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
 /** Crawlable links to the public conference surfaces. Plain in-app routes so a
  *  browser agent reading `href`s can discover every public page. */
 export const EXPLORE = [
-  { label: 'Schedule', to: featuredScheduleUrl },
-  { label: 'Speakers', to: featuredSpeakersUrl },
-  { label: 'Call for Speakers', to: CFP_FORM_URL },
-  { label: 'Developers', to: DEVELOPERS_URL },
+  { label: 'Schedule', to: featuredScheduleUrl, hint: 'Sessions, times and rooms' },
+  { label: 'Speakers', to: featuredSpeakersUrl, hint: 'Who is on the programme' },
+  { label: 'Call for Speakers', to: CFP_FORM_URL, hint: 'Submit a talk' },
 ]
 
 /**
@@ -130,8 +129,37 @@ export function CodeBlock({ code, label = 'Copy code' }: { code: string; label?:
   )
 }
 
-/** Sticky site nav. `badge` labels a sub-surface (e.g. the API reference). */
+/**
+ * Sticky site nav. `badge` labels a sub-surface (e.g. the API reference).
+ *
+ * The three attendee-facing pages used to sit loose in the nav, which said
+ * nothing about who they were for. They now live under one "Attendee portal"
+ * menu, so the top level reads as audiences — attendees, developers, people who
+ * want to self-host — rather than as a list of routes.
+ */
 export function SiteNav({ badge }: { badge?: string }) {
+  const [open, setOpen] = useState(false)
+  const menu = useRef<HTMLDivElement | null>(null)
+
+  // Click opens and closes; outside click, Escape, or the pointer leaving all
+  // close it. Deliberately not hover-to-open: with both, moving the pointer onto
+  // the trigger opened the menu and the click that followed closed it again.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => {
+      if (!menu.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
     <nav className="nav" aria-label="Site">
       <Link to="/" className="brand" aria-label="SpeakerWeave home">
@@ -140,12 +168,36 @@ export function SiteNav({ badge }: { badge?: string }) {
       </Link>
       {badge && <span className="eyebrow">{badge}</span>}
       <div className="navlinks">
-        {EXPLORE.map(({ label, to }) => (
-          <Link key={label} to={to}>
-            {label}
-          </Link>
-        ))}
+        <div
+          className="navmenu"
+          ref={menu}
+          onMouseLeave={() => setOpen(false)}
+        >
+          <button
+            type="button"
+            className="navtrigger"
+            aria-expanded={open}
+            aria-haspopup="true"
+            onClick={() => setOpen((was) => !was)}
+          >
+            Attendee portal
+            <ChevronDown aria-hidden="true" />
+          </button>
+          <div className="navdrop" hidden={!open}>
+            {EXPLORE.map(({ label, to, hint }) => (
+              <Link key={label} to={to} onClick={() => setOpen(false)}>
+                <b>{label}</b>
+                <span>{hint}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+        <Link to={DEVELOPERS_URL}>Developers</Link>
+        <Link to="/open-source">Open source</Link>
         <a href={DOCS_URL}>Docs</a>
+        <Link to="/killmysaas" className="navflag">
+          Kill My SaaS
+        </Link>
         <Link to="/speaker-signin" className="accent">
           Speaker sign in
         </Link>
@@ -166,7 +218,9 @@ export function SiteFooter() {
               {label}
             </Link>
           ))}
+          <Link to={DEVELOPERS_URL}>Developers</Link>
           <Link to="/speaker-signin">Speaker sign in</Link>
+          <Link to="/open-source">Open source</Link>
           <a href={LICENSE_URL}>License</a>
           <a href={DOCS_URL}>Docs</a>
           <Link to="/killmysaas">Kill My SaaS</Link>

@@ -96,9 +96,7 @@ describe('Home landing', () => {
     expect(
       screen.getByRole('heading', { name: 'Every speaker, from submission to stage.' })
     ).toBeInTheDocument()
-    expect(
-      screen.getByText(/From call for papers to a published, staffed, scheduled agenda/)
-    ).toBeInTheDocument()
+    expect(screen.getByText(/SpeakerWeave runs your whole conference/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Enter the demo workspace/i })).toBeInTheDocument()
     expect(screen.getByText('No sign-up. Jump into a fully seeded workspace.')).toBeInTheDocument()
   })
@@ -167,6 +165,8 @@ describe('Home landing', () => {
     expect(href(/Call for Speakers/i)).toContain('/submit/call-for-speakers')
     expect(href(/Developers/i)).toContain('/developers')
     expect(href(/Speaker sign in/i)).toContain('/speaker-signin')
+    expect(href(/Open source/i)).toContain('/open-source')
+    expect(href(/Kill My SaaS/i)).toContain('/killmysaas')
     // Real-org sign-in stays reachable (Clerk).
     expect(href(/Sign in with your account/i)).toContain('/sign-in')
   })
@@ -198,13 +198,11 @@ describe('Home landing', () => {
     expect(stack).toHaveTextContent(
       'Swap auth, email, hosting, or data providers without touching the domain core'
     )
-    const facts = screen.getByRole('region', { name: 'Project credibility' })
-    expect(within(facts).getByText(/982/).closest('li')).toHaveTextContent(
-      '982 backend + 603 frontend tests'
-    )
-    expect(within(facts).getByRole('link')).toHaveAttribute('href', REPO_URL)
-    expect(within(facts).getByText('Built end-to-end by AI coding agents')).toBeInTheDocument()
-    expect(within(facts).getByText('REST API + MCP + webhooks-ready')).toBeInTheDocument()
+    // The hero closes with where the agent runs, not with project statistics.
+    const where = screen.getByRole('region', { name: 'Where SpeakerWeave runs' })
+    for (const surface of ['In-app agent', 'MCP server + connectors', 'Slack', 'sw CLI']) {
+      expect(within(where).getByText(surface)).toBeInTheDocument()
+    }
     expect(screen.getByRole('link', { name: 'License' })).toHaveAttribute(
       'href',
       `${REPO_URL}/blob/main/LICENSE`
