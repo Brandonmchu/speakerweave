@@ -1067,3 +1067,131 @@ export async function uploadSpeakerPhoto(
     { method: 'POST', body: form }
   )
 }
+
+// ── Multi-organization membership (organizer) ───────────────────────────────
+// One person can run programs for several conference companies. The org is a
+// claim on the token — never a header, see `request()` above — so "switching
+// workspace" means minting a fresh token for the target org and storing it with
+// setToken(). Nothing else in the app has to know it happened.
+
+export interface OrganizationMembership {
+  org_id: string
+  name: string
+  role: string
+  /** How many events that org runs. A machine value — render it mono. */
+  events: number
+  is_current: boolean
+}
+
+/**
+ * The one react-query key for the membership list, so the rail-foot switcher
+ * and the /choose-workspace picker share a single fetch instead of racing.
+ */
+export const organizationKeys = {
+  mine: ['me', 'organizations'] as const,
+}
+
+/**
+ * GET /api/me/organizations — every org this token's user belongs to.
+ *
+ * `/api`, not `/v1`: the web tier proxies only `/api`, `/public`, `/mcp` and
+ * `/oauth` to the backend, so a browser calling `/v1` gets the SPA's index.html
+ * instead. The API mounts this router at both prefixes; `/v1` is the documented
+ * surface for external integrators, `/api` is how this app talks to its own
+ * backend everywhere else.
+ *
+ * Deliberately non-fatal. This list only ever *enables* a switcher; it never
+ * gates the app, so a backend that doesn't serve the route yet (or a blip)
+ * yields an empty list rather than an error screen — and, with one membership
+ * or none, the caller behaves exactly as it did before multi-org existed.
+ *
+ * The token dance guards the same property: `request()` clears the token on a
+ * 401, which is right for the queries that ARE the app but wrong for this
+ * decorative one. Put it back and let those real queries be the authority on
+ * whether the session is dead.
+ */
+export async function listMyOrganizations(): Promise<OrganizationMembership[]> {
+  const tokenBefore = peekToken()
+  try {
+    const wire = await apiGet<{ organizations?: OrganizationMembership[] }>('/api/me/organizations')
+    return Array.isArray(wire?.organizations)
+      ? wire.organizations
+      : unwrapList<OrganizationMembership>(wire)
+  } catch {
+    if (tokenBefore && !peekToken()) setToken(tokenBefore)
+    return []
+  }
+}
+
+/**
+ * POST /api/me/organizations/{org_id}/token → a fresh organizer JWT scoped to
+ * that org. 404 means the caller is not a member of it, which surfaces as the
+ * standard "We couldn't find that." — no membership probing from the client.
+ */
+export async function switchOrganization(orgId: string): Promise<string> {
+  const wire = await apiPost<{ token?: string }>(
+    `/api/me/organizations/${encodeURIComponent(orgId)}/token`
+  )
+  const token = wire?.token
+  if (!token) throw new ApiError("That workspace didn't hand back a session.", 500)
+  return token
+}
+
+// ── Cross-org speaker sign-in ───────────────────────────────────────────────
+// A speaker is a person, not a row on one event: the same human may be on three
+// conferences run by three different companies. These three calls replace the
+// single-event manage-link path with "email → pick your conference → portal".
+
+/**
+ * POST /public/portal/sign-in — mail a link covering every conference this
+ * address appears on, in any org.
+ *
+ * The response is identical whether or not the email is known, and the UI
+ * ignores the server's wording entirely, so neither the status code nor the
+ * copy can be used to enumerate speakers.
+ */
+export function requestPortalSignIn(email: string): Promise<{ ok: boolean; message: string }> {
+  return apiPost<{ ok: boolean; message: string }>('/public/portal/sign-in', { email })
+}
+
+/** One conference this speaker can enter, and the contact row that grants it. */
+export interface PortalChoice {
+  contact_id: string
+  org_id: string
+  org_name: string
+  event_id: string
+  event_name: string
+  starts_at?: string | null
+  ends_at?: string | null
+}
+
+export interface PortalChoices {
+  email: string | null
+  choices: PortalChoice[]
+}
+
+/** GET /public/portal/choices?token=… — 401 once the link expires or is spent. */
+export async function getPortalChoices(token: string): Promise<PortalChoices> {
+  const wire = await apiGet<Partial<PortalChoices>>(
+    `/public/portal/choices?token=${encodeURIComponent(token)}`
+  )
+  return {
+    email: typeof wire.email === 'string' ? wire.email : null,
+    choices: Array.isArray(wire.choices) ? wire.choices : [],
+  }
+}
+
+/**
+ * POST /public/portal/choose → 204 and the portal session cookie.
+ *
+ * `credentials: 'include'` is the whole point of the call: every subsequent
+ * speaker-portal request is cookie-authenticated with no bearer token at all.
+ */
+export function choosePortalConference(token: string, contactId: string): Promise<void> {
+  return request<void>('/public/portal/choose', {
+    method: 'POST',
+    anonymous: true,
+    credentials: 'include',
+    body: { token, contact_id: contactId },
+  })
+}

@@ -23,6 +23,8 @@ export function DevLogin() {
   const [demoLoading, setDemoLoading] = useState(false)
   const hasExistingToken = Boolean(peekToken())
 
+  // The demo is a single, known workspace — it goes straight in, exactly as it
+  // always has. Never route this button through the workspace picker.
   async function enterDemo() {
     setError(null)
     setDemoLoading(true)
@@ -36,6 +38,9 @@ export function DevLogin() {
     }
   }
 
+  // A pasted token belongs to a real person, who may organize for several orgs.
+  // /choose-workspace asks; with one membership it redirects to /submissions on
+  // its own, so this path is unchanged for everyone who has no choice to make.
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     const token = value.trim()
@@ -44,7 +49,7 @@ export function DevLogin() {
       return
     }
     setToken(token)
-    navigate('/submissions', { replace: true })
+    navigate('/choose-workspace', { replace: true })
   }
 
   return (

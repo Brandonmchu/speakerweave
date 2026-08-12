@@ -21,7 +21,7 @@ function renderPage() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Speaker sign in', () => {
-  it('posts to the featured form manage-link endpoint and shows generic copy', async () => {
+  it('posts to the cross-org portal sign-in endpoint and shows generic copy', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(
         JSON.stringify({ ok: true, message: 'Server wording is deliberately ignored.' }),
@@ -42,7 +42,8 @@ describe('Speaker sign in', () => {
     fireEvent.click(screen.getByRole('button', { name: /Email me a sign-in link/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
-    expect(fetch.mock.calls[0][0]).toBe('/public/forms/call-for-speakers/manage-link')
+    // Not one event's manage-link: this covers every conference, in any org.
+    expect(fetch.mock.calls[0][0]).toBe('/public/portal/sign-in')
     expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
       email: 'speaker@example.com',
     })

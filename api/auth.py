@@ -111,7 +111,7 @@ async def get_current_user_and_org(request: Request) -> tuple[str, str]:
         raise HTTPException(status_code=401, detail="Organization ID not found in token")
 
     request.state.auth_claims = claims
-    await _ensure_org_exists(org_id)
+    await _ensure_org_exists(org_id, user_id)
     return user_id, org_id
 
 
@@ -154,13 +154,29 @@ async def get_current_user_or_api_org(request: Request) -> tuple[str, str]:
 
 # Clerk creates orgs; our orgs table learns about them lazily on first
 # authenticated request. Positive-only TTL cache so the upsert isn't per-call.
-_ORG_SEEN: dict[str, float] = {}
+# Keyed by (org_id, user_id) because the same bootstrap also records the
+# membership that lets this user switch back to this org later.
+_ORG_SEEN: dict[tuple[str, str], float] = {}
 _ORG_SEEN_TTL = 300.0
 
 
-async def _ensure_org_exists(org_id: str) -> None:
+async def _ensure_org_exists(org_id: str, user_id: str) -> None:
+    """Lazily record the org, and this user's membership in it.
+
+    Two writes behind ONE cache entry per (user, org): the org row Clerk never
+    tells us about, and the `org_memberships` row that `/v1/me/organizations`
+    reads to list the orgs this user may switch to. Memberships therefore
+    accrue as people sign in — no data migration, and no write per request.
+
+    Both are best-effort: a failure here logs and leaves the pair uncached so
+    the next request retries, but it never fails an otherwise valid request.
+    The membership row is a convenience for the switcher, never an
+    authorisation on its own — every route still derives org_id from the
+    verified token.
+    """
     now = time.monotonic()
-    seen = _ORG_SEEN.get(org_id)
+    key = (org_id, user_id)
+    seen = _ORG_SEEN.get(key)
     if seen is not None and now - seen < _ORG_SEEN_TTL:
         return
     from services.supabase_helpers import db  # local import: avoid module cycle
@@ -171,9 +187,20 @@ async def _ensure_org_exists(org_id: str) -> None:
             lambda: supabase.table("orgs").upsert({"org_id": org_id}, on_conflict="org_id").execute(),
             "ensure_org_exists",
         )
-        _ORG_SEEN[org_id] = now
     except Exception:
         logger.warning("auth: org upsert failed org_id=%s", org_id, exc_info=True)
+        return
+
+    try:
+        # Local import for the same reason as above: services import auth.
+        from services.org_membership import upsert_membership
+
+        await upsert_membership(org_id, user_id)
+        _ORG_SEEN[key] = now
+    except Exception:
+        logger.warning(
+            "auth: membership upsert failed org_id=%s user_id=%s", org_id, user_id, exc_info=True
+        )
 
 
 def verify_org_access(row: dict | None, org_id: str, resource: str = "Resource") -> dict:

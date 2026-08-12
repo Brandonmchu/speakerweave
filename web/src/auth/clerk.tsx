@@ -59,7 +59,17 @@ function ClerkTokenBridge() {
 export function MaybeClerkProvider({ children }: { children: ReactNode }) {
   if (!CLERK_ENABLED) return <>{children}</>
   return (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY!} signInUrl="/sign-in" signUpUrl="/sign-up">
+    <ClerkProvider
+      publishableKey={PUBLISHABLE_KEY!}
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      // A real organizer may belong to several orgs, so sign-in lands on the
+      // picker — which redirects itself straight through for the (common) case
+      // of exactly one membership. Only the fallback is set: an explicit
+      // redirect_url on the sign-in link still wins.
+      signInFallbackRedirectUrl="/choose-workspace"
+      signUpFallbackRedirectUrl="/choose-workspace"
+    >
       <ClerkTokenBridge />
       {children}
     </ClerkProvider>

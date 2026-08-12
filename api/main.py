@@ -23,10 +23,12 @@ from routes.form_admin_routes import router as form_admin_router
 from routes.health_routes import router as health_router
 from routes.ics_routes import router as ics_router
 from routes.integration_routes import router as integration_router
+from routes.me_routes import router as me_router
 from routes.oauth_routes import router as oauth_router
 from routes.portal_admin_routes import router as portal_admin_router
 from routes.portal_routes import router as portal_router
 from routes.portal_session_routes import router as portal_session_router
+from routes.portal_signin_routes import router as portal_signin_router
 from routes.program_routes import router as program_router
 from routes.public_routes import router as public_router
 from routes.review_routes import router as review_router
@@ -121,6 +123,7 @@ app.include_router(public_router)
 app.include_router(demo_router)
 app.include_router(program_router)
 app.include_router(portal_session_router)
+app.include_router(portal_signin_router)
 app.include_router(ics_router)
 app.include_router(admin_router)
 app.include_router(assistant_router)
@@ -137,6 +140,12 @@ app.include_router(portal_admin_router)
 app.include_router(comms_router)
 app.include_router(crm_router)
 app.include_router(v1_router)
+# The organizer's own account. Mounted twice on purpose: /v1/me is the
+# contracted path, and /api/me is the same surface where the web tier's
+# same-origin proxy (vite dev, nginx, worker) actually forwards — it passes
+# /api, /public, /mcp and /oauth, but not /v1.
+app.include_router(me_router, prefix="/v1/me")
+app.include_router(me_router, prefix="/api/me")
 app.include_router(api_key_admin_router)
 app.include_router(integration_router)
 app.include_router(slack_router)

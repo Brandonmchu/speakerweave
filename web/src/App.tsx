@@ -6,6 +6,7 @@ import { featuredScheduleUrl, featuredSpeakersUrl } from '@/lib/featuredEvent'
 import {
   loadAgenda,
   loadApiDocs,
+  loadChooseWorkspace,
   loadKillMySaas,
   loadOpenSource,
   loadComms,
@@ -20,6 +21,7 @@ import {
   loadOnboarding,
   loadPipeline,
   loadPortal,
+  loadPortalChoose,
   loadPublicForm,
   loadPublicSchedule,
   loadPublicSpeakers,
@@ -42,6 +44,9 @@ import { Toaster } from '@/ui/toaster'
 
 const LazyAgenda = lazy(() => loadAgenda().then(({ Agenda }) => ({ default: Agenda })))
 const LazyApiDocs = lazy(() => loadApiDocs().then(({ ApiDocs }) => ({ default: ApiDocs })))
+const LazyChooseWorkspace = lazy(() =>
+  loadChooseWorkspace().then(({ ChooseWorkspace }) => ({ default: ChooseWorkspace })),
+)
 const LazyKillMySaas = lazy(() =>
   loadKillMySaas().then(({ KillMySaas }) => ({ default: KillMySaas })),
 )
@@ -76,6 +81,9 @@ const LazyPipeline = lazy(() =>
   loadPipeline().then(({ Pipeline }) => ({ default: Pipeline })),
 )
 const LazyPortal = lazy(() => loadPortal().then(({ Portal }) => ({ default: Portal })))
+const LazyPortalChoose = lazy(() =>
+  loadPortalChoose().then(({ PortalChoose }) => ({ default: PortalChoose })),
+)
 const LazyPublicForm = lazy(() =>
   loadPublicForm().then(({ PublicForm }) => ({ default: PublicForm })),
 )
@@ -296,7 +304,11 @@ export default function App() {
         <Route path="/sourcing" element={<Navigate to="/pipeline" replace />} />
         <Route path="/prospects" element={<Navigate to="/pipeline" replace />} />
 
-        {/* Magic-link surfaces: redeem the token, then run cookie-only. */}
+        {/* Magic-link surfaces: redeem the token, then run cookie-only.
+            /portal/choose is declared first so it can never be swallowed by the
+            :token pattern — a speaker whose link covers several conferences
+            picks one here before the portal session cookie exists. */}
+        <Route path="/portal/choose" element={<DeferredPage fullPage><LazyPortalChoose /></DeferredPage>} />
         <Route path="/portal/:token" element={<DeferredPage fullPage><LazyPortal /></DeferredPage>} />
         <Route path="/portal" element={<DeferredPage fullPage><LazyPortal /></DeferredPage>} />
         <Route path="/review/:token" element={<DeferredPage fullPage><LazyReview /></DeferredPage>} />
@@ -307,6 +319,21 @@ export default function App() {
             <Route path="/sign-up/*" element={<SignUpPage />} />
           </>
         )}
+
+        {/* Workspace picker: authed, but outside the shell — you can't draw the
+            rail before you know which org it belongs to. It redirects straight
+            through for anyone with a single membership, so no organizer ever
+            pays a click for a choice they don't have. */}
+        <Route
+          path="/choose-workspace"
+          element={
+            <RequireAuth>
+              <DeferredPage fullPage>
+                <LazyChooseWorkspace />
+              </DeferredPage>
+            </RequireAuth>
+          }
+        />
 
         {/* Organizer app. */}
         <Route

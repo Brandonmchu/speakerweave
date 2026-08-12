@@ -12,7 +12,17 @@ import {
 
 import { agentKeys, getAgentCapabilities } from '@/agent/lib/agentApi'
 import { CLERK_ENABLED, ClerkUserIdentity, type AuthUserIdentity } from '@/auth/clerk'
-import { apiGet, clearToken, peekToken, unwrapList, type EventSummary } from '@/lib/api'
+import {
+  apiGet,
+  clearToken,
+  listMyOrganizations,
+  organizationKeys,
+  peekToken,
+  setToken,
+  switchOrganization,
+  unwrapList,
+  type EventSummary,
+} from '@/lib/api'
 import { createEvent } from '@/lib/adminApi'
 import { fromDateInput, localTimezone, timezoneOptions } from '@/lib/eventDateTime'
 import { FEATURED_EVENT_SLUG } from '@/lib/featuredEvent'
@@ -174,6 +184,14 @@ function sessionIdentity(claims: SessionClaims): AuthUserIdentity {
   return { id, name, workspace }
 }
 
+/**
+ * The rail foot: who you are, which workspace you're in, and — for someone who
+ * organizes for more than one company — the switch between them.
+ *
+ * The org list is strictly additive. One membership (or a backend that can't
+ * answer) leaves this menu exactly as it has always been: identity, then sign
+ * out. There is no empty "Workspaces" heading to explain away.
+ */
 function RailAccount({
   identity,
   onSignOut,
@@ -181,6 +199,38 @@ function RailAccount({
   identity: AuthUserIdentity
   onSignOut: () => void
 }) {
+  const queryClient = useQueryClient()
+  const organizationsQuery = useQuery({
+    queryKey: organizationKeys.mine,
+    queryFn: listMyOrganizations,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+  const organizations = organizationsQuery.data ?? []
+  const canSwitch = organizations.length > 1
+
+  const switchWorkspace = useMutation({
+    mutationFn: (orgId: string) => switchOrganization(orgId),
+    onSuccess: (token, orgId) => {
+      setToken(token)
+      // The whole cache — events, submissions, speakers — belongs to the org we
+      // just left. Drop it so every panel refetches under the new token instead
+      // of reloading the page out from under the operator.
+      queryClient.removeQueries()
+      const target = organizations.find((candidate) => candidate.org_id === orgId)
+      toast({
+        title: 'Workspace switched',
+        description: target ? `You're now in ${target.name}.` : undefined,
+      })
+    },
+    onError: (error: Error) =>
+      toast({
+        variant: 'destructive',
+        title: "Couldn't switch workspace",
+        description: error.message,
+      }),
+  })
+
   return (
     <div className="shrink-0 px-3 pb-4">
       <DropdownMenu>
@@ -198,11 +248,43 @@ function RailAccount({
             <ChevronsUpDown className="h-3 w-3 shrink-0 text-placeholder" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="top" sideOffset={6} className="w-48">
+        <DropdownMenuContent
+          align="start"
+          side="top"
+          sideOffset={6}
+          className={canSwitch ? 'w-56' : 'w-48'}
+        >
           <DropdownMenuLabel>
             <span className="block truncate text-foreground">{identity.name}</span>
             <span className="block truncate text-[10px] font-normal text-muted-foreground">{identity.workspace}</span>
           </DropdownMenuLabel>
+          {canSwitch && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="section-label">Workspaces</DropdownMenuLabel>
+              {organizations.map((organization) => (
+                <DropdownMenuItem
+                  key={organization.org_id}
+                  className="gap-2.5"
+                  disabled={switchWorkspace.isPending}
+                  onSelect={() => {
+                    if (!organization.is_current) switchWorkspace.mutate(organization.org_id)
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+                  <span className="shrink-0 font-mono text-[10px] text-placeholder">
+                    {organization.events}
+                  </span>
+                  {organization.is_current && (
+                    <>
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="sr-only">Current workspace</span>
+                    </>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onSignOut} className="gap-2">
             <LogOut className="h-4 w-4" />

@@ -82,18 +82,20 @@ def auth_headers():
 
 @pytest.fixture(autouse=True)
 def _org_cache_warm():
-    """Pre-warm auth's org cache.
+    """Pre-warm auth's org/membership cache.
 
-    `get_current_user_and_org` lazily upserts the org on first sight, which in
-    a test means a doomed round trip to a Supabase that is not running. The
-    upsert is best-effort in production too, so skipping it changes nothing
-    the tests are about.
+    `get_current_user_and_org` lazily upserts the org AND the caller's
+    membership on first sight, which in a test means a doomed round trip to a
+    Supabase that is not running. Both writes are best-effort in production
+    too, so skipping them changes nothing the tests are about. The cache is
+    keyed by (org_id, user_id); a test that wants the backfill to run deletes
+    its key (see test_multi_org.py).
     """
     import time
 
     import auth
 
-    auth._ORG_SEEN[TEST_ORG_ID] = time.monotonic()
+    auth._ORG_SEEN[(TEST_ORG_ID, TEST_USER_ID)] = time.monotonic()
     yield
 
 

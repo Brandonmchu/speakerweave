@@ -4,20 +4,29 @@ import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Mail } from 'lucide-react'
 
-import { requestManageLink } from '@/lib/api'
-import { CFP_FORM_SLUG } from '@/lib/featuredEvent'
+import { requestPortalSignIn } from '@/lib/api'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** Passwordless entry to the token-scoped speaker account. */
+/**
+ * Passwordless entry to the speaker's account — across organizations.
+ *
+ * This page used to be hardcoded to one event's CFP form. It now asks the
+ * cross-org endpoint, which mails a link covering every conference the address
+ * appears on; the speaker picks one at /portal/choose.
+ *
+ * The confirmation below is deliberately the same words in every case and never
+ * echoes the server's message: nothing on this screen may reveal whether an
+ * email address is known to us.
+ */
 export function SpeakerSignin() {
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const mutation = useMutation({
-    mutationFn: (value: string) => requestManageLink(CFP_FORM_SLUG, value),
+    mutationFn: (value: string) => requestPortalSignIn(value),
   })
 
   function submit(event: FormEvent) {

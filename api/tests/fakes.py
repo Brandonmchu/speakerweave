@@ -46,8 +46,10 @@ PATCH_TARGET_MODULES = (
     "services.magic_links",
     "services.onboarding",
     "services.oauth",
+    "services.org_membership",
     "services.org_scope",
     "services.portal",
+    "services.portal_signin",
     "services.session_revisions",
     "services.slack_bridge",
     "services.slugs",
@@ -110,6 +112,7 @@ class FakeQuery:
         self.orders: list[tuple[str, bool]] = []
         self.columns = "*"
         self.strict_columns = strict_columns
+        self.ignore_duplicates = False
 
     # -- builders ----------------------------------------------------------
     def select(self, *args, **_kwargs):
@@ -163,8 +166,11 @@ class FakeQuery:
         self.op, self.payload = "update", payload
         return self
 
-    def upsert(self, payload, on_conflict: str | None = None):
+    def upsert(self, payload, on_conflict: str | None = None, ignore_duplicates: bool = False):
         self.op, self.payload, self.on_conflict = "upsert", payload, on_conflict
+        # PostgREST's `resolution=ignore-duplicates`: INSERT … ON CONFLICT DO
+        # NOTHING. An existing row is left exactly as it was.
+        self.ignore_duplicates = ignore_duplicates
         return self
 
     def delete(self):
@@ -220,6 +226,8 @@ class FakeQuery:
                     (r for r in rows if all(r.get(k) == record.get(k) for k in keys)), None
                 )
                 if existing:
+                    if self.ignore_duplicates:
+                        continue  # ON CONFLICT DO NOTHING: no write, no row back
                     existing.update(record)
                     written.append(dict(existing))
                 else:
