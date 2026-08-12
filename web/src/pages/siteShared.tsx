@@ -16,6 +16,7 @@ import {
   featuredScheduleUrl,
   featuredSpeakersUrl,
 } from '@/lib/featuredEvent'
+import { CLERK_ENABLED } from '@/auth/clerk'
 import { BrandMark } from '@/ui/brand'
 
 /** `--d` (reveal delay) and `--w` (bar width) ride on style attributes. */
@@ -26,6 +27,14 @@ export function vars(values: Record<string, string>): CSSProperties {
 export const REPO_URL = 'https://github.com/Brandonmchu/speakerweave'
 export const DOCS_URL = 'https://speaker-weave.mintlify.site'
 export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
+
+/**
+ * Where an organizer signs in to their own workspace. Clerk owns this when it
+ * is configured; a self-hosted instance without it issues a dev token instead,
+ * and `/sign-in` does not exist there — linking to it unconditionally would
+ * bounce a self-hoster back to the landing page.
+ */
+export const ORGANIZER_SIGNIN_URL = CLERK_ENABLED ? '/sign-in' : '/dev-login'
 
 /** Crawlable links to the public conference surfaces. Plain in-app routes so a
  *  browser agent reading `href`s can discover every public page. */
@@ -204,8 +213,14 @@ export function SiteNav({ badge }: { badge?: string }) {
         <Link to="/killmysaas" className="navflag">
           Kill My SaaS
         </Link>
-        <Link to="/speaker-signin" className="accent">
+        <Link to="/speaker-signin" className="navmore">
           Speaker sign in
+        </Link>
+        <Link to={ORGANIZER_SIGNIN_URL} className="navcta">
+          {/* "Organizer" disambiguates it from the speaker link beside it; on a
+              phone that link is hidden, so the qualifier is dead weight. */}
+          <span className="navcta-full">Organizer sign in</span>
+          <span className="navcta-short">Sign in</span>
         </Link>
       </div>
     </nav>
@@ -226,6 +241,7 @@ export function SiteFooter() {
           ))}
           <Link to={DEVELOPERS_URL}>Developers</Link>
           <Link to="/speaker-signin">Speaker sign in</Link>
+          <Link to={ORGANIZER_SIGNIN_URL}>Organizer sign in</Link>
           <Link to="/open-source">Open source</Link>
           <a href={LICENSE_URL}>License</a>
           <a href={DOCS_URL}>Docs</a>
