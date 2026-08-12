@@ -150,6 +150,7 @@ export function CodeBlock({ code, label = 'Copy code' }: { code: string; label?:
 const PRODUCT_MENU = [
   { label: 'Organizer workspace', to: '/demo', hint: 'The seeded admin demo' },
   ...EXPLORE,
+  { label: 'Open it as any role', to: '/judge', hint: 'Organizer, reviewer or speaker' },
 ]
 
 /** Everything for people who want to read, extend, or self-host it. */

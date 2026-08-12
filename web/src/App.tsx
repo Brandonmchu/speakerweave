@@ -7,6 +7,7 @@ import {
   loadAgenda,
   loadApiDocs,
   loadChooseWorkspace,
+  loadJudge,
   loadKillMySaas,
   loadOpenSource,
   loadComms,
@@ -50,6 +51,7 @@ const LazyChooseWorkspace = lazy(() =>
 const LazyKillMySaas = lazy(() =>
   loadKillMySaas().then(({ KillMySaas }) => ({ default: KillMySaas })),
 )
+const LazyJudge = lazy(() => loadJudge().then(({ Judge }) => ({ default: Judge })))
 const LazyOpenSource = lazy(() =>
   loadOpenSource().then(({ OpenSource }) => ({ default: OpenSource })),
 )
@@ -271,6 +273,15 @@ export default function App() {
           element={
             <DeferredPage fullPage>
               <LazyOpenSource />
+            </DeferredPage>
+          }
+        />
+        {/* One URL to hand somebody evaluating this: every door, in one place. */}
+        <Route
+          path="/judge"
+          element={
+            <DeferredPage fullPage>
+              <LazyJudge />
             </DeferredPage>
           }
         />

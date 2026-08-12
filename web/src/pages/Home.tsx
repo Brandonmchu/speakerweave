@@ -30,6 +30,7 @@ import {
 } from '@/lib/programApi'
 import { avatarGradient, stableHash } from '@/ui/avatar'
 import { AgentSurfaceDemo, type AgentSurfaceId } from '@/pages/agentDemos'
+import { DemoDoors, useDemoEntry } from '@/pages/demoDoors'
 import { AppWindow, type ScreenKey } from '@/pages/appWindow'
 import { AttendeeWindow, type AttendeeViewKey } from '@/pages/attendeeWindow'
 import {
@@ -554,46 +555,8 @@ function SpeakerWall() {
 }
 
 export function Home() {
-  const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { loading, error, enterDemo, enterAs } = useDemoEntry()
   const mcpEndpoint = `${window.location.origin}/mcp`
-
-  async function enterDemo() {
-    if (loading) return
-    setError(null)
-    setLoading(true)
-    try {
-      const token = await fetchDemoToken()
-      setToken(token)
-      navigate('/dashboard', { replace: true })
-    } catch {
-      setError("Couldn't start the demo. Give it a moment and try again.")
-      setLoading(false)
-    }
-  }
-
-  /**
-   * Open the demo as somebody other than the organizer.
-   *
-   * A reviewer's scorecard and a speaker's portal are real, shipped surfaces
-   * that nobody could reach without an emailed link — so a visitor never saw
-   * two thirds of the product. This asks the API for the same link an organizer
-   * would have sent, and follows it.
-   */
-  async function enterAs(persona: Exclude<DemoPersona, 'organizer'>) {
-    if (loading) return
-    setError(null)
-    setLoading(true)
-    try {
-      const entry = await fetchDemoEntry(persona)
-      if (entry.kind !== 'path') throw new Error('Unexpected demo entry')
-      navigate(entry.path, { replace: true })
-    } catch {
-      setError("Couldn't open that view of the demo. Give it a moment and try again.")
-      setLoading(false)
-    }
-  }
 
   return (
     <SiteShell>
@@ -634,20 +597,7 @@ export function Home() {
               reviewer's scorecard and a speaker's portal are entered by emailed
               link, so nobody could see them without being invited — these ask
               the API for the same link an organizer would have sent. */}
-          <div className="doors" aria-label="Open the demo as">
-            <button type="button" onClick={enterDemo} disabled={loading}>
-              <b>Organizer</b>
-              <span>Run the whole program</span>
-            </button>
-            <button type="button" onClick={() => enterAs('reviewer')} disabled={loading}>
-              <b>Reviewer</b>
-              <span>Score an open round</span>
-            </button>
-            <button type="button" onClick={() => enterAs('speaker')} disabled={loading}>
-              <b>Speaker</b>
-              <span>Your talk and content</span>
-            </button>
-          </div>
+          <DemoDoors enterAs={enterAs} loading={loading} />
         </div>
         <SpeakerWall />
       </section>

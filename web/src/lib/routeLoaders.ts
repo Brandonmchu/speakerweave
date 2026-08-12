@@ -42,4 +42,5 @@ export function preloadOrganizerRoute(path: string): void {
   void organizerRouteLoaders[path]?.()
 }
 export const loadKillMySaas = () => import('@/pages/KillMySaas')
+export const loadJudge = () => import('@/pages/Judge')
 export const loadOpenSource = () => import('@/pages/OpenSource')
