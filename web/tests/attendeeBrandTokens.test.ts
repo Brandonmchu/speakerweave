@@ -12,13 +12,15 @@ import { describe, expect, it } from 'vitest'
 const CSS = readFile('src/styles/site-attendee.css', 'utf8')
 
 describe('attendee window brand tokens', () => {
-  // In a real engine a transitioned `background` SHORTHAND holding a var()
-  // stays pending-substitution: the minified build kept painting the default
-  // and every preset looked identical, while dev looked fine.
-  it('transitions the canvas by longhand, never the background shorthand', async () => {
+  // A property whose value is a var() does not re-resolve when only that custom
+  // property changes while a transition is declared on it — shorthand OR
+  // longhand. The minified build kept painting the default white and every
+  // preset looked identical; dev looked fine, which is how it reached prod.
+  // So: nothing brand-controlled may sit behind a background transition.
+  it('never transitions a background whose value is a brand token', async () => {
     const css = await CSS
     expect(css).toContain('background-color: var(--swp-paper)')
-    expect(css).not.toMatch(/transition:[^;]*\bbackground\s+[\d.]/)
+    expect(css).not.toMatch(/transition:[^;]*background/)
   })
 
   // Pin only the block of an inverted chip and a light-ink brand paints white

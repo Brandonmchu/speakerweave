@@ -32,14 +32,14 @@
   --swp-accent-on: #fff;
   overflow: hidden;
   border-radius: 14px;
-  /* Longhands, deliberately. Transitioning the `background` SHORTHAND when its
-     value is a var() leaves the property pending-substitution: minified builds
-     keep painting the default and the preset never lands. */
+  /* No transition on either of these, deliberately. A property whose value is a
+     var() does not re-resolve when only that custom property changes while a
+     transition is declared on it — shorthand or longhand — so the canvas kept
+     painting the default white and every preset looked identical in the
+     minified build. The brand switch snaps; `.swp-page` already carries the
+     motion. */
   background-color: var(--swp-paper);
   color: var(--swp-ink);
-  transition:
-    background-color 0.35s var(--sw-ease),
-    color 0.35s var(--sw-ease);
   box-shadow:
     0 1px 2px rgba(28, 26, 23, 0.07),
     0 26px 64px rgba(28, 26, 23, 0.16);
@@ -125,9 +125,7 @@
   background-color: transparent;
   cursor: pointer;
   color: var(--swp-ink2);
-  transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+  transition: color 0.18s ease;
 }
 .sw-site .swp-head nav button:hover {
   background-color: var(--swp-tint);
@@ -450,9 +448,7 @@
   color: var(--swp-ink2);
   background-color: transparent;
   box-shadow: inset 0 0 0 1px var(--swp-line);
-  transition:
-    background-color 0.18s ease,
-    color 0.18s ease;
+  transition: color 0.18s ease;
 }
 .sw-site .swp-brands button:hover {
   background-color: var(--swp-tint);
