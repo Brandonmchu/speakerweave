@@ -1,0 +1,105 @@
+---
+title: Configuration
+description: Every environment variable, grouped by the feature it enables — what this implementation uses, and what you can point at instead.
+---
+
+SpeakerWeave is configured entirely through environment variables. The core app needs only the database block; every other layer — AI, email delivery, Slack, Airtable, Clerk — activates when its keys are present and stays dormant otherwise. Copy the templates and fill in what you need:
+
+```bash
+cp api/.env.example api/.env
+cp web/.env.example web/.env
+```
+
+## Core: database and tokens
+
+Required for everything. This implementation uses **Supabase** (Postgres + Storage over PostgREST), but any compatible PostgREST origin works — the API talks to `SUPABASE_URL` through one data layer.
+
+| Variable | Purpose |
+|---|---|
+| `SUPABASE_URL` | Supabase project / PostgREST origin |
+| `SUPABASE_SERVICE_API_KEY` | Service-role key, used **only** by the API — never exposed to the browser |
+| `SUPABASE_JWT_SECRET` | Long random HS256 secret that verifies organizer JWTs and mints dev/demo tokens |
+| `PORTAL_SESSION_SECRET` | Separate secret for speaker/reviewer/submitter session cookies (falls back to `SUPABASE_JWT_SECRET`) |
+
+## URLs and CORS
+
+| Variable | Purpose |
+|---|---|
+| `CORS_ALLOWED_ORIGINS` | Explicit comma-separated browser origins; wildcards are rejected |
+| `FRONTEND_URL` | Public web-app origin used in magic links |
+| `PUBLIC_APP_URL` | Canonical public web origin for MCP OAuth discovery and redirects |
+| `PUBLIC_API_URL` | Public origin of the API, used for absolute calendar-invite links |
+| `VITE_BACKEND_URL` (web) | Backend origin baked at build time; leave empty for same-origin proxying |
+
+## AI: the agent, triage, and every AI surface
+
+The in-app Ask agent, the Slack agent, AI triage, and title generation all run from the same provider configuration. **One key is enough** — bring OpenAI or Anthropic:
+
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Enables the OpenAI lane (OpenAI Agents SDK) |
+| `ANTHROPIC_API_KEY` | Enables the Anthropic lane, plus AI triage |
+| `ASSISTANT_PROVIDER` | `openai` or `anthropic` — explicit choice when both keys exist (OpenAI wins by default) |
+| `ASSISTANT_OPENAI_MODEL` | OpenAI-lane model (default `gpt-5.6-luna`) |
+| `ASSISTANT_ENABLED` | Set `false` to switch every agent surface off even with keys present |
+
+<Note>
+**OpenAI-compatible gateways** (OpenRouter, LiteLLM, a self-hosted proxy): the OpenAI client honors the standard `OPENAI_BASE_URL` environment variable, so point it at your gateway and set `ASSISTANT_OPENAI_MODEL` to the gateway's model slug. The OpenAI lane speaks the **Responses API**, so choose a gateway/model that supports it — otherwise use the Anthropic lane, or swap the model loop in `api/agent/runtime_openai.py` (the documented seam) while keeping `agent/service.run_turn`.
+</Note>
+
+With **no** provider key: the Ask pane and Slack agent stay hidden/dormant, and submission triage falls back to reviewer-score heuristics. The product works fully without AI.
+
+## Email delivery
+
+This implementation uses **Resend**; the seam is one `send_email` function in `api/services/mailer.py` — implement it against any provider.
+
+| Variable | Purpose |
+|---|---|
+| `RESEND_API_KEY` | Enables real delivery; **blank writes local `.eml` files** to `OUTBOX_DIR` instead |
+| `MAIL_FROM_NAME` / `MAIL_FROM_EMAIL` | From header (the address must be verified with your provider) |
+| `INVITE_ORGANIZER_EMAIL` | Calendar ORGANIZER address (falls back to `MAIL_FROM_EMAIL`) |
+| `OUTBOX_WORKER_ENABLED` | Starts the in-process outbox drain loop |
+| `AUTO_REMINDERS_ENABLED` / `AUTO_REMINDERS_INTERVAL_HOURS` | Automatic overdue-task reminder sweeps |
+
+## Auth (organizer sign-in)
+
+This implementation uses **Clerk**, but the API only ever verifies an HS256 JWT carrying an `org_id` claim — any issuer that signs with `SUPABASE_JWT_SECRET` works, and the dev-token flow needs no external auth at all.
+
+| Variable | Purpose |
+|---|---|
+| `VITE_CLERK_PUBLISHABLE_KEY` (web) | Enables Clerk in the SPA, paired with a Clerk `supabase` JWT template |
+
+## Slack agent
+
+Full setup in [Slack agent](/ai/slack) — the manifest preconfigures the app; the API needs:
+
+| Variable | Purpose |
+|---|---|
+| `SLACK_SIGNING_SECRET` | Verifies the raw body of Events + Interactivity requests |
+| `SLACK_BOT_TOKEN` | Posts replies, approval cards, and status |
+| `SLACK_DEFAULT_ORG` | The organization this workspace is bound to |
+| An agent provider key | The Slack agent runs on the same AI configuration above |
+
+## Airtable
+
+No environment variables in normal use — credentials are **per-organization** in Settings → Integrations. `AIRTABLE_API_KEY` / `AIRTABLE_BASE_ID` exist only as a development fallback for the demo org.
+
+## MCP connectors
+
+| Variable | Purpose |
+|---|---|
+| `EVERY_MCP_URL` | Optional preset endpoint in the connector catalog; custom servers are added per-organization in Settings |
+| `PUBLIC_WEB_URL` | Optional extra origin accepted during MCP OAuth registration |
+
+## Operations
+
+| Variable | Purpose |
+|---|---|
+| `ENVIRONMENT` | `development` (reload, local CORS) or `production` (JSON logs, workers) |
+| `RATE_LIMIT_ENABLED` | SlowAPI limits on public endpoints |
+| `WORKERS` / `WEB_CONCURRENCY` | Uvicorn worker count (rate limits divide by it) |
+| `LOG_LEVEL` / `PORT` | Standard service knobs |
+
+<Note>
+The in-process permission gate for agent approvals is designed for a single API process. Keep `WORKERS=1`, or move the pending-permission registry to the database before scaling out — see [chat agent](/ai/chat-agent).
+</Note>

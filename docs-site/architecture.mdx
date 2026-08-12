@@ -1,0 +1,38 @@
+---
+title: Tech stack & swap points
+description: What this implementation is built on, and what you can use instead — every layer sits behind a deliberate seam.
+---
+
+SpeakerWeave is a complete reference implementation, not a framework: it ships with concrete choices at every layer so you can deploy it as-is, and each choice sits behind a boundary you can re-point without touching product code.
+
+```text
+React 19 + Vite + Tailwind SPA ── nginx / Cloudflare Worker
+        │  /api  /public  /mcp
+FastAPI (Python 3.12) ── one org-scoped data layer ── Supabase Postgres + Storage
+        ├─ outbox mailer ────────── Resend (or .eml files)
+        ├─ agent runtime ────────── OpenAI Agents SDK ─or─ Anthropic
+        │    └─ shared by in-app Ask, Slack, MCP, CLI
+        └─ integrations ─────────── Slack · Airtable · MCP connectors
+```
+
+## The swap table
+
+| Layer | This implementation uses | Use instead |
+|---|---|---|
+| **Database & storage** | Supabase Postgres + Storage via PostgREST (`supabase-py`) | Any Postgres with a PostgREST-compatible origin, or replace the data-layer client and storage adapter. Config: `SUPABASE_URL`, `SUPABASE_SERVICE_API_KEY`. |
+| **Auth** | Clerk in the SPA, verified as an HS256 JWT in FastAPI | Any issuer that supplies an `org_id` claim signed with `SUPABASE_JWT_SECRET` — the API never talks to Clerk. The dev-token flow needs no auth provider at all. |
+| **Email** | Resend behind a single `send_email` function (`api/services/mailer.py`) | Implement that one function against SES, Postmark, SMTP — anything. Without a key, mail writes local `.eml` files so flows stay testable. |
+| **AI provider** | OpenAI Agents SDK (default) or the Anthropic SDK — one runtime seam each | Either vendor key alone; an OpenAI-compatible gateway via `OPENAI_BASE_URL`; or swap the model loop in `api/agent/runtime_openai.py` / `runtime_anthropic.py` while keeping `agent/service.run_turn`, its event protocol, tools, threads, and permission gate. No key: AI surfaces stay dormant, product works fully. |
+| **Hosting** | Two Railway services (uvicorn API + nginx SPA) with a ready-made Cloudflare Workers web tier | Any Python host + any static host that can proxy `/api`, `/public`, and `/mcp` to the API. Both reference configs ship in-repo ([hosting](/hosting)). |
+| **Slack** | Signed Events API + Interactivity transport over the shared agent runtime | Optional entirely. If you keep it, it must remain a thin transport over `agent/service.run_turn` — same endpoint for events and approval buttons. |
+| **Airtable** | Per-organization sync configured in the product UI | Optional entirely; replace at its service boundary. |
+
+## The invariants worth keeping
+
+Whatever you swap, three seams carry the architecture:
+
+1. **One org-scoped data layer.** Every query passes an `org_id` resolved from the verified token — never from client input. Tools, routes, and integrations all inherit isolation from this.
+2. **One agent turn service.** `api/agent/service.run_turn` owns the loop: history, prompt, tools, permission gate, persistence. The in-app pane is an SSE adapter over it; Slack is an events adapter; the MCP server and CLI hit the same tool registry. Add a surface by adding an adapter, not another brain.
+3. **One outbox.** All mail is queued rows drained by a worker — retries, idempotency, and suppression live in one place.
+
+For the deeper agent architecture (events, permissions, threads, and how to remove the whole thing cleanly), see [chat agent](/ai/chat-agent). For every variable these layers read, see [configuration](/configuration).

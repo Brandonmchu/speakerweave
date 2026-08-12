@@ -41,7 +41,7 @@
         "groups": [
           {
             "group": "Get started",
-            "pages": ["introduction", "quickstart", "hosting"]
+            "pages": ["introduction", "quickstart", "configuration", "architecture", "hosting"]
           },
           {
             "group": "AI surfaces",
