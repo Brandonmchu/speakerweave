@@ -136,7 +136,7 @@ python -m scripts.seed_demo seed
 python scripts/mint_dev_token.py
 ```
 
-`seed` resets and repopulates the known demo rows in `org_dev`; do not use that organization for production data. The second command prints a short-lived organizer JWT for `/dev-login`. You can also use `/demo`, which obtains the same kind of token from the deliberately public `org_dev` demo endpoint — and the landing page offers reviewer and speaker demo doors minted with the same magic-link machinery (`/public/demo-entry/{organizer|reviewer|speaker}`).
+`seed` resets and repopulates the known demo rows in `org_dev`; do not use that organization for production data. For the full multi-event demo workspace (four extra conferences at different lifecycle stages), run `python -m scripts.seed_aie_events full` instead — it reseeds the flagship event and then the extras in one pass. The second command prints a short-lived organizer JWT for `/dev-login`. You can also use `/demo`, which obtains the same kind of token from the deliberately public `org_dev` demo endpoint — and the landing page offers reviewer and speaker demo doors minted with the same magic-link machinery (`/public/demo-entry/{organizer|reviewer|speaker}`).
 
 ### 5. Run the API and web app
 

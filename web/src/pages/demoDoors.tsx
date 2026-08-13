@@ -64,6 +64,13 @@ export function useDemoEntry() {
     try {
       const token = await fetchDemoToken()
       setToken(token)
+      // The demo workspace manages several events; the dashboard defaults to
+      // the latest-starting one, but the door should always open on the fully
+      // populated flagship. Key mirrors ACTIVE_EVENT_KEY in shell/AppShell.tsx.
+      window.localStorage.setItem(
+        'dais.active-event-id',
+        '11111111-1111-1111-1111-111111111111',
+      )
       navigate('/dashboard')
     } catch {
       setError("Couldn't start the demo. Give it a moment and try again.")
