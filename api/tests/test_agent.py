@@ -350,6 +350,112 @@ async def test_context_search_is_org_scoped_and_type_filtered(fake_db):
     assert await context_search.search_context(TEST_ORG_ID, "a", None) == []
 
 
+async def test_context_search_browses_a_picked_type_without_a_query(fake_db):
+    fake_db.seed(
+        "sessions",
+        {
+            "id": "scheduled",
+            "org_id": TEST_ORG_ID,
+            "friendly_id": "SESS-1",
+            "title": "Opening Keynote",
+            "status": "accepted",
+            "starts_at": "2026-05-01T09:00:00Z",
+        },
+        {
+            "id": "unscheduled",
+            "org_id": TEST_ORG_ID,
+            "friendly_id": "SESS-2",
+            "title": "Waiting On A Slot",
+            "status": "pending",
+        },
+        {
+            "id": "theirs",
+            "org_id": OTHER_ORG_ID,
+            "friendly_id": "SESS-3",
+            "title": "Someone Else's Keynote",
+            "status": "accepted",
+            "starts_at": "2026-05-01T09:00:00Z",
+        },
+    )
+    # Drilling into a category is the whole query — an empty one lists the type.
+    assert await context_search.search_context(TEST_ORG_ID, "", "session") == [
+        {
+            "type": "session",
+            "id": "scheduled",
+            "display": "Opening Keynote",
+            "sublabel": "accepted",
+        }
+    ]
+    submissions = await context_search.search_context(TEST_ORG_ID, "", "submission")
+    assert [row["id"] for row in submissions] == ["scheduled", "unscheduled"]
+    # A single character is a real filter once the type is picked.
+    narrowed = await context_search.search_context(TEST_ORG_ID, "w", "submission")
+    assert [row["id"] for row in narrowed] == ["unscheduled"]
+    # The unscoped fan-out keeps its floor.
+    assert await context_search.search_context(TEST_ORG_ID, "", None) == []
+    assert await context_search.search_context(TEST_ORG_ID, "", "nope") == []
+
+
+async def test_context_search_separates_roster_speakers_from_crm_contacts(fake_db):
+    fake_db.seed(
+        "contacts",
+        {
+            "id": "roster-1",
+            "org_id": TEST_ORG_ID,
+            "first_name": "Grace",
+            "last_name": "Lin",
+            "email": "grace@finetune.dev",
+            "company_name": "FineTune Labs",
+        },
+        # The same human on a second event's roster is not a second speaker.
+        {
+            "id": "roster-2",
+            "org_id": TEST_ORG_ID,
+            "first_name": "Grace",
+            "last_name": "Lin",
+            "email": "Grace@FineTune.dev",
+            "company_name": "FineTune Labs",
+        },
+    )
+    fake_db.seed(
+        "directory_people",
+        {
+            "id": "crm-1",
+            "org_id": TEST_ORG_ID,
+            "first_name": "Grace",
+            "last_name": "Lin",
+            "email": "grace@finetune.dev",
+            "company_name": "FineTune Labs",
+        },
+        {
+            "id": "crm-merged",
+            "org_id": TEST_ORG_ID,
+            "first_name": "Grace",
+            "last_name": "Lin",
+            "email": "g.lin@finetune.dev",
+            "company_name": "FineTune Labs",
+            "merged_into": "crm-1",
+        },
+    )
+    # `speaker` ids must be the roster ids the speaker tools resolve.
+    assert await context_search.search_context(TEST_ORG_ID, "grace", "speaker") == [
+        {
+            "type": "speaker",
+            "id": "roster-1",
+            "display": "Grace Lin",
+            "sublabel": "FineTune Labs",
+        }
+    ]
+    assert await context_search.search_context(TEST_ORG_ID, "grace", "contact") == [
+        {
+            "type": "contact",
+            "id": "crm-1",
+            "display": "Grace Lin",
+            "sublabel": "FineTune Labs",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("openai_key", "anthropic_key", "flag", "provider_env", "enabled", "provider"),
     [

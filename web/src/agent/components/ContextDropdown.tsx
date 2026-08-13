@@ -33,6 +33,10 @@ const CATEGORIES: Category[] = [
 
 const queryCache = new Map<string, ContextItem[]>()
 
+// The unscoped list fans out across every category, so it waits for a real
+// query. One picked category is a single indexed lookup — it browses instead.
+const MIN_UNSCOPED_QUERY = 2
+
 export function entityIcon(type: string): LucideIcon {
   return CATEGORIES.find((category) => category.type === type)?.icon ?? FileText
 }
@@ -58,15 +62,20 @@ export function ContextDropdown({
   const [loading, setLoading] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const trimmedQuery = query.trim()
+  const scoped = selectedType !== null
+  const browsing = scoped && trimmedQuery.length === 0
+  const canSearch = scoped || trimmedQuery.length >= MIN_UNSCOPED_QUERY
 
   useEffect(() => {
     if (!open) {
       setSelectedType(null)
       setResults([])
       setActiveIndex(0)
+      // Rows cached here would otherwise outlive an org switch or a sign-out.
+      queryCache.clear()
       return
     }
-    if (trimmedQuery.length < 2) {
+    if (!canSearch) {
       setResults([])
       setLoading(false)
       setActiveIndex(0)
@@ -81,30 +90,41 @@ export function ContextDropdown({
       return
     }
     const controller = new AbortController()
+    // The skeleton hides them, but Enter would still pick a row from the
+    // category the organizer just left.
+    setResults([])
+    setActiveIndex(0)
     setLoading(true)
-    const timer = window.setTimeout(() => {
-      searchAgentContext(trimmedQuery, selectedType, controller.signal)
-        .then((items) => {
-          queryCache.set(key, items)
-          setResults(items)
-          setActiveIndex(0)
-        })
-        .catch((error) => {
-          if ((error as { name?: string }).name !== 'AbortError') setResults([])
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setLoading(false)
-        })
-    }, 200)
+    const timer = window.setTimeout(
+      () => {
+        searchAgentContext(trimmedQuery, selectedType, controller.signal)
+          .then((items) => {
+            queryCache.set(key, items)
+            setResults(items)
+            setActiveIndex(0)
+          })
+          .catch(() => {
+            // An aborted request is a superseded keystroke, not an empty
+            // result — `request()` reports it as an ApiError, so ask the
+            // signal rather than the error.
+            if (!controller.signal.aborted) setResults([])
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) setLoading(false)
+          })
+      },
+      // Drilling into a category is one click, not a burst of keystrokes.
+      trimmedQuery ? 200 : 0,
+    )
     return () => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [open, selectedType, trimmedQuery])
+  }, [canSearch, open, selectedType, trimmedQuery])
 
   const visibleItems = useMemo(
-    () => (trimmedQuery.length === 0 && !selectedType ? CATEGORIES : results),
-    [results, selectedType, trimmedQuery.length],
+    () => (!scoped && trimmedQuery.length === 0 ? CATEGORIES : results),
+    [results, scoped, trimmedQuery.length],
   )
 
   useEffect(() => {
@@ -151,6 +171,12 @@ export function ContextDropdown({
 
   if (!open) return null
   const selectedLabel = CATEGORIES.find((category) => category.type === selectedType)?.label
+  const scopeName = selectedLabel?.toLowerCase() ?? 'context'
+  const emptyMessage = !scoped
+    ? 'No matching context.'
+    : browsing
+      ? `No ${scopeName} yet.`
+      : `No ${scopeName} match “${trimmedQuery}”.`
 
   return (
     <div
@@ -179,7 +205,7 @@ export function ContextDropdown({
         />
       </div>
       <div className="scrollbar-app max-h-[212px] overflow-y-auto p-1.5">
-        {trimmedQuery.length === 0 && !selectedType ? (
+        {!scoped && trimmedQuery.length === 0 ? (
           CATEGORIES.map((category, index) => {
             const Icon = category.icon
             return (
@@ -209,9 +235,9 @@ export function ContextDropdown({
               </button>
             )
           })
-        ) : trimmedQuery.length < 2 ? (
+        ) : !canSearch ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            Type at least 2 characters{selectedLabel ? ` to search ${selectedLabel.toLowerCase()}` : ''}.
+            Type at least {MIN_UNSCOPED_QUERY} characters.
           </p>
         ) : loading ? (
           <div className="space-y-2 px-2 py-2" aria-label="Searching context">
@@ -226,7 +252,7 @@ export function ContextDropdown({
             ))}
           </div>
         ) : results.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-muted-foreground">No matching context.</p>
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">{emptyMessage}</p>
         ) : (
           results.map((item, index) => {
             const Icon = entityIcon(item.type)

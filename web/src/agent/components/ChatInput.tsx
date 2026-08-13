@@ -130,11 +130,18 @@ export function ChatInput({
       const duplicate = contexts.some(
         (context) => context.type === item.type && context.id === item.id,
       )
-      if (!duplicate) insertContextBadge(editor, contextStart, contextQuery.length, item)
+      // The query can also be typed into the dropdown's own search box, which
+      // never reaches the editor. Measure what is actually after the "@" here
+      // instead of trusting the query length, or the badge finds no text node
+      // wide enough to replace and silently drops the pick.
+      const typed = (editor.textContent ?? '').slice(contextStart + 1)
+      const boundary = typed.search(/\s/)
+      const queryLength = boundary === -1 ? typed.length : boundary
+      if (!duplicate) insertContextBadge(editor, contextStart, queryLength, item)
       closeAtMode()
       window.setTimeout(sync, 0)
     },
-    [closeAtMode, contextQuery.length, contextStart, contexts, sync],
+    [closeAtMode, contextStart, contexts, sync],
   )
 
   const fadeAndRemove = useCallback(
