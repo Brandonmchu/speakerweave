@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -90,12 +90,14 @@ function stubFetch() {
   )
 }
 
-function renderSettings() {
+function renderSettings(path = '/settings/integrations') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <QueryClientProvider client={client}>
-        <SettingsPage />
+        <Routes>
+          <Route path="/settings/:section?" element={<SettingsPage />} />
+        </Routes>
       </QueryClientProvider>
     </MemoryRouter>
   )
@@ -217,7 +219,7 @@ describe('Settings integrations', () => {
         last_error: 'Authorization expired',
       },
     ]
-    renderSettings()
+    renderSettings('/settings/mcp')
 
     expect(await screen.findByTestId('mcp-connectors-card')).toBeInTheDocument()
     expect(await screen.findByTestId('mcp-connector-every')).toHaveTextContent('Preset')
@@ -230,7 +232,7 @@ describe('Settings integrations', () => {
   it('validates the add-custom dialog and shows a server 422 inline', async () => {
     agentEnabled = true
     mcpCreateError = 'MCP validation failed: tools/list rejected the credential'
-    renderSettings()
+    renderSettings('/settings/mcp')
     fireEvent.click(await screen.findByRole('button', { name: /add custom server/i }))
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sales CRM' } })
@@ -250,6 +252,15 @@ describe('Settings integrations', () => {
     renderSettings()
     expect(await screen.findByText('Airtable sync')).toBeInTheDocument()
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/agent/capabilities'), expect.anything()))
+    expect(screen.queryByRole('link', { name: 'MCP connectors' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('mcp-connectors-card')).not.toBeInTheDocument()
+    expect(calls.some((call) => call.url.endsWith('/api/agent/integrations/mcp'))).toBe(false)
+  })
+
+  it('bounces /settings/mcp back to the Event tab when the assistant is off', async () => {
+    agentEnabled = false
+    renderSettings('/settings/mcp')
+    expect(await screen.findByLabelText(/event name/i)).toBeInTheDocument()
     expect(screen.queryByTestId('mcp-connectors-card')).not.toBeInTheDocument()
     expect(calls.some((call) => call.url.endsWith('/api/agent/integrations/mcp'))).toBe(false)
   })

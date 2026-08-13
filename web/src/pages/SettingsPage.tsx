@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react'
-import { Link, Navigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
@@ -10,6 +17,7 @@ import {
   Plus,
   PlugZap,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 
@@ -132,21 +140,32 @@ export function slugError(value: string): string | null {
 }
 
 const SETTINGS_SECTIONS = [
-  { id: 'settings-event', label: 'Event' },
-  { id: 'settings-branding', label: 'Branding' },
-  { id: 'settings-vocabulary', label: 'Vocabulary' },
-  { id: 'settings-embed', label: 'Embed & share' },
-  { id: 'settings-mcp', label: 'MCP connectors' },
-  { id: 'settings-integrations', label: 'Integrations' },
-  { id: 'settings-api-tokens', label: 'API tokens' },
+  { slug: 'event', label: 'Event' },
+  { slug: 'branding', label: 'Branding' },
+  { slug: 'vocabulary', label: 'Vocabulary' },
+  { slug: 'embed', label: 'Embed & share' },
+  { slug: 'mcp', label: 'MCP connectors' },
+  { slug: 'integrations', label: 'Integrations' },
+  { slug: 'api-tokens', label: 'API tokens' },
 ] as const
 
-type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]['id']
+type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['slug']
+
+function isSettingsSection(value: string): value is SettingsSection {
+  return SETTINGS_SECTIONS.some((section) => section.slug === value)
+}
+
+/** Event is the landing section, so it owns the bare /settings URL. */
+function sectionPath(slug: SettingsSection): string {
+  return slug === 'event' ? '/settings' : `/settings/${slug}`
+}
 
 export function SettingsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { section } = useParams<{ section?: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>('settings-event')
   const eventsQuery = useQuery({
     queryKey: ['events'],
     queryFn: () => apiGet<EventSummary[]>('/api/events').then(unwrapList),
@@ -171,43 +190,29 @@ export function SettingsPage() {
     setSearchParams(next, { replace: true })
   }, [queryClient, searchParams, setSearchParams])
 
+  // Settings used to be one long page with #settings-* scroll anchors. Old
+  // bookmarks and shared links still say #settings-embed — land them on the
+  // subpage that replaced the anchor.
   useEffect(() => {
-    if (!event || typeof IntersectionObserver === 'undefined') return
-    const root = document.querySelector<HTMLElement>('main')
-    const sections = SETTINGS_SECTIONS.map(({ id }) => document.getElementById(id)).filter(
-      (section): section is HTMLElement => Boolean(section)
-    )
-    if (!root || sections.length === 0) return
+    const slug = location.hash.replace(/^#settings-/, '')
+    if (location.hash && isSettingsSection(slug)) {
+      navigate(sectionPath(slug), { replace: true })
+    }
+  }, [location.hash, navigate])
 
-    const visible = new Set<HTMLElement>()
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          const section = entry.target as HTMLElement
-          if (entry.isIntersecting) visible.add(section)
-          else visible.delete(section)
-        })
-        const next = [...visible].sort(
-          (a, b) => Math.abs(a.getBoundingClientRect().top) - Math.abs(b.getBoundingClientRect().top)
-        )[0]
-        if (next) setActiveSection(next.id as SettingsSectionId)
-      },
-      { root, rootMargin: '-72px 0px -65% 0px', threshold: [0, 0.01, 0.5] }
-    )
-    sections.forEach((section) => observer.observe(section))
-    return () => observer.disconnect()
-  }, [event, capabilitiesQuery.data?.assistant])
-
-  const scrollToSection = (id: SettingsSectionId) => {
-    const section = document.getElementById(id)
-    if (!section) return
-    setActiveSection(id)
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    window.history.replaceState(window.history.state, '', `#${id}`)
-  }
+  const assistantEnabled = capabilitiesQuery.data?.assistant === true
+  const active: SettingsSection = section && isSettingsSection(section) ? section : 'event'
+  const tabs = SETTINGS_SECTIONS.filter((tab) => tab.slug !== 'mcp' || assistantEnabled)
 
   if (!eventsQuery.isPending && !eventsQuery.error && !event) {
     return <Navigate to="/onboarding" replace />
+  }
+  if (section && !isSettingsSection(section)) {
+    return <Navigate to="/settings" replace />
+  }
+  // The MCP section only exists when the assistant is available.
+  if (active === 'mcp' && !capabilitiesQuery.isPending && !assistantEnabled) {
+    return <Navigate to="/settings" replace />
   }
 
   return (
@@ -223,26 +228,22 @@ export function SettingsPage() {
         aria-label="Settings sections"
         className="sticky top-0 z-30 mt-5 flex max-w-full items-center overflow-x-auto border-b border-border bg-card/95 backdrop-blur-sm scrollbar-hide"
       >
-        {SETTINGS_SECTIONS.map((section) => {
-          const active = activeSection === section.id
+        {tabs.map((tab) => {
+          const isActive = active === tab.slug
           return (
-            <a
-              key={section.id}
-              href={`#${section.id}`}
-              aria-current={active ? 'location' : undefined}
-              onClick={(event) => {
-                event.preventDefault()
-                scrollToSection(section.id)
-              }}
+            <Link
+              key={tab.slug}
+              to={sectionPath(tab.slug)}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
                 '-mb-px shrink-0 border-b px-3 py-2 text-[13px] transition-colors',
-                active
+                isActive
                   ? 'border-foreground text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               )}
             >
-              {section.label}
-            </a>
+              {tab.label}
+            </Link>
           )
         })}
       </nav>
@@ -266,17 +267,11 @@ export function SettingsPage() {
           <Skeleton className="h-48 w-full max-w-2xl" />
         </div>
       ) : (
-        <div className="mt-8 max-w-3xl space-y-10">
-          <EventCard event={event} />
-          <BrandingSection event={event} />
-          <section id="settings-vocabulary" className="scroll-mt-14">
-            <div className="border-b border-border pb-4">
-              <h2 className="text-[15px] font-medium text-foreground">Vocabulary</h2>
-              <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-                Tracks, rooms, formats, levels and tags used across your program.
-              </p>
-            </div>
-            <div className="mt-5 space-y-8">
+        <div className={cn('mt-6', active === 'branding' ? 'max-w-4xl' : 'max-w-3xl')}>
+          {active === 'event' && <EventCard event={event} />}
+          {active === 'branding' && <BrandingSection event={event} />}
+          {active === 'vocabulary' && (
+            <div className="space-y-6">
               <TaxonomySection
                 eventId={event.id}
                 kind="tracks"
@@ -311,22 +306,16 @@ export function SettingsPage() {
                 description="Free-form labels for filtering and reporting."
               />
             </div>
-          </section>
-          <EmbedSection event={event} />
-          {capabilitiesQuery.data?.assistant === true && <MCPConnectorsCard />}
-          <section id="settings-integrations" className="scroll-mt-14">
-            <div className="border-b border-border pb-4">
-              <h2 className="text-[15px] font-medium text-foreground">Integrations</h2>
-              <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-                Keep external tools connected to the current workspace.
-              </p>
-            </div>
-            <div className="mt-5 space-y-8">
+          )}
+          {active === 'embed' && <EmbedSection event={event} />}
+          {active === 'mcp' && assistantEnabled && <MCPConnectorsCard />}
+          {active === 'integrations' && (
+            <div className="space-y-6">
               <AirtableSyncCard />
               <SlackBotCard />
             </div>
-          </section>
-          <ApiTokensSection />
+          )}
+          {active === 'api-tokens' && <ApiTokensSection />}
         </div>
       )}
     </div>
@@ -443,7 +432,11 @@ function MCPConnectorsCard() {
 
   return (
     <>
-      <section id="settings-mcp" className="scroll-mt-14" data-testid="mcp-connectors-card">
+      <section
+        id="settings-mcp"
+        className="overflow-hidden rounded-lg border border-border bg-card"
+        data-testid="mcp-connectors-card"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
@@ -688,7 +681,7 @@ function AirtableSyncCard() {
   const syncError = sync.error instanceof Error ? sync.error.message : null
 
   return (
-    <section data-testid="airtable-card">
+    <section className="overflow-hidden rounded-lg border border-border bg-card" data-testid="airtable-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -838,7 +831,7 @@ function SlackBotCard() {
     status.data?.model_key_configured ?? status.data?.anthropic_configured
 
   return (
-    <section className="border-t border-border pt-8" data-testid="slack-card">
+    <section className="overflow-hidden rounded-lg border border-border bg-card" data-testid="slack-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1047,7 +1040,7 @@ function EmbedSection({ event }: { event: EventSummary }) {
   const iframeSnippet = embedIframeSnippet(event.slug, widget, options)
 
   return (
-    <section id="settings-embed" className="scroll-mt-14">
+    <section id="settings-embed" className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="border-b border-border px-5 py-4">
         <div>
           <h2 className="text-[15px] font-medium text-foreground">Embed &amp; share</h2>
@@ -1266,7 +1259,7 @@ function ApiTokensSection() {
   const tokens = query.data ?? []
 
   return (
-    <section id="settings-api-tokens" className="scroll-mt-14">
+    <section id="settings-api-tokens" className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <h2 className="text-[15px] font-medium text-foreground">API tokens</h2>
@@ -1431,7 +1424,7 @@ function EventCard({ event }: { event: EventSummary }) {
   const set = (patch: Partial<EventDraft>) => setDraft({ ...draft, ...patch })
 
   return (
-    <section id="settings-event" className="scroll-mt-14">
+    <section id="settings-event" className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <h2 className="text-[15px] font-medium text-foreground">Event</h2>
@@ -1676,7 +1669,8 @@ function BrandingSection({ event }: { event: EventSummary }) {
   }
 
   return (
-    <section id="settings-branding" className="scroll-mt-14">
+    // No overflow-hidden on this card: it would break the sticky live preview.
+    <section id="settings-branding" className="rounded-lg border border-border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
           <h2 className="text-[15px] font-medium text-foreground">Branding</h2>
@@ -1903,31 +1897,50 @@ function BrandAssetInput({
   onFile: (file: File) => void
   onRemove: () => void
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
   return (
-    <div className="grid gap-3 sm:grid-cols-[72px_minmax(0,1fr)] sm:items-center">
-      <div className="flex h-14 w-[72px] items-center justify-center overflow-hidden rounded-md border border-border bg-card p-2">
+    <div className="flex items-center gap-4">
+      <div className="flex h-14 w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-background/60 p-2">
         {preview ? (
           <img src={preview} alt={`${label} preview`} className="max-h-full max-w-full object-contain" />
         ) : (
           <span className="text-[10px] text-placeholder">No {kind}</span>
         )}
       </div>
-      <div className="space-y-2">
+      <div className="min-w-0">
         <Label htmlFor={`branding-${kind}`}>{label}</Label>
-        <Input
-          id={`branding-${kind}`}
-          type="file"
-          accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) onFile(file)
-          }}
-        />
-        {preview && (
-          <Button type="button" size="sm" variant="ghost" onClick={onRemove}>
-            Remove {kind}
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            ref={inputRef}
+            id={`branding-${kind}`}
+            type="file"
+            className="sr-only"
+            accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) onFile(file)
+              // Reset so picking the same file again still fires a change.
+              event.target.value = ''
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => inputRef.current?.click()}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {preview ? 'Replace' : 'Upload image'}
           </Button>
-        )}
+          {preview && (
+            <Button type="button" size="sm" variant="ghost" onClick={onRemove}>
+              Remove
+            </Button>
+          )}
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          PNG, JPG, GIF or WebP{kind === 'favicon' ? ' — square images look best' : ''}.
+        </p>
       </div>
     </div>
   )
@@ -2039,7 +2052,7 @@ function TaxonomySection({
   const rows = query.data ?? []
 
   return (
-    <section>
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="border-b border-border px-5 py-4">
         <h2 className="text-[15px] font-medium text-foreground">{title}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>

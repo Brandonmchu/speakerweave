@@ -100,7 +100,7 @@ describe('organizer form-builder routes', () => {
       ['/api/events/evt-1/tags', { tags: [] }],
       ['/api/events', { events: [{ id: 'evt-1', name: 'Summit', slug: 'summit' }] }],
     ])
-    renderApp('/settings')
+    renderApp('/settings/vocabulary')
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
     expect(await screen.findByText('AI Engineering')).toBeInTheDocument()
     for (const section of ['Tracks', 'Rooms', 'Formats', 'Levels', 'Tags']) {

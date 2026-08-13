@@ -418,8 +418,9 @@ export default function App() {
               </DeferredPage>
             }
           />
+          {/* Each settings tab is its own subpage; bare /settings is the Event tab. */}
           <Route
-            path="/settings"
+            path="/settings/:section?"
             element={
               <DeferredPage>
                 <LazySettingsPage />

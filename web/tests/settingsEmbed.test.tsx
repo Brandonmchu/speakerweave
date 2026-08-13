@@ -8,7 +8,7 @@
  */
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -48,9 +48,11 @@ function stubFetch() {
 function renderSettings() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={['/settings/embed']}>
       <QueryClientProvider client={queryClient}>
-        <SettingsPage />
+        <Routes>
+          <Route path="/settings/:section?" element={<SettingsPage />} />
+        </Routes>
       </QueryClientProvider>
     </MemoryRouter>
   )
