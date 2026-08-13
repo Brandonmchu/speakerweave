@@ -1260,22 +1260,30 @@ async def _send_decision_feedback(
         now = datetime.now(timezone.utc).isoformat()
         delivery: dict | None = None
         error: str | None = None
-        status = "sent"
-        try:
-            delivery = await mailer.send_email(
-                to=str(recipient["email"]),
-                subject=subject,
-                html=body_html,
-            )
-            sent += 1
-        except Exception as exc:  # one speaker's mailbox must not block the rest
-            logger.exception(
-                "decision email failed session=%s contact=%s",
-                session["id"],
-                recipient.get("id"),
-            )
-            status = "failed"
-            error = str(exc)
+        recipient_email = str(recipient.get("email") or "")
+        if mailer.demo_suppressed(recipient_email):
+            # Reserved demo address (seeded contact): delivery is deliberately
+            # suppressed, logged as 'cancelled' — not a failure.
+            status = "cancelled"
+            error = "demo address — delivery suppressed"
+            sent += 1  # recorded in the outbox — counts as handled for `emailed`
+        else:
+            status = "sent"
+            try:
+                delivery = await mailer.send_email(
+                    to=recipient_email,
+                    subject=subject,
+                    html=body_html,
+                )
+                sent += 1
+            except Exception as exc:  # one speaker's mailbox must not block the rest
+                logger.exception(
+                    "decision email failed session=%s contact=%s",
+                    session["id"],
+                    recipient.get("id"),
+                )
+                status = "failed"
+                error = str(exc)
 
         outbox_payload: dict = {
             "to": recipient.get("email"),
