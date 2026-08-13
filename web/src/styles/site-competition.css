@@ -78,16 +78,38 @@
   font-weight: 500;
 }
 
-/* Parity and bonus tables run long; give their prose columns a real measure and
-   stop the "where" column from stealing width. */
-.sw-site table.doctable td.said {
+/* Head-to-head table: a feature column that can carry a product mark, and two
+   narrow centred check columns. The check is colour, the dash is absence. */
+.sw-site table.doctable th.ck,
+.sw-site table.doctable td.ck {
+  text-align: center;
+  white-space: nowrap;
+  width: 118px;
+}
+.sw-site table.doctable td.ck svg {
+  width: 15px;
+  height: 15px;
+  vertical-align: -3px;
+}
+.sw-site table.doctable td.ck.yes {
+  color: var(--sw-accepted);
+}
+.sw-site table.doctable td.ck.not {
+  color: #a9a399;
+}
+.sw-site table.doctable td.feat {
   color: var(--sw-ink);
   font-weight: 500;
 }
-/* Where to go and look, named as a place rather than as a route. These were
-   raw paths in mono, which wrapped mid-URL ("/e/ai-builders-summit/sched|ule")
-   and made the reader parse a string instead of reading a destination. */
-.sw-site table.doctable td.where {
-  font-size: 12.5px;
-  white-space: nowrap;
+.sw-site table.doctable td.feat img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+  vertical-align: -2.5px;
+  margin-right: 7px;
+}
+/* The seam between parity rows and SpeakerWeave-only rows. 2px for the same
+   collapse-resolution reason as tr.sum above. */
+.sw-site table.doctable tr.brk td {
+  border-top: 2px solid var(--sw-line2);
 }

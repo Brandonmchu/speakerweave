@@ -2,9 +2,9 @@
  * Judge-facing competition page (route: /killmysaas).
  *
  * A scoreboard, not a brochure. The argument runs: here is what the brief
- * asked for, here is the independent evaluation result, here is the parity
- * ledger against the SaaS, here is what goes past it, here are the bonuses,
- * and here is a ten-minute path to check all of it yourself.
+ * asked for, here is the independent evaluation result, here is the
+ * head-to-head feature table against the SaaS, here are the bonuses, and
+ * here is a ten-minute path to check all of it yourself.
  *
  * Ground rhythm follows the site's rule — ink for the argument, paper for the
  * evidence. The two long tables sit in `.light` bands because that is where
@@ -14,23 +14,13 @@
  * of them are rounded up. Where a figure is quoted from a document rather than
  * measured here, the document is named next to it.
  */
-import {
-  ArrowLeftRight,
-  Blocks,
-  Bot,
-  Cloud,
-  Code2,
-  Gauge,
-  KeyRound,
-  Network,
-  Scale,
-  Slack,
-  Sparkles,
-  Table2,
-  Terminal,
-  type LucideIcon,
-} from 'lucide-react'
+import { Check, Cloud, Gauge, KeyRound, Table2, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
+
+import airtableLogo from '../assets/logos/airtable.svg'
+import chatgptLogo from '../assets/logos/chatgpt.svg'
+import claudeLogo from '../assets/logos/claude.svg'
+import slackLogo from '../assets/logos/slack.svg'
 
 import { DOCS_URL, REPO_URL, SiteShell, vars } from '@/pages/siteShared'
 
@@ -40,7 +30,6 @@ const EDGE_URL = 'https://speakerweave-web.brandon-c2f.workers.dev'
 const SCHEDULE_PATH = '/e/ai-builders-summit/schedule'
 const SPEAKERS_PATH = '/e/ai-builders-summit/speakers'
 const CFP_PATH = '/submit/call-for-speakers'
-const CALENDAR_FEED = '/public/program/ai-builders-summit/calendar.ics'
 
 /* ── hero facts ────────────────────────────────────────────────────────────
  * API 1,059 (pytest --collect-only) + web 632 (vitest list) + CLI 8 = 1,699. */
@@ -88,171 +77,43 @@ const RUN_FACTS: Array<[string, string]> = [
   ['+10', 'extra credit: Speaker CRM, the optional area, also scored 100%'],
 ]
 
-/* ── parity ────────────────────────────────────────────────────────────────
- * Rows 1–9 are the brief's nine core requirements, verbatim in intent. Rows
- * 10–12 come from the Sessionboard teardown — things the SaaS sells that the
- * brief never spelled out. */
-type ParityRow = {
-  asked: string
-  ships: string
-  where: string
-  href?: string
+/* ── head to head ──────────────────────────────────────────────────────────
+ * One table replaces the old parity ledger and the "beyond it" list. The
+ * first twelve rows are the brief's core requirements plus the Sessionboard
+ * teardown; both columns check. The last ten are SpeakerWeave-only. Feature
+ * titles carry the argument on their own — no body copy. */
+type CompareRow = {
+  feature: string
+  logos?: string[]
+  saas: boolean
 }
 
-const PARITY: ParityRow[] = [
-  {
-    asked: 'Custom submission forms with conditional logic and category routing',
-    ships:
-      'Multi-page builder over reusable contact and session fields, with show/hide/require rules on all-or-any matching plus routing rules. The rule engine ships twice — Python and TypeScript — against shared fixtures, so the live preview and the server enforcement cannot drift.',
-    where: 'Call for Speakers',
-    href: CFP_PATH,
-  },
-  {
-    asked: 'Speaker portal for bios, headshots, slides, and documents',
-    ships:
-      'Cookie-scoped portal with no client-supplied identity: profile, headshot, socials, logistics fields, assigned tasks with due dates, file requests, immutable versions, approve / needs-changes review, and per-item comment threads.',
-    where: 'Speaker portal',
-    href: '/speaker-signin',
-  },
-  {
-    asked: 'Automated communications including calendar invites (Gmail, Outlook, iCal)',
-    ships:
-      'Outbox-backed sending with retries and idempotency, templates with merge tags, audience targeting with a live recipient count, and one log row per recipient. Native calendar invitations, plus a subscribable feed of the whole published program.',
-    where: 'Calendar feed',
-    href: CALENDAR_FEED,
-  },
-  {
-    asked: 'Evaluation workflows with optional AI-assisted review',
-    ships:
-      'Multiple rounds with open/close windows, weighted numeric, select and free-text criteria, per-round reviewer pools, track-aware and per-submission assignment, anonymised rounds, abstentions with reasons, a summary dashboard, and CSV export of scores. AI first-pass triage returns a score and a rationale that an organizer can override.',
-    where: 'Evaluation',
-  },
-  {
-    asked: 'Drag-and-drop scheduling with conflict detection and multiple view options',
-    ships:
-      'Multi-day room grid with drag-and-drop and a click-to-place fallback, live conflict detection for speaker double-booking and room overlap — the room rule backed by a Postgres gist exclusion constraint, not just a client check — List / Day / Week / Rooms / Conflicts views, and conflict-free auto-place.',
-    where: 'Agenda',
-  },
-  {
-    asked: 'Real-time dashboard for speaker onboarding status',
-    ships:
-      'Per-speaker by per-task deliverables matrix with due dates, outstanding-only filters, polling refresh, and reminders targeted at exactly the speakers who are behind rather than the whole roster.',
-    where: 'Dashboard',
-  },
-  {
-    asked: 'Accelevents integration to prevent manual data re-entry',
-    ships:
-      'No vendor connector, and no re-entry either: an accepted submission is the session, in one table, with its metadata intact. Everything else leaves through a stable /v1 REST API with organization-scoped tokens, read-only JSON program feeds, iCal, speaker CSV import and export, and Airtable sync.',
-    where: 'Developers',
-    href: '/developers',
-  },
-  {
-    asked: 'Resource and wiki pages supporting HTML embeds',
-    ships:
-      'Organizer-authored rich text on speaker portals and on CFP forms, with the server as the authoritative sanitiser — script tags and inline event handlers are stripped before anything renders, and the API suite asserts it.',
-    where: 'Portal',
-  },
-  {
-    asked: 'Embeddable speaker gallery and schedule for websites',
-    ships:
-      'Public schedule and speaker pages, script and iframe snippets generated in Settings with track, accent-colour and compact-layout options, an auto-resizing embed loader, and the same data as read-only JSON feeds.',
-    where: 'Public schedule',
-    href: SCHEDULE_PATH,
-  },
-  {
-    asked: 'Speaker CRM across events — the teardown’s year-round product',
-    ships:
-      'Organization-wide people directory with duplicate detection and merge, notes, tags, custom fields, saved segments that are stored as filters rather than frozen lists, cross-event history, and a Kanban sourcing pipeline.',
-    where: 'Directory · Pipeline',
-  },
-  {
-    asked: 'Change history with attribution and restore',
-    ships:
-      'Session title and description edits are recorded as revisions with attribution and can be restored from the submission drawer.',
-    where: 'Submissions',
-  },
-  {
-    asked: 'Reporting and export',
-    ships:
-      'Evaluation summary with per-session aggregates and reviewer-disagreement spread, CSV export of submissions and of review scores, speaker roster CSV in and out, and a ZIP bundle of the current version of every collected file.',
-    where: 'Evaluation · Content',
-  },
+const COMPARE: CompareRow[] = [
+  { feature: 'Conditional submission forms', saas: true },
+  { feature: 'Speaker portal', saas: true },
+  { feature: 'Automated emails & calendar invites', saas: true },
+  { feature: 'Evaluation workflows', saas: true },
+  { feature: 'Drag-and-drop agenda with conflict detection', saas: true },
+  { feature: 'Speaker onboarding dashboard', saas: true },
+  { feature: 'No manual data re-entry', saas: true },
+  { feature: 'Resource pages with HTML embeds', saas: true },
+  { feature: 'Embeddable speaker gallery & schedule', saas: true },
+  { feature: 'Speaker CRM', saas: true },
+  { feature: 'Change history & restore', saas: true },
+  { feature: 'Reporting & export', saas: true },
+  { feature: 'In-app agent with approval gates', saas: false },
+  { feature: 'Hosted MCP server, OAuth 2.1', logos: [claudeLogo, chatgptLogo], saas: false },
+  { feature: 'Inbound MCP connectors', saas: false },
+  { feature: 'Slack agent', logos: [slackLogo], saas: false },
+  { feature: 'Command-line client', saas: false },
+  { feature: 'Open REST API & hosted docs', saas: false },
+  { feature: 'Airtable sync', logos: [airtableLogo], saas: false },
+  { feature: 'AI triage with human overrides', saas: false },
+  { feature: 'Provider-neutral AI runtime', saas: false },
+  { feature: 'MIT-licensed open source', saas: false },
 ]
 
-/* ── beyond parity ─────────────────────────────────────────────────────── */
-type Beyond = {
-  icon: LucideIcon
-  tone?: string
-  title: string
-  kicker: string
-  body: string
-}
-
-const BEYOND: Beyond[] = [
-  {
-    icon: Bot,
-    tone: 'brand',
-    title: 'In-app agent with approval gates',
-    kicker: 'Ask',
-    body: 'Streaming threads on every organizer page. @-mention any submission, speaker or session as context; entity badges route back into the app; and anything sensitive — email, decision, publish, delete — stops at an inline Approve / Deny gate before it runs.',
-  },
-  {
-    icon: Network,
-    tone: 'mcp',
-    title: 'Hosted MCP server with OAuth 2.1',
-    kicker: '14 tools',
-    body: 'Remote Streamable HTTP at /mcp with 14 tools and 3 resources. Protected-resource discovery, dynamic client registration and authorization code with PKCE, so claude.ai or a ChatGPT connector needs the URL and nothing else. Header-capable clients can use a bearer token instead.',
-  },
-  {
-    icon: Blocks,
-    title: 'MCP connectors, inbound',
-    kicker: 'External tools',
-    body: 'The agent consumes external MCP servers as well as exposing one. Every ships as a preset; any other server joins over OAuth or a bearer token; and external mutations pass through the same approval gate as internal ones.',
-  },
-  {
-    icon: Slack,
-    title: 'Slack agent',
-    kicker: 'Team surface',
-    body: 'Registered as a Slack Agent, not a webhook toy: signed Events and Interactivity on one URL, the same organization-scoped tools and connectors, native Approve and Deny buttons, and Slack threads mapped into Ask history so both surfaces share one conversation.',
-  },
-  {
-    icon: Terminal,
-    tone: 'cli',
-    title: 'sw command-line client',
-    kicker: 'Terminal',
-    body: 'A separate Python package with its own test gate. pipx install, sw auth login with an organization token, then decisions, speaker CSV import, scheduling, content reminders, triage — or sw ask, which is the same agent from a shell script.',
-  },
-  {
-    icon: Code2,
-    title: 'REST API and hosted documentation',
-    kicker: '25 endpoints',
-    body: 'A stable /v1 surface with organization-scoped tokens stored only as SHA-256 hashes, an in-app reference with copyable curl, the generated OpenAPI explorer on the API service, and a hosted documentation site. The brief pointed at Sessionboard’s own docs site; this is the same thing, open.',
-  },
-  {
-    icon: Table2,
-    title: 'Airtable sync',
-    kicker: 'Persistence',
-    body: 'Per-organization credentials held server-side and masked, Speakers and Submissions tables created on demand, and keyed upserts — speakers by email, submissions by friendly ID — so a sync can run twice without duplicating a row.',
-  },
-  {
-    icon: Sparkles,
-    title: 'AI triage with human overrides',
-    kicker: 'Review',
-    body: 'A first pass over the submission pool that returns a score and a written rationale, ranks the field, and falls back to reviewer-score heuristics with no provider key. Organizer overrides persist and win.',
-  },
-  {
-    icon: ArrowLeftRight,
-    title: 'Provider-neutral by construction',
-    kicker: 'No lock-in',
-    body: 'One agent runtime behind one service boundary, running on the OpenAI Agents SDK or on Claude by environment variable, with the same tools, event protocol and permission gate. Database, auth, email, hosting and AI are each a documented swap point with its invariants written down in AGENTS.md.',
-  },
-  {
-    icon: Scale,
-    title: 'MIT licence, and a repo built to be forked',
-    kicker: 'Open source',
-    body: '19 ordered, re-runnable migrations, a deterministic demo seed, four named quality gates, and an AGENTS.md that hands the next coding agent the map, the invariants and a starter prompt for standing it up on someone else’s stack.',
-  },
-]
+const FIRST_BEYOND = COMPARE.findIndex((row) => !row.saas)
 
 /* ── bonuses ───────────────────────────────────────────────────────────── */
 type Bonus = {
@@ -466,16 +327,15 @@ export function KillMySaas() {
         </div>
       </section>
 
-      {/* ── parity ─────────────────────────────────────────────────────── */}
+      {/* ── head to head ───────────────────────────────────────────────── */}
       <section className="light seam">
         <div className="wrap">
           <div className="rv">
-            <p className="eyebrow">Parity</p>
-            <h2 className="h2 serif">Everything the SaaS was quoted for.</h2>
+            <p className="eyebrow">Head to head</p>
+            <h2 className="h2 serif">Not a Clone. The Next Generation.</h2>
             <p className="lede">
-              The first nine rows are the brief&rsquo;s core requirements. The last three come from
-              the Sessionboard teardown — things the product sells that the brief never spelled out.
-              Every row is open in the demo right now.
+              Everything the $40,000 SaaS was quoted for, then ten things it does not do. Every row
+              is open in the demo right now.
             </p>
           </div>
 
@@ -483,26 +343,23 @@ export function KillMySaas() {
             <table className="doctable">
               <thead>
                 <tr>
-                  <th>What the brief and the SaaS specify</th>
-                  <th>What SpeakerWeave ships</th>
-                  <th>Where</th>
+                  <th>Feature</th>
+                  <th className="ck">Sessionboard</th>
+                  <th className="ck">SpeakerWeave</th>
                 </tr>
               </thead>
               <tbody>
-                {PARITY.map((row) => (
-                  <tr key={row.asked}>
-                    <td className="said">{row.asked}</td>
-                    <td>{row.ships}</td>
-                    <td className="where">
-                      {row.href ? (
-                        row.href.startsWith('/public') ? (
-                          <a href={row.href}>{row.where}</a>
-                        ) : (
-                          <Link to={row.href}>{row.where}</Link>
-                        )
-                      ) : (
-                        row.where
-                      )}
+                {COMPARE.map((row, index) => (
+                  <tr key={row.feature} className={index === FIRST_BEYOND ? 'brk' : undefined}>
+                    <td className="feat">
+                      {row.logos?.map((src) => <img key={src} src={src} alt="" />)}
+                      {row.feature}
+                    </td>
+                    <td className={`ck${row.saas ? '' : ' not'}`}>
+                      {row.saas ? <Check strokeWidth={2.5} aria-label="yes" /> : '—'}
+                    </td>
+                    <td className="ck yes">
+                      <Check strokeWidth={2.5} aria-label="yes" />
                     </td>
                   </tr>
                 ))}
@@ -511,42 +368,14 @@ export function KillMySaas() {
           </div>
 
           <p className="note">
-            Rows without a public link live behind the demo workspace, which opens in one click at{' '}
+            Every row is live behind the demo workspace, which opens in one click at{' '}
             <Link to="/demo">/demo</Link> — no account, no email code.
           </p>
         </div>
       </section>
 
-      {/* ── beyond ─────────────────────────────────────────────────────── */}
-      <section className="wrap sect">
-        <div className="rv">
-          <p className="eyebrow">Beyond it</p>
-          <h2 className="h2 serif">Ten things the SaaS does not do.</h2>
-          <p className="lede">
-            Parity was the requirement. These are the reasons to keep running it after the
-            competition ends.
-          </p>
-        </div>
-        <div style={{ marginTop: 30 }}>
-          {BEYOND.map(({ icon: Icon, tone, title, kicker, body }, index) => (
-            <div
-              key={title}
-              className="srow rv"
-              style={vars({ '--d': `${Math.min(index, 5) * 0.05}s` })}
-            >
-              <span className={`ico${tone ? ` ${tone}` : ''}`} aria-hidden="true">
-                <Icon strokeWidth={1.75} />
-              </span>
-              <h3>{title}</h3>
-              <em>{kicker}</em>
-              <p>{body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* ── bonuses ────────────────────────────────────────────────────── */}
-      <section className="light">
+      <section className="light seam">
         <div className="wrap">
           <div className="rv">
             <p className="eyebrow">Bonuses</p>
