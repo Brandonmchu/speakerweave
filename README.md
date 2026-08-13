@@ -18,6 +18,9 @@ SpeakerWeave is an open-source conference speaker-management platform for runnin
 - **Content pipeline:** speaker portal tasks, uploads, approval/needs-changes states, comments, immutable file versions, restore, reminders, and ZIP/CSV exports.
 - **Agenda builder:** drag-and-drop, click-to-place, multi-day room grids, live client and server conflict detection, and conflict-free auto-place.
 - **Public program:** schedule and speaker pages, responsive script/iframe widgets, read-only JSON feeds, per-session calendar downloads, and a subscribable iCal feed.
+- **Per-event branding:** colors, heading/body fonts, corner radius, layout and density choices, logo and favicon on every public page and embed — edited in Settings or through the API, agent, and MCP branding tools, scoped per event.
+- **Multi-organization workspaces:** organizer membership across organizations with an in-app workspace switcher, and cross-organization speaker sign-in via emailed links.
+- **One-click demo doors:** organizer, reviewer, and speaker entrances minted with the real magic-link machinery, so a visitor experiences exactly what an invited user would.
 - **Full REST API:** organization-scoped API tokens, a stable `/v1` integration surface, and interactive FastAPI OpenAPI docs.
 - **Hosted MCP server:** remote Streamable HTTP at `/mcp`, with bearer-token access and OAuth 2.1 discovery/PKCE for Claude and ChatGPT connector UIs.
 - **One AI agent in-app and in Slack:** in-app Ask and the signed Slack bot share the same provider-neutral runtime, organization-scoped tools, MCP connectors, persisted threads, and permission gate. Approve or deny actions from Slack; Slack conversations remain visible in Ask history.
@@ -77,7 +80,7 @@ The reference production shape is two application services—`api/` and `web/`�
 - PostgreSQL plus `psql`; the shortest path for this implementation is a Supabase project because the API expects PostgREST, a service-role key, and Supabase Storage
 - A Supabase `portal-files` Storage bucket marked **public** if you want speaker uploads or the full demo seed
 
-The SQL uses the `btree_gist` and `citext` extensions. Migrations `014` and `015` also apply grants to Supabase's `anon`, `authenticated`, and `service_role` roles. A plain PostgreSQL deployment is viable, but it needs equivalent roles/grants and either PostgREST + compatible Storage or a replacement for the Supabase client/storage adapter.
+The SQL uses the `btree_gist` and `citext` extensions. Several migrations (`014`, `015`, `016`, `019`) also apply grants to Supabase's `anon`, `authenticated`, and `service_role` roles. A plain PostgreSQL deployment is viable, but it needs equivalent roles/grants and either PostgREST + compatible Storage or a replacement for the Supabase client/storage adapter.
 
 ### 1. Clone and install
 
@@ -133,7 +136,7 @@ python -m scripts.seed_demo seed
 python scripts/mint_dev_token.py
 ```
 
-`seed` resets and repopulates the known demo rows in `org_dev`; do not use that organization for production data. The second command prints a short-lived organizer JWT for `/dev-login`. You can also use `/demo`, which obtains the same kind of token from the deliberately public `org_dev` demo endpoint.
+`seed` resets and repopulates the known demo rows in `org_dev`; do not use that organization for production data. The second command prints a short-lived organizer JWT for `/dev-login`. You can also use `/demo`, which obtains the same kind of token from the deliberately public `org_dev` demo endpoint — and the landing page offers reviewer and speaker demo doors minted with the same magic-link machinery (`/public/demo-entry/{organizer|reviewer|speaker}`).
 
 ### 5. Run the API and web app
 
@@ -300,12 +303,16 @@ No preferences? Tell your agent: **use the reference stack exactly as documented
 ├── cli/
 │   ├── src/speakerweave_cli/   # Python 3.11+ `sw` command package
 │   └── tests/                  # isolated CLI pytest suite with mocked HTTP
-└── web/
-    ├── src/                    # React application, pages, API clients, and shared logic
-    ├── tests/                  # Vitest + Testing Library suite
-    ├── nginx/default.conf      # SPA serving, reverse proxy, caching, and embed headers
-    ├── Dockerfile              # Vite build and nginx runtime
-    └── package.json            # web scripts and dependencies
+├── web/
+│   ├── src/                    # React application, pages, API clients, and shared logic
+│   ├── tests/                  # Vitest + Testing Library suite
+│   ├── nginx/default.conf      # SPA serving, reverse proxy, caching, and embed headers
+│   ├── worker/ + wrangler.jsonc  # Cloudflare Workers edge web tier
+│   ├── Dockerfile              # Vite build and nginx runtime
+│   └── package.json            # web scripts and dependencies
+├── docs/                       # in-repo deep dives (chat agent) and README screenshots
+├── docs-site/                  # Mintlify documentation site (speaker-weave.mintlify.site)
+└── assets/                     # brand assets (Slack app icon)
 ```
 
 ## Tests and quality gates
