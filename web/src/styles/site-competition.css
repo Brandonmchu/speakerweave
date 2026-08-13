@@ -102,6 +102,8 @@
   font-weight: 500;
 }
 .sw-site table.doctable td.feat img {
+  /* Tailwind preflight sets img { display: block } — restore inline flow */
+  display: inline-block;
   width: 15px;
   height: 15px;
   object-fit: contain;

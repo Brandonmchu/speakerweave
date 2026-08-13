@@ -79,9 +79,10 @@ const RUN_FACTS: Array<[string, string]> = [
 
 /* ── head to head ──────────────────────────────────────────────────────────
  * One table replaces the old parity ledger and the "beyond it" list. The
- * first twelve rows are the brief's core requirements plus the Other Conference/CFP Software
- * teardown; both columns check. The last ten are SpeakerWeave-only. Feature
- * titles carry the argument on their own — no body copy. */
+ * parity rows are the brief's core requirements plus the Other Conference/CFP
+ * Software teardown; both columns check. The rest are SpeakerWeave-only —
+ * only real, big differences; no thin AI-positioning rows. Feature titles
+ * carry the argument on their own — no body copy. */
 type CompareRow = {
   feature: string
   logos?: string[]
@@ -91,6 +92,7 @@ type CompareRow = {
 const COMPARE: CompareRow[] = [
   { feature: 'Conditional submission forms', saas: true },
   { feature: 'Speaker portal', saas: true },
+  { feature: 'Attendee portal branding', saas: true },
   { feature: 'Automated emails & calendar invites', saas: true },
   { feature: 'Evaluation workflows', saas: true },
   { feature: 'Drag-and-drop agenda with conflict detection', saas: true },
@@ -102,14 +104,11 @@ const COMPARE: CompareRow[] = [
   { feature: 'Change history & restore', saas: true },
   { feature: 'Reporting & export', saas: true },
   { feature: 'In-app agent with approval gates', saas: false },
-  { feature: 'Hosted MCP server, OAuth 2.1', logos: [claudeLogo, chatgptLogo], saas: false },
-  { feature: 'Inbound MCP connectors', saas: false },
+  { feature: 'MCP server for Claude & ChatGPT', logos: [claudeLogo, chatgptLogo], saas: false },
   { feature: 'Slack agent', logos: [slackLogo], saas: false },
-  { feature: 'Command-line client', saas: false },
-  { feature: 'Open REST API & hosted docs', saas: false },
+  { feature: 'CLI', saas: false },
+  { feature: 'Open REST API', saas: false },
   { feature: 'Airtable sync', logos: [airtableLogo], saas: false },
-  { feature: 'AI triage with human overrides', saas: false },
-  { feature: 'Provider-neutral AI runtime', saas: false },
   { feature: 'MIT-licensed open source', saas: false },
 ]
 
