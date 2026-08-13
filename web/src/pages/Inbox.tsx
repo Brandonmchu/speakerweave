@@ -203,7 +203,7 @@ function submitterName(submission: Submission): string {
 /**
  * We never fetched the form catalog here, so "Source" is derived from whether a
  * submission carries a form id: a public CFP submission has one, an operator's
- * manual add does not. Enough to read like Sessionboard's Form/Manual column.
+ * manual add does not. Enough to read like Other Conference/CFP Software's Form/Manual column.
  */
 function sourceLabel(submission: Submission): string {
   return submission.source_form_id ? 'Form' : 'Manual'

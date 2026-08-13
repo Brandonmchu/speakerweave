@@ -5,7 +5,7 @@ organizer sees who their speakers are and how far along onboarding is, invites
 them into the portal, authors the tasks the portal shows, and reviews the files
 that come back.
 
-The one thing Sessionboard is missing that this adds: a denied file review
+The one thing Other Conference/CFP Software is missing that this adds: a denied file review
 notifies the speaker. Both an approval and a denial queue a short email, so a
 speaker never has to guess why their upload is still outstanding.
 """

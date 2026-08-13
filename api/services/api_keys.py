@@ -1,6 +1,6 @@
 """API-key minting and resolution for the public ``/v1`` API.
 
-The public API authenticates with an ``x-access-token`` header (Sessionboard's
+The public API authenticates with an ``x-access-token`` header (Other Conference/CFP Software's
 own convention), not a Clerk JWT. A key is minted once, shown once, and only its
 SHA-256 hash is persisted in ``api_tokens.token_hash`` — exactly how magic-link
 tokens are stored (``services.magic_links.hash_token`` is reused so the two can

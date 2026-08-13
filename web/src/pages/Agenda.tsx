@@ -804,7 +804,7 @@ function ConflictsPanel({
 /* -------------------------------------------------------------------------- */
 
 /**
- * Sessionboard-style view switcher. "Rooms" is our drag grid (default); the
+ * View switcher in the style of Other Conference/CFP Software. "Rooms" is our drag grid (default); the
  * others are lighter reads over the same data — no wizard, no second tool.
  */
 type AgendaView = 'list' | 'day' | 'week' | 'rooms' | 'conflicts'

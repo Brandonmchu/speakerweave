@@ -83,7 +83,7 @@ export function ApiDocs() {
               </p>
 
               <div className="callout">
-                <b>SpeakerWeave speaks Sessionboard&rsquo;s protocol.</b>
+                <b>SpeakerWeave speaks Other Conference/CFP Software&rsquo;s protocol.</b>
                 <p>
                   Existing integrations can keep the <code className="m">{API_BASE_PATH}</code> base
                   path and <code className="m">{AUTH_HEADER}</code> authentication convention, while

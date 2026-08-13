@@ -745,7 +745,7 @@ export function Home() {
         <div className="proof rv" style={vars({ '--d': '.12s' })}>
           <b>100 / 100</b>
           <p>
-            on the independent SessionBoard evaluation — all seven areas, 96 rubric items, 197
+            on the independent Other Conference/CFP Software evaluation — all seven areas, 96 rubric items, 197
             weighted points, graded by a browser agent with no help from us.
           </p>
           <Link to="/killmysaas" className="arrowlink">

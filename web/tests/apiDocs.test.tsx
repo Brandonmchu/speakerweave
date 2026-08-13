@@ -13,10 +13,10 @@ function renderDocs() {
 }
 
 describe('ApiDocs page', () => {
-  it('renders the title and the "speaks Sessionboard\'s protocol" story', () => {
+  it('renders the title and the "speaks Other Conference/CFP Software\'s protocol" story', () => {
     renderDocs()
     expect(screen.getByRole('heading', { name: 'SpeakerWeave API', level: 1 })).toBeInTheDocument()
-    expect(screen.getByText(/speaks Sessionboard/i)).toBeInTheDocument()
+    expect(screen.getByText(/speaks Other Conference\/CFP Software/i)).toBeInTheDocument()
     expect(screen.getByText(/The Slack bot is the same agent as in-app Ask/i)).toBeInTheDocument()
   })
 

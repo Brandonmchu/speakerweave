@@ -564,7 +564,7 @@ export function AppShell() {
       </div>
 
         {/* Event switcher — a static single-event dropdown today, but the chevron
-            + colored square read as the Sessionboard multi-event switcher. */}
+            + colored square read as the Other Conference/CFP Software multi-event switcher. */}
         <div className="px-3 pb-1">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

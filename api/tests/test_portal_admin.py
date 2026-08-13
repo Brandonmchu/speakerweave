@@ -4,7 +4,7 @@ The aggregation has to be correct and org-safe (a foreign speaker must never
 appear), an invite has to both mint a portal link and enqueue the email, task
 authoring must refuse contacts outside the event, and a review must move the
 assignment AND queue the speaker's notification — the deny-notifies behaviour
-that Sessionboard lacks.
+that Other Conference/CFP Software lacks.
 """
 
 from __future__ import annotations
@@ -201,7 +201,7 @@ def test_review_denied_notifies_and_allows_resubmit(client, auth_headers, admin_
     assert resp.status_code == 200
     assert resp.json()["assignment"]["status"] == "denied"
 
-    # This is the notify-on-deny that Sessionboard lacks.
+    # This is the notify-on-deny that Other Conference/CFP Software lacks.
     emails = [e for e in admin_db.rows("email_outbox") if e.get("template_key") == "task_denied"]
     assert len(emails) == 1
     row = next(a for a in admin_db.rows("task_assignments") if a["id"] == ASSIGN_ADA_FILE)

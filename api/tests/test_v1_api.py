@@ -1,6 +1,6 @@
 """The public org-token ``/v1`` API.
 
-Exercises the Sessionboard-shaped contract: ``x-access-token`` auth, the
+Exercises the contract shaped after Other Conference/CFP Software: ``x-access-token`` auth, the
 list + ``/search`` variants, the ``{data, page, pageSize, total}`` envelope,
 pagination limits, the nested session/contact shapes, and org isolation (a key
 for one org cannot read another org's event).

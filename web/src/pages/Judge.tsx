@@ -102,7 +102,7 @@ export function Judge() {
         <div className="proof rv">
           <b>100 / 100</b>
           <p>
-            on the independent SessionBoard evaluation — all seven areas, 96 rubric items, 197
+            on the independent Other Conference/CFP Software evaluation — all seven areas, 96 rubric items, 197
             weighted points, graded by a browser agent driving this same deployment.
           </p>
           <Link to="/killmysaas" className="arrowlink">

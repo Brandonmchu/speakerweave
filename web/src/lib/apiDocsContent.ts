@@ -41,12 +41,12 @@ export const REST_ENDPOINTS: RestEndpoint[] = [
   {
     method: 'GET',
     path: '/events/{event_id}/sessions',
-    description: 'Sessionboard-compatible alias for submissions.',
+    description: 'Alias for submissions, compatible with Other Conference/CFP Software.',
   },
   {
     method: 'POST',
     path: '/events/{event_id}/sessions/search',
-    description: 'Sessionboard-compatible submission search alias.',
+    description: 'Submission search alias, compatible with Other Conference/CFP Software.',
   },
   { method: 'GET', path: '/submissions/{submission_id}', description: 'Get one submission.' },
   {
@@ -78,12 +78,12 @@ export const REST_ENDPOINTS: RestEndpoint[] = [
   {
     method: 'GET',
     path: '/events/{event_id}/contacts',
-    description: 'Sessionboard-compatible speaker directory.',
+    description: 'Speaker directory, compatible with Other Conference/CFP Software.',
   },
   {
     method: 'POST',
     path: '/events/{event_id}/contacts/search',
-    description: 'Sessionboard-compatible speaker directory search.',
+    description: 'Speaker directory search, compatible with Other Conference/CFP Software.',
   },
   {
     method: 'GET',

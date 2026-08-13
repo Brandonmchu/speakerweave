@@ -364,7 +364,7 @@
      "v1-public"
     ],
     "summary": "Search Submissions",
-    "description": "Search submissions using a Sessionboard-compatible JSON body.",
+    "description": "Search submissions using a JSON body compatible with Other Conference/CFP Software.",
     "operationId": "search_submissions_v1_events__event_id__submissions_search_post",
     "parameters": [
      {
@@ -426,7 +426,7 @@
      "v1-public"
     ],
     "summary": "Search Submissions",
-    "description": "Search submissions using a Sessionboard-compatible JSON body.",
+    "description": "Search submissions using a JSON body compatible with Other Conference/CFP Software.",
     "operationId": "search_submissions_v1_events__event_id__sessions_search_post",
     "parameters": [
      {
@@ -584,7 +584,7 @@
      "v1-public"
     ],
     "summary": "List Contacts",
-    "description": "Legacy Sessionboard alias for the event speaker collection.",
+    "description": "Legacy Other Conference/CFP Software alias for the event speaker collection.",
     "operationId": "list_contacts_v1_events__event_id__contacts_get",
     "parameters": [
      {

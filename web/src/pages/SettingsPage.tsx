@@ -1432,7 +1432,7 @@ function EventCard({ event }: { event: EventSummary }) {
             Used on public pages, calendar invites and every email you send.
           </p>
         </div>
-        {/* Default variant = solid Sessionboard blue. Prominent while there are
+        {/* Default variant = solid Other Conference/CFP Software blue. Prominent while there are
             unsaved changes; the disabled state (clean form) reads as muted. */}
         <Button
           className="min-w-[104px]"

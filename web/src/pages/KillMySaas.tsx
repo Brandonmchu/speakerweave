@@ -79,7 +79,7 @@ const RUN_FACTS: Array<[string, string]> = [
 
 /* ── head to head ──────────────────────────────────────────────────────────
  * One table replaces the old parity ledger and the "beyond it" list. The
- * first twelve rows are the brief's core requirements plus the Sessionboard
+ * first twelve rows are the brief's core requirements plus the Other Conference/CFP Software
  * teardown; both columns check. The last ten are SpeakerWeave-only. Feature
  * titles carry the argument on their own — no body copy. */
 type CompareRow = {
@@ -217,7 +217,7 @@ export function KillMySaas() {
             100% on the independent evaluation. All seven areas.
           </h1>
           <p className="lede" style={{ maxWidth: '74ch' }}>
-            The brief: clone Sessionboard — the $40,000-a-year conference platform swyx&rsquo;s team
+            The brief: clone Other Conference/CFP Software — the $40,000-a-year conference platform swyx&rsquo;s team
             was quoted for — in a weekend, open source and deployed, then let the AI Engineer
             team&rsquo;s own evaluation harness grade it. SpeakerWeave is that clone. It answers all
             nine core requirements, took every bonus on the list, and adds an agent layer, a public
@@ -344,7 +344,7 @@ export function KillMySaas() {
               <thead>
                 <tr>
                   <th>Feature</th>
-                  <th className="ck">Sessionboard</th>
+                  <th className="ck">Other Conference/CFP Software</th>
                   <th className="ck">SpeakerWeave</th>
                 </tr>
               </thead>

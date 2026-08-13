@@ -1,6 +1,6 @@
 """Public org-token API for conference integrations.
 
-Authentication follows the existing Sessionboard-compatible contract:
+Authentication follows the existing contract, compatible with Other Conference/CFP Software:
 ``x-access-token: dais_…`` resolves to one organization, and every operation is
 delegated to :mod:`services.integration_api`, the same org-scoped layer used by
 the hosted MCP server.
@@ -148,7 +148,7 @@ async def search_submissions(
     body: SearchRequest | None = None,
     auth: tuple = Depends(get_api_org),
 ) -> dict:
-    """Search submissions using a Sessionboard-compatible JSON body."""
+    """Search submissions using a JSON body compatible with Other Conference/CFP Software."""
     org_id, _scopes = auth
     query = body or SearchRequest()
     page, page_size = _paging(query.page, query.pageSize)
@@ -214,7 +214,7 @@ async def list_contacts(
     pageSize: int = Query(default=integration_api.DEFAULT_PAGE_SIZE),
     auth: tuple = Depends(get_api_org),
 ) -> dict:
-    """Legacy Sessionboard alias for the event speaker collection."""
+    """Legacy Other Conference/CFP Software alias for the event speaker collection."""
     org_id, _scopes = auth
     page, page_size = _paging(page, pageSize)
     result = await integration_api.list_speakers(
