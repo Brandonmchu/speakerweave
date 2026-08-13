@@ -20,6 +20,10 @@ class JSONFormatter(logging.Formatter):
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
+            # Railway's log explorer swallows the "message" key into its own
+            # (empty) message field; the duplicate keeps the text visible as an
+            # attribute in the UI and CLI.
+            "msg": record.getMessage(),
         }
         if record.exc_info:
             log_obj["exception"] = self.formatException(record.exc_info)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -24,6 +25,8 @@ from agent.permissions import (
 from services import assistant, branding, content_pipeline, integration_api
 from services.supabase_helpers import db, first, rows
 from supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 ExternalToolHandler = Callable[[str, dict[str, Any]], Awaitable[Any]]
 
@@ -647,6 +650,9 @@ async def invoke_tool(
         result = {"error": str(exc.detail), "status": exc.status_code}
     except (KeyError, TypeError, ValueError) as exc:
         result = {"error": f"Invalid arguments for {tool_name}: {exc}"}
+    except Exception as exc:  # noqa: BLE001 - one failed tool must not kill the turn
+        logger.warning("Tool %s raised", tool_name, exc_info=True)
+        result = {"error": f"{tool_name} failed: {exc}"}
 
     result_text = _json_result(result)
     context.tool_calls.append(

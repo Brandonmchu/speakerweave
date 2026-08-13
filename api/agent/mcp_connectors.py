@@ -30,6 +30,23 @@ MCP_CONNECTOR_KIND_PREFIX = f"{MCP_CONNECTOR_PROVIDER}:"
 OAUTH_STATE_TTL = timedelta(minutes=10)
 VALIDATION_TIMEOUT_SECONDS = 10.0
 HTTP_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+# Partner MCP servers may hold a gated tool call open while a human approves it
+# out-of-band (Every's admin-mcp waits ~30s and expects the client to survive).
+# The SDK's 5-second default was killing those calls mid-approval.
+MCP_HTTP_TIMEOUT_SECONDS = 60.0
+MCP_SSE_READ_TIMEOUT_SECONDS = 120.0
+MCP_TOOL_CALL_TIMEOUT_SECONDS = 90.0
+
+
+def _tool_call_timeout_result(exposed_name: str) -> dict[str, Any]:
+    return {
+        "error": (
+            f"{exposed_name} did not respond within "
+            f"{int(MCP_TOOL_CALL_TIMEOUT_SECONDS)} seconds. If this action needs "
+            "approval in the connected app, approve it there and ask me to retry."
+        ),
+        "timed_out": True,
+    }
 
 # Adding a preset is one catalog entry. Its endpoint remains deployment config,
 # while connection state and credentials remain organization-owned rows.
@@ -634,7 +651,12 @@ async def openai_tools(
         name = str(config["name"])
         try:
             server = MCPServerStreamableHttp(
-                params={"url": str(config["url"]), "headers": await _headers(org_id, config)},
+                params={
+                    "url": str(config["url"]),
+                    "headers": await _headers(org_id, config),
+                    "timeout": MCP_HTTP_TIMEOUT_SECONDS,
+                    "sse_read_timeout": MCP_SSE_READ_TIMEOUT_SECONDS,
+                },
                 cache_tools_list=True,
                 name=name,
             )
@@ -651,7 +673,17 @@ async def openai_tools(
 
     async def invoke(exposed_name: str, arguments: dict[str, Any]) -> Any:
         server, original_name = handlers[exposed_name]
-        return _serializable_result(await server.call_tool(original_name, arguments))
+        try:
+            result = await asyncio.wait_for(
+                server.call_tool(original_name, arguments),
+                timeout=MCP_TOOL_CALL_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            return _tool_call_timeout_result(exposed_name)
+        except Exception as exc:  # noqa: BLE001 - one connector fault stays one tool error
+            logger.warning("MCP tool %s failed", exposed_name, exc_info=True)
+            return {"error": str(exc)}
+        return _serializable_result(result)
 
     return definitions, (invoke if handlers else None)
 
@@ -672,7 +704,12 @@ async def anthropic_tools(
         name = str(config["name"])
         try:
             read_stream, write_stream, _session_id = await stack.enter_async_context(
-                streamablehttp_client(str(config["url"]), headers=await _headers(org_id, config))
+                streamablehttp_client(
+                    str(config["url"]),
+                    headers=await _headers(org_id, config),
+                    timeout=MCP_HTTP_TIMEOUT_SECONDS,
+                    sse_read_timeout=MCP_SSE_READ_TIMEOUT_SECONDS,
+                )
             )
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
@@ -689,6 +726,16 @@ async def anthropic_tools(
 
     async def invoke(exposed_name: str, arguments: dict[str, Any]) -> Any:
         session, original_name = handlers[exposed_name]
-        return _serializable_result(await session.call_tool(original_name, arguments))
+        try:
+            result = await asyncio.wait_for(
+                session.call_tool(original_name, arguments),
+                timeout=MCP_TOOL_CALL_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            return _tool_call_timeout_result(exposed_name)
+        except Exception as exc:  # noqa: BLE001 - one connector fault stays one tool error
+            logger.warning("MCP tool %s failed", exposed_name, exc_info=True)
+            return {"error": str(exc)}
+        return _serializable_result(result)
 
     return definitions, (invoke if handlers else None)

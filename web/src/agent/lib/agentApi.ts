@@ -88,6 +88,11 @@ export async function openAgentStream(
   return response
 }
 
+// The server emits a keepalive every 15s; three missed keepalives means the
+// connection silently died (proxy drop, sleeping laptop) and waiting longer
+// would leave the user staring at a spinner forever.
+const STREAM_INACTIVITY_MS = 45_000
+
 export async function consumeAgentSse(
   stream: ReadableStream<Uint8Array>,
   onEvent: (event: AgentStreamEvent) => void,
@@ -96,6 +101,29 @@ export async function consumeAgentSse(
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let lineBuffer = ''
+  let sawDone = false
+
+  const readWithInactivityWatchdog = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  'The agent connection went quiet. The reply may still arrive — reopen this thread in a moment.',
+                ),
+              ),
+            STREAM_INACTIVITY_MS,
+          )
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
 
   const consumeLines = (final = false) => {
     const lines = lineBuffer.split('\n')
@@ -113,8 +141,9 @@ export async function consumeAgentSse(
 
   try {
     while (!signal?.aborted) {
-      const { done, value } = await reader.read()
+      const { done, value } = await readWithInactivityWatchdog()
       if (done) {
+        sawDone = true
         lineBuffer += decoder.decode()
         if (lineBuffer && !lineBuffer.endsWith('\n')) lineBuffer += '\n'
         consumeLines(true)
@@ -124,7 +153,9 @@ export async function consumeAgentSse(
       consumeLines()
     }
   } finally {
-    if (signal?.aborted) await reader.cancel().catch(() => undefined)
+    // Cancel on abort, watchdog timeout, or any thrown error — a still-open
+    // reader would hold the connection while the caller has already moved on.
+    if (!sawDone) await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
 }

@@ -40,6 +40,11 @@ def build_system_prompt(
     routes = "\n".join(f"- {kind}: {route}" for kind, route in ROUTE_TABLE.items())
     mcp_note = (
         f"{mcp_connectors_connected} external MCP connector(s) are available with mcp__<connector>__ tool prefixes."
+        " Destructive connector actions (send, delete, void) may additionally require"
+        " the organizer to approve them out-of-band in the partner app (for example"
+        " the Every app). If a connector tool reports that approval is pending or"
+        " that it timed out awaiting approval, that is not a failure: tell the user"
+        " to approve the action in that app, then ask you to retry."
         if mcp_connectors_connected
         else "No external MCP connectors are connected for this organization."
     )

@@ -212,6 +212,7 @@ async def run_turn(
         usage: dict[str, Any] = {}
         status: Literal["complete", "error", "cancelled"] = "complete"
         error_message = "The conference assistant could not finish this turn."
+        error_detail: str | None = None
 
         try:
             if provider == "openai":
@@ -238,6 +239,7 @@ async def run_turn(
                 elif event_type == "error":
                     status = "error"
                     error_message = str(event_item.get("message") or error_message)
+                    error_detail = str(event_item.get("detail") or "") or None
                     break
                 elif event_type in PUBLIC_EVENT_TYPES:
                     await progress_queue.put(event_item)
@@ -252,12 +254,22 @@ async def run_turn(
                 )
                 await progress_queue.put({"type": "message_complete"})
 
-            if status == "complete" or response_text:
+            if status == "error":
+                logger.error(
+                    "Agent turn errored thread=%s turn=%s provider=%s detail=%s",
+                    resolved_thread_id,
+                    turn_id,
+                    provider,
+                    error_detail or error_message,
+                )
+            if status == "complete" or status == "error" or response_text:
+                # An errored turn with no streamed text still persists the
+                # user-facing error, so the thread never looks unanswered.
                 await threads.persist_agent_message(
                     thread_id=resolved_thread_id,
                     org_id=org_id,
                     turn_id=turn_id,
-                    content=response_text,
+                    content=response_text or (error_message if status == "error" else ""),
                     metadata={
                         "turn_id": turn_id,
                         "usage": usage,
@@ -268,6 +280,7 @@ async def run_turn(
                         ),
                         "activity": context.activity,
                         **({"cancelled": True} if status == "cancelled" else {}),
+                        **({"error_detail": error_detail[:500]} if error_detail else {}),
                     },
                     reasoning_context={
                         "tool_calls": context.tool_calls,
@@ -315,8 +328,42 @@ async def run_turn(
                 )
             status = "cancelled"
         except Exception:  # noqa: BLE001 - convert provider/persistence failure
+            logger.exception(
+                "Agent turn crashed thread=%s turn=%s provider=%s",
+                resolved_thread_id,
+                turn_id,
+                provider,
+            )
             status = "error"
             response_text = "".join(accumulated).strip()
+            try:
+                await threads.persist_agent_message(
+                    thread_id=resolved_thread_id,
+                    org_id=org_id,
+                    turn_id=turn_id,
+                    content=response_text or error_message,
+                    metadata={
+                        "turn_id": turn_id,
+                        "usage": usage,
+                        "agent_sdk": (
+                            "openai_agents_sdk"
+                            if provider == "openai"
+                            else "anthropic_sdk"
+                        ),
+                        "activity": context.activity,
+                    },
+                    reasoning_context={
+                        "tool_calls": context.tool_calls,
+                        "provider": provider,
+                    },
+                    response_type="error",
+                )
+            except Exception:
+                logger.exception(
+                    "Could not persist agent turn failure thread=%s turn=%s",
+                    resolved_thread_id,
+                    turn_id,
+                )
 
         await progress_queue.join()
         result = TurnResult(
@@ -340,7 +387,26 @@ async def run_turn(
             )
         return result
     except Exception:  # noqa: BLE001 - transport receives a terminal agent error
+        logger.exception(
+            "Agent turn setup failed thread=%s turn=%s", resolved_thread_id, turn_id
+        )
         error_message = "The conference assistant could not finish this turn."
+        try:
+            await threads.persist_agent_message(
+                thread_id=resolved_thread_id,
+                org_id=org_id,
+                turn_id=turn_id,
+                content=error_message,
+                metadata={"turn_id": turn_id},
+                reasoning_context={},
+                response_type="error",
+            )
+        except Exception:
+            logger.exception(
+                "Could not persist agent turn failure thread=%s turn=%s",
+                resolved_thread_id,
+                turn_id,
+            )
         await _send_event(on_event, {"type": "error", "message": error_message})
         return TurnResult(
             status="error",

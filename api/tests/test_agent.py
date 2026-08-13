@@ -987,3 +987,115 @@ def test_mcp_tool_definition_tolerates_both_sdk_field_names():
     assert _definition("every", "Every", v2)["input_schema"] == {"type": "object"}
     bare = SimpleNamespace(name="ping", description=None)
     assert _definition("every", "Every", bare)["input_schema"]["type"] == "object"
+
+
+def test_error_turn_with_no_text_persists_error_reply(monkeypatch, seeded_db):
+    """A turn that dies before producing text must never leave the thread
+    looking unanswered — the user-facing error is persisted as the reply."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ASSISTANT_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_ENABLED", "true")
+
+    async def broken_runtime(**_kwargs):
+        yield {
+            "type": "error",
+            "message": "The conference assistant could not finish this turn.",
+            "detail": "anyio.ClosedResourceError from connector",
+        }
+
+    monkeypatch.setattr("agent.runtime_openai.stream_response", broken_runtime)
+
+    with TestClient(_test_app()) as client:
+        response = client.post(
+            "/api/agent/chat/stream",
+            json={"thread_id": None, "message": "Send the proposal"},
+        )
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    assert [event["type"] for event in events] == ["thread_started", "error"]
+    messages = seeded_db.rows("agent_messages")
+    assert [message["sender_type"] for message in messages] == ["user", "agent"]
+    reply = messages[-1]
+    assert reply["response_type"] == "error"
+    assert reply["content"] == "The conference assistant could not finish this turn."
+    assert reply["metadata"]["error_detail"] == (
+        "anyio.ClosedResourceError from connector"
+    )
+
+
+async def test_invoke_tool_converts_unexpected_tool_crash_into_error_result():
+    context = _context()
+
+    async def exploding_handler(_tool_name, _arguments):
+        raise RuntimeError("connector exploded")
+
+    result = json.loads(
+        await tools.invoke_tool(
+            context,
+            "mcp__crm__list_contacts",
+            {"q": "Ada"},
+            external_handler=exploding_handler,
+        )
+    )
+    assert result == {"error": "mcp__crm__list_contacts failed: connector exploded"}
+
+
+async def test_mcp_tool_call_timeout_returns_retryable_error(monkeypatch, fake_db):
+    """A gated partner call (Every holds ~30s for out-of-band approval) must
+    come back as a retryable tool error, never a raised exception that kills
+    the whole turn."""
+    import agents.mcp
+    from contextlib import AsyncExitStack
+
+    fake_db.seed(
+        "org_integrations",
+        {
+            "org_id": TEST_ORG_ID,
+            "provider": "mcp_connector",
+            "kind": "mcp_connector:slow",
+            "config": {
+                "key": "slow",
+                "name": "Slow CRM",
+                "url": "https://slow.example.com/mcp",
+                "auth_kind": "none",
+                "status": "connected",
+                "tokens": {},
+                "bearer_token": None,
+            },
+        },
+    )
+
+    class SlowServer:
+        def __init__(self, *, name, **_kwargs):
+            self.name = name
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def list_tools(self):
+            return [
+                SimpleNamespace(
+                    name="send_proposal",
+                    description="Send a proposal",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+            ]
+
+        async def call_tool(self, _name, _arguments):
+            await asyncio.sleep(30)
+
+    monkeypatch.setattr(agents.mcp, "MCPServerStreamableHttp", SlowServer)
+    monkeypatch.setattr(mcp_connectors, "MCP_TOOL_CALL_TIMEOUT_SECONDS", 0.05)
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    async with AsyncExitStack() as stack:
+        _definitions, handler = await mcp_connectors.openai_tools(
+            stack, TEST_ORG_ID, queue
+        )
+        assert handler is not None
+        result = await handler("mcp__slow__send_proposal", {})
+    assert result["timed_out"] is True
+    assert "approve it there" in result["error"]
