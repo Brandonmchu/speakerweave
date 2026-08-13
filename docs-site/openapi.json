@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "SpeakerWeave API",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Organization-scoped REST API for conference program data. Authenticate every request with an API token from Settings \u2192 API tokens, sent as the x-access-token header."
  },
  "servers": [
